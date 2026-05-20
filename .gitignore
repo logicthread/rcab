@@ -1,0 +1,52 @@
+# Obsidian — per-machine workspace state, not vault content
+.obsidian/workspace.json
+.obsidian/workspace-mobile.json
+.obsidian/cache
+.obsidian/.trash/
+
+# Empty/accidental Obsidian canvases
+Untitled*.canvas
+
+# macOS
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Working scratchpad files (per LLM-INSTRUCTIONS §8 — ephemeral)
+WORKING.md
+
+# --- Future code (monorepo) — ignored ahead of time so accidental builds don't pollute commits
+
+# Node / pnpm / turbo
+node_modules/
+.pnpm-store/
+.turbo/
+dist/
+build/
+.next/
+out/
+coverage/
+*.tsbuildinfo
+
+# Env files (no secrets in git, ever)
+.env
+.env.*
+!.env.example
+
+# Flutter / Dart
+**/.dart_tool/
+**/.flutter-plugins
+**/.flutter-plugins-dependencies
+**/.packages
+**/build/
+**/ios/Pods/
+**/android/.gradle/
+**/android/local.properties
+
+# Generated API client / migrations artifacts
+apps/*/src/generated/
+apps/api/migrations/*.snapshot
