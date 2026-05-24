@@ -39,8 +39,8 @@ Integration tests run against **real Postgres + Redis + OSRM containers** — ne
 
 ## Out of scope
 
-- E2E web tests (Playwright) — covered in [[story-rcab-e4-s9]]-era work.
-- Load tests (k6) — covered in [[story-rcab-e8-s5-k6-load-test]] (RCAB-E8.S5).
+- E2E web tests (Playwright) — covered later, in the `RCAB-E4.S9` era of work.
+- Load tests (k6) — covered by `RCAB-E8.S5`.
 
 ## See also
 - [[epic-e1-foundation]] · [[docker-test-environment]] · [[testing-strategy]]
