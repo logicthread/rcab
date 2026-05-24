@@ -19,6 +19,9 @@ Untitled*.canvas
 # Working scratchpad files (per LLM-INSTRUCTIONS §8 — ephemeral)
 WORKING.md
 
+# System probe report (machine-local, never committed)
+system-probe-report.json
+
 # --- Future code (monorepo) — ignored ahead of time so accidental builds don't pollute commits
 
 # Node / pnpm / turbo

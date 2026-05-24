@@ -24,15 +24,15 @@ Completing every story in this epic ⇒ Demo 0 passes.
 
 | ID | Title | Status |
 |---|---|---|
-| RCAB-E1.S1 | [[story-rcab-e1-s1-repo-scaffold]] — monorepo skeleton | · |
-| RCAB-E1.S2 | [[story-rcab-e1-s2-docker-dev]] — docker-compose.dev + devcontainer | · |
-| RCAB-E1.S3 | [[story-rcab-e1-s3-docker-test]] — docker-compose.test + testcontainers | · |
-| RCAB-E1.S4 | [[story-rcab-e1-s4-docker-prod]] — docker-compose.prod + nginx + TLS | · |
-| RCAB-E1.S5 | [[story-rcab-e1-s5-ci-cd]] — GitHub Actions pipeline | · |
-| RCAB-E1.S6 | [[story-rcab-e1-s6-observability]] — Loki + Prometheus + Grafana | · |
-| RCAB-E1.S7 | [[story-rcab-e1-s7-db-bootstrap]] — Postgres + Redis + OSRM + migrations | · |
-| RCAB-E1.S8 | [[story-rcab-e1-s8-health-endpoints]] — /v1/health/live + /ready | · |
-| RCAB-E1.S9 | [[story-rcab-e1-s9-system-probe]] — host probe + load estimator | · |
+| RCAB-E1.S1 | [[story-rcab-e1-s1-repo-scaffold]] — monorepo skeleton | ■ |
+| RCAB-E1.S2 | [[story-rcab-e1-s2-docker-dev]] — docker-compose.dev + devcontainer | □ |
+| RCAB-E1.S3 | [[story-rcab-e1-s3-docker-test]] — docker-compose.test + testcontainers | □ |
+| RCAB-E1.S4 | [[story-rcab-e1-s4-docker-prod]] — docker-compose.prod + nginx + TLS | □ |
+| RCAB-E1.S5 | [[story-rcab-e1-s5-ci-cd]] — GitHub Actions pipeline | □ |
+| RCAB-E1.S6 | [[story-rcab-e1-s6-observability]] — Loki + Prometheus + Grafana | □ |
+| RCAB-E1.S7 | [[story-rcab-e1-s7-db-bootstrap]] — Postgres + Redis + OSRM + migrations | □ |
+| RCAB-E1.S8 | [[story-rcab-e1-s8-health-endpoints]] — /v1/health/live + /ready | □ |
+| RCAB-E1.S9 | [[story-rcab-e1-s9-system-probe]] — host probe + load estimator | □ |
 
 ## Demo 0 headline (verbatim from [[delivery-roadmap]])
 

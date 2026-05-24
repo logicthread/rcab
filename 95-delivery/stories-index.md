@@ -24,7 +24,7 @@ audience: both
 | ID | Title | Status |
 |---|---|---|
 | RCAB-E1.S0 | Vault scaffold (this work) | ■ |
-| RCAB-E1.S1 | [[story-rcab-e1-s1-repo-scaffold]] — monorepo skeleton (pnpm + turborepo + apps/ + packages/) | □ |
+| RCAB-E1.S1 | [[story-rcab-e1-s1-repo-scaffold]] — monorepo skeleton (pnpm + turborepo + apps/ + packages/) | ■ |
 | RCAB-E1.S2 | [[story-rcab-e1-s2-docker-dev]] — `docker-compose.dev.yml` + devcontainer | □ |
 | RCAB-E1.S3 | [[story-rcab-e1-s3-docker-test]] — `docker-compose.test.yml` + testcontainers harness | □ |
 | RCAB-E1.S4 | [[story-rcab-e1-s4-docker-prod]] — `docker-compose.prod.yml` + nginx + Let's Encrypt | □ |

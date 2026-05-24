@@ -1,7 +1,7 @@
 ---
 title: RCAB-E1.S1 — Scaffold the monorepo (pnpm + turborepo + apps + packages)
 tags: [layer/delivery, kind/story]
-status: ready
+status: done
 phase: 0
 epic: [[epic-e1-foundation]]
 demo: 0
