@@ -76,6 +76,16 @@ This vault is the **source of truth for architecture**. Code is generated *from*
 - [[ADR-0009-single-vps-phase-0]]
 - [[ADR-0010-shared-ride-route-similarity]]
 
+### Delivery (the *how-to-ship* layer)
+- [[delivery-roadmap]] — 9-demo path from `docker compose up` to pilot
+- [[stories-index]] — full backlog with epic hierarchy
+- [[story-template]] · [[story-id-scheme]] · [[commit-story-linkage]]
+- [[demo-cadence]] · [[hitl-touchpoints]] · [[impact-analysis]]
+- Epics: [[epic-e1-foundation]] · [[epic-e2-auth]] · [[epic-e3-driver-presence]] · [[epic-e4-normal-booking]] · [[epic-e5-shared-booking]] · [[epic-e6-scheduled-booking]] · [[epic-e7-rating-dashboards]] · [[epic-e8-production-hardening]] · [[epic-e9-pilot-rollout]]
+- [[claude-code-launch-prompt]] — paste this into Claude Code to bootstrap implementation
+- Docker workflow: [[docker-dev-environment]] · [[docker-test-environment]] · [[docker-compose]]
+- Capacity check: [[local-system-probe]]
+
 ---
 
 ## Status snapshot
@@ -83,9 +93,10 @@ This vault is the **source of truth for architecture**. Code is generated *from*
 | Area | State |
 |---|---|
 | Vault scaffolded | yes (Phase‑0 scope) |
+| Delivery layer | yes — roadmap, stories, HITL, impact analysis, launch prompt |
 | Code | none yet — vault is the seed |
 | Target | 5,000 clients, 100 drivers, single VPS |
-| Next | implement [[phase-0]] starting from [[module-map]] |
+| Next | paste [[claude-code-launch-prompt]] into Claude Code → start with [[epic-e1-foundation]] |
 
 ---
 

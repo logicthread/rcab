@@ -141,6 +141,50 @@ A new session needs to understand the project from zero.
 - [[system-overview]] · [[tech-stack]]
 - [[module-map]]
 
+## Delivery (how-to-ship)
+
+### `path:start-implementation`
+You are Claude Code, just opened. You want to begin implementing the project.
+- [[claude-code-launch-prompt]] (load it; it already names everything else)
+- [[delivery-roadmap]] · [[demo-cadence]]
+- [[hitl-touchpoints]] · [[impact-analysis]]
+- [[commit-story-linkage]] · [[stories-index]]
+- [[local-system-probe]]
+
+### `path:work-a-story`
+You picked up a `ready` story. You want to implement it.
+- The story file (frontmatter has `epic:`, `affected_notes:`, `depends_on:`)
+- Every note listed in the story's `affected_notes` and `depends_on`
+- [[story-template]] · [[commit-story-linkage]] · [[demo-cadence]]
+- [[testing-strategy]] for the test plan layer
+- [[docker-dev-environment]] · [[docker-test-environment]] for the run/test loop
+
+### `path:add-new-story`
+A new story needs to exist (mid-flight discovery, retro follow-up, dev request).
+- [[stories-index]] · [[story-template]] · [[story-id-scheme]]
+- [[impact-analysis]] (if it touches existing scope)
+- [[commit-story-linkage]]
+
+### `path:run-impact-analysis`
+A scope change is proposed; you must analyze before acting.
+- [[impact-analysis]] (the 6-question process)
+- [[delivery-roadmap]] · [[stories-index]]
+- [[hitl-touchpoints]]
+
+### `path:bootstrap-demo-0`
+First demo, "Hello, stack." Everything from empty repo to docker compose up + ready endpoint green.
+- [[epic-e1-foundation]] + its 9 stories ([[story-rcab-e1-s1-repo-scaffold]] … [[story-rcab-e1-s9-system-probe]])
+- [[docker-dev-environment]] · [[docker-test-environment]] · [[docker-compose]]
+- [[ci-cd]] · [[observability]] · [[vps-topology]]
+- [[ADR-0007-monorepo-layout]] · [[ADR-0009-single-vps-phase-0]]
+
+### `path:walk-a-demo`
+A demo is ready to sign off.
+- The owning epic's note
+- [[demo-cadence]] (the per-demo contract)
+- [[performance-budget]] · [[observability]]
+- [[hitl-touchpoints]] (sign-off discipline)
+
 ---
 
 ## See also

@@ -30,6 +30,7 @@ How notes are written, named, and linked. Read this before adding a note.
 | `70-algorithms/` | Standalone algorithm notes |
 | `80-infrastructure/` | VPS, ops, deploy |
 | `90-quality/` | Testing, security, performance |
+| `95-delivery/` | Roadmap, user stories, epics, HITL, impact analysis, commit linkage, Claude Code launch prompt |
 | `99-decisions/` | ADRs |
 
 The folder is **navigation aid only**. Slug uniqueness means files can be re-organized without breaking links.
@@ -55,9 +56,9 @@ audience: human | llm | both
 
 Two facets. Pick one from each.
 
-Layer: `layer/product`, `layer/architecture`, `layer/domain`, `layer/backend`, `layer/client-web`, `layer/client-driver`, `layer/integration`, `layer/algorithm`, `layer/infra`, `layer/quality`, `layer/decision`
+Layer: `layer/product`, `layer/architecture`, `layer/domain`, `layer/backend`, `layer/client-web`, `layer/client-driver`, `layer/integration`, `layer/algorithm`, `layer/infra`, `layer/quality`, `layer/decision`, `layer/delivery`
 
-Kind: `kind/moc`, `kind/persona`, `kind/journey`, `kind/feature`, `kind/entity`, `kind/state-machine`, `kind/module`, `kind/api`, `kind/diagram`, `kind/adr`, `kind/runbook`, `kind/algo`, `kind/integration`
+Kind: `kind/moc`, `kind/persona`, `kind/journey`, `kind/feature`, `kind/entity`, `kind/state-machine`, `kind/module`, `kind/api`, `kind/diagram`, `kind/adr`, `kind/runbook`, `kind/algo`, `kind/integration`, `kind/epic`, `kind/story`
 
 ## Note structure
 
