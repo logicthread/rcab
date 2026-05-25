@@ -1,7 +1,7 @@
 ---
 title: RCAB-E1.S8 — Health endpoints (/v1/health/live + /v1/health/ready)
 tags: [layer/delivery, kind/story]
-status: ready
+status: done
 phase: 0
 epic: [[epic-e1-foundation]]
 demo: 0
