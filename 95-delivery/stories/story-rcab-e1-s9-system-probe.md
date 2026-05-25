@@ -1,7 +1,7 @@
 ---
 title: RCAB-E1.S9 — System probe & load-capacity estimator (`pnpm system:probe`)
 tags: [layer/delivery, kind/story]
-status: ready
+status: in_progress
 phase: 0
 epic: [[epic-e1-foundation]]
 demo: 0
