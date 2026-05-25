@@ -53,7 +53,9 @@ Encodes `path:work-a-story` from `00-index/reading-paths.md`. Use this BEFORE wr
 
 7. **Create a task list** with one task per acceptance criterion (use TaskCreate). Mark the first task `in_progress`.
 
-8. **Begin implementation.** Follow the demo-cadence loop in `95-delivery/demo-cadence.md`.
+8. **Begin implementation.** Follow the demo-cadence loop in `95-delivery/demo-cadence.md`. After any `pnpm install` that adds packages with native build scripts, run
+   `pnpm approve-builds` to enable native compilation (testcontainers deps: cpu-features,
+   protobufjs, ssh2).
 
 ## Out of scope for this skill
 

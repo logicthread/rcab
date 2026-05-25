@@ -18,11 +18,12 @@ The exit gate for a story. Use this when you believe every acceptance criterion 
 
 2. **Run the test suite.** Execute (in this order, stop on first failure):
    ```bash
-   pnpm lint
+   pnpm --filter ...[HEAD^1]... lint
    pnpm build
    pnpm test
    ```
-   If any fail, stop. Report what failed. Do NOT proceed to status changes.
+   If any fail, stop. Report what failed. Do NOT proceed to status changes. The scoped lint filter runs only packages changed since the last commit plus their dependents — avoids pre-existing failures in untouched packages.
+
 
 3. **Run the affected-criteria check.** Re-read the story's acceptance criteria and confirm each has a test (search the test files for behavior matching the criterion's wording). For any AC without a matching test, ask the user before continuing.
 
