@@ -1,7 +1,7 @@
 ---
 title: RCAB-E1.S6 — Observability stack (Loki + Prometheus + Grafana + Uptime Kuma)
 tags: [layer/delivery, kind/story]
-status: in_progress
+status: done
 phase: 0
 epic: [[epic-e1-foundation]]
 demo: 0
