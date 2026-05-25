@@ -1,7 +1,7 @@
 ---
 title: RCAB-E1.S4 — Production compose (docker-compose.prod + nginx + Let's Encrypt)
 tags: [layer/delivery, kind/story]
-status: ready
+status: in_progress
 phase: 0
 epic: [[epic-e1-foundation]]
 demo: 0

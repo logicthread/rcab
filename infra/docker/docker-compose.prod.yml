@@ -1,0 +1,161 @@
+name: rcab-prod
+
+services:
+  nginx:
+    build:
+      context: ./nginx
+      dockerfile: Dockerfile.prod
+    networks: [rcab_net]
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - certbot-etc:/etc/letsencrypt:ro
+      - certbot-webroot:/var/www/certbot:ro
+    depends_on:
+      api:
+        condition: service_healthy
+      web:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:80/nginx-health || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+
+  api:
+    build:
+      context: ../..
+      dockerfile: infra/docker/api/Dockerfile.prod
+    networks: [rcab_net]
+    env_file:
+      - path: /opt/rcab/compose/env/api.env
+        required: false
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      OSRM_URL: http://osrm:5000
+    depends_on:
+      migrator:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:3000/v1/health/ready || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ../..
+      dockerfile: infra/docker/web/Dockerfile.prod
+    networks: [rcab_net]
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      NEXT_PUBLIC_API_URL: https://api.rcab.example
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:3000/ || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  migrator:
+    build:
+      context: ../..
+      dockerfile: infra/docker/api/Dockerfile.prod
+    networks: [rcab_net]
+    env_file:
+      - path: /opt/rcab/compose/env/api.env
+        required: false
+    environment:
+      NODE_ENV: production
+    command: ["node", "dist/migrate.js"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  postgres:
+    image: postgis/postgis:16-3.4@sha256:44126d872ac91993766c341e369c539e8196614321765d36a6f1bab0419a5fa5
+    networks: [rcab_net]
+    env_file:
+      - path: /opt/rcab/compose/env/postgres.env
+        required: false
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99
+    networks: [rcab_net]
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD}"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a $${REDIS_PASSWORD} ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 3s
+    restart: unless-stopped
+
+  osrm:
+    image: osrm/osrm-backend@sha256:af5d4a83fb90086a43b1ae2ca22872e6768766ad5fcbb07a29ff90ec644ee409
+    networks: [rcab_net]
+    volumes:
+      - osrm-data:/data:ro
+    command: ["osrm-routed", "--algorithm", "mld", "--port", "5000", "/data/region.osrm"]
+    restart: unless-stopped
+
+  backup:
+    build:
+      context: ./backup
+    networks: [rcab_net]
+    env_file:
+      - path: /opt/rcab/compose/env/backup.env
+        required: false
+    environment:
+      PGHOST: postgres
+      PGPORT: "5432"
+    volumes:
+      - /opt/rcab/secrets/age.key:/run/secrets/age.key:ro
+      - /opt/rcab/backups:/backups
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  certbot:
+    image: certbot/certbot:v2.11.0@sha256:ddf9e5d226a56e886986838fa0ebedc0237511c78664352e8d0f4346ee022cd8
+    volumes:
+      - certbot-etc:/etc/letsencrypt
+      - certbot-webroot:/var/www/certbot
+    restart: "no"
+
+networks:
+  rcab_net:
+    driver: bridge
+
+volumes:
+  pg-data:
+  redis-data:
+  osrm-data:
+  certbot-etc:
+  certbot-webroot:

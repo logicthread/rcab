@@ -1,0 +1,2 @@
+# IST 02:30 = UTC 21:00
+0 21 * * * /usr/local/bin/backup.sh >> /var/log/backup.log 2>&1

@@ -1,0 +1,66 @@
+name: rcab-prod
+
+# CI override: self-signed certs, inline env vars, no external dependencies.
+# Usage: docker compose -f docker-compose.prod.yml -f docker-compose.prod-test.yml up -d
+
+services:
+  certbot:
+    image: alpine:3.20@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc
+    volumes:
+      - certbot-etc:/etc/letsencrypt
+    command:
+      - sh
+      - -c
+      - |
+        apk add --no-cache openssl
+        mkdir -p /etc/letsencrypt/live/rcab.example
+        openssl req -x509 -nodes -days 1 -newkey rsa:2048 \
+          -keyout /etc/letsencrypt/live/rcab.example/privkey.pem \
+          -out /etc/letsencrypt/live/rcab.example/fullchain.pem \
+          -subj "/CN=rcab.example"
+    restart: "no"
+
+  nginx:
+    depends_on:
+      api:
+        condition: service_healthy
+      web:
+        condition: service_healthy
+      certbot:
+        condition: service_completed_successfully
+
+  api:
+    env_file: []
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      DATABASE_URL: postgres://rcab:rcab@postgres:5432/rcab
+      REDIS_URL: redis://:testpass@redis:6379
+      OSRM_URL: http://osrm:5000
+
+  web:
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      NEXT_PUBLIC_API_URL: https://api.rcab.example
+
+  migrator:
+    env_file: []
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgres://rcab:rcab@postgres:5432/rcab
+
+  postgres:
+    env_file: []
+    environment:
+      POSTGRES_USER: rcab
+      POSTGRES_PASSWORD: rcab
+      POSTGRES_DB: rcab
+
+  redis:
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "testpass"]
+    environment:
+      REDIS_PASSWORD: testpass
+
+  backup:
+    profiles: [disabled]

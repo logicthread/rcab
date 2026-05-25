@@ -42,7 +42,16 @@
       "Bash(pnpm -F *)",
       "Bash(pnpm test:int)",
       "Bash(pnpm test:int *)",
-      "Bash(RCAB_SKIP_INT=1 pnpm test:int)"
+      "Bash(RCAB_SKIP_INT=1 pnpm test:int)",
+      "Bash(pnpm prod:*)",
+      "Write(.claude/hooks/**)",
+      "Write(.claude/skills/**)",
+      "Edit(.claude/hooks/**)",
+      "Edit(.claude/skills/**)",
+      "Write(infra/docker/**)",
+      "Edit(infra/docker/**)",
+      "Write(scripts/*)",
+      "Edit(scripts/*)"
     ],
     "deny": [
       "Bash(rm -rf /*)",

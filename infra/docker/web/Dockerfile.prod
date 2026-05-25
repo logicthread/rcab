@@ -1,0 +1,55 @@
+FROM node:20-bookworm-slim@sha256:2cf067cfed83d5ea958367df9f966191a942351a2df77d6f0193e162b5febfc0 AS base
+
+ENV PNPM_HOME=/root/.local/share/pnpm
+ENV PATH=$PNPM_HOME:$PATH
+
+RUN corepack enable \
+  && corepack prepare pnpm@10.33.4 --activate
+
+FROM base AS deps
+
+WORKDIR /workspace
+
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
+COPY tsconfig.base.json ./
+COPY apps/web/package.json ./apps/web/
+COPY packages/shared/package.json ./packages/shared/
+COPY packages/api-client/package.json ./packages/api-client/
+
+RUN pnpm install --frozen-lockfile
+
+FROM base AS build
+
+WORKDIR /workspace
+
+COPY --from=deps /workspace ./
+COPY packages ./packages
+COPY apps/web ./apps/web
+
+RUN pnpm --filter @rcab/shared --filter @rcab/api-client build \
+  && pnpm --filter @rcab/web build
+
+FROM node:20-bookworm-slim@sha256:2cf067cfed83d5ea958367df9f966191a942351a2df77d6f0193e162b5febfc0 AS production
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends curl \
+  && rm -rf /var/lib/apt/lists/*
+
+RUN groupadd -r rcab && useradd -r -g rcab rcab
+
+WORKDIR /app
+
+COPY --from=build /workspace/apps/web/.next ./.next
+COPY --from=build /workspace/apps/web/public ./public
+COPY --from=build /workspace/apps/web/package.json ./
+COPY --from=build /workspace/node_modules ./node_modules
+COPY --from=build /workspace/packages ./packages
+
+USER rcab
+
+EXPOSE 3000
+
+ENV NODE_ENV=production
+ENV PORT=3000
+
+CMD ["./node_modules/.bin/next", "start"]

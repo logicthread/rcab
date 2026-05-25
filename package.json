@@ -15,6 +15,10 @@
     "dev:logs": "docker compose --env-file .env.dev -f infra/docker/docker-compose.dev.yml logs -f",
     "dev:smoke": "bash scripts/dev-smoke.sh",
     "test:int": "turbo test:int",
+    "prod:up": "docker compose -f infra/docker/docker-compose.prod.yml -f infra/docker/docker-compose.prod-test.yml up -d --build",
+    "prod:down": "docker compose -f infra/docker/docker-compose.prod.yml -f infra/docker/docker-compose.prod-test.yml down -v",
+    "prod:smoke": "bash scripts/prod-smoke.sh",
+    "prod:test": "pnpm prod:up && pnpm prod:smoke; rc=$?; pnpm prod:down; exit $rc",
     "system:probe": "echo 'system:probe not yet implemented — see RCAB-E1.S9'"
   },
   "devDependencies": {
