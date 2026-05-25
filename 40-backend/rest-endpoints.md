@@ -73,7 +73,7 @@ audience: both
 | Method | Path | Description |
 |---|---|---|
 | GET | `/v1/health/live` | liveness — process up |
-| GET | `/v1/health/ready` | readiness — DB+Redis reachable |
+| GET | `/v1/health/ready` | readiness — DB+Redis+OSRM reachable |
 
 ## See also
 - [[api-conventions]] · [[websocket-events]] · [[error-codes]]
