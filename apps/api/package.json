@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@rcab/shared": "workspace:*",
+    "drizzle-orm": "^0.45.2",
     "ioredis": "^5.4.1",
     "pg": "^8.13.1",
     "pino": "^10.3.1",
@@ -23,6 +24,7 @@
     "@testcontainers/redis": "^12.0.0",
     "@types/node": "^22.15.21",
     "@types/pg": "^8.11.10",
+    "drizzle-kit": "^0.31.10",
     "testcontainers": "^12.0.0",
     "tsx": "^4.19.2",
     "vitest": "^3.2.2"
