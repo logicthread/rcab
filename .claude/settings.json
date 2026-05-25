@@ -51,7 +51,9 @@
       "Write(infra/docker/**)",
       "Edit(infra/docker/**)",
       "Write(scripts/*)",
-      "Edit(scripts/*)"
+      "Edit(scripts/*)",
+      "Write(.github/workflows/**)",
+      "Edit(.github/workflows/**)"
     ],
     "deny": [
       "Bash(rm -rf /*)",
