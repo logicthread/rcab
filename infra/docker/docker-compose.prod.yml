@@ -88,6 +88,7 @@ services:
 
   postgres:
     image: postgis/postgis:16-3.4@sha256:44126d872ac91993766c341e369c539e8196614321765d36a6f1bab0419a5fa5
+    platform: linux/amd64
     networks: [rcab_net]
     env_file:
       - path: /opt/rcab/compose/env/postgres.env
@@ -118,6 +119,7 @@ services:
 
   osrm:
     image: osrm/osrm-backend@sha256:af5d4a83fb90086a43b1ae2ca22872e6768766ad5fcbb07a29ff90ec644ee409
+    platform: linux/amd64
     networks: [rcab_net]
     volumes:
       - osrm-data:/data:ro
