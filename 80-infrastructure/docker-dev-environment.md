@@ -30,7 +30,7 @@ audience: both
 | `osrm-extract` (one-shot) | `osrm/osrm-backend:latest` | extracts + partitions + customizes the OSRM graph; skipped if already present | — |
 | `osrm` | `osrm/osrm-backend:latest` | serves `osrm-routed --algorithm mld` on `:5000` | n/a |
 | `mailhog` (optional) | `mailhog/mailhog` | — | for future email work |
-| `loki + promtail + prometheus + grafana + uptime-kuma` | per [[observability]] | — | n/a |
+| `loki + promtail + prometheus + alertmanager + grafana + uptime-kuma` | per [[observability]] | — | n/a |
 
 Flutter is **not** in Docker — Android tooling fights with containers. The driver app runs on the host or in an emulator and talks to the API at `http://10.0.2.2:3000` (Android emulator) or `http://localhost:3000` (host).
 

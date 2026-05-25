@@ -1,0 +1,27 @@
+groups:
+  - name: api_alerts
+    rules:
+      - alert: ApiHighErrorRate
+        expr: >
+          (
+            sum(rate(http_request_duration_seconds_count{status_code=~"5.."}[5m]))
+            /
+            sum(rate(http_request_duration_seconds_count[5m]))
+          ) > 0.01
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "API 5xx error rate above 1%"
+          description: "5xx rate is {{ $value | humanizePercentage }} over the last 5 minutes."
+
+      - alert: ApiHighP99Latency
+        expr: >
+          histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket[5m])) by (le))
+          > 1.5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "API p99 latency above 1.5s"
+          description: "p99 latency is {{ $value }}s over the last 10 minutes."

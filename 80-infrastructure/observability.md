@@ -21,7 +21,7 @@ audience: both
 
 ## Metrics
 
-- `prom-client` in the NestJS API exposes `/metrics` (bound only on the internal network).
+- `prom-client` in the API exposes `/metrics` (bound only on the internal network).
 - Standard process metrics + custom:
   - `rcab_dispatch_latency_seconds` (histogram)
   - `rcab_dispatch_outcome_total{outcome}` (counter)

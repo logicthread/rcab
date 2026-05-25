@@ -166,6 +166,77 @@ services:
       - certbot-webroot:/var/www/certbot
     restart: "no"
 
+  # --- Observability ---
+
+  loki:
+    image: grafana/loki:3.0.0
+    networks: [rcab_net]
+    volumes:
+      - loki-data:/loki
+      - ../observability/loki.yml:/etc/loki/local-config.yaml:ro
+    command: -config.file=/etc/loki/local-config.yaml
+    restart: unless-stopped
+
+  promtail:
+    image: grafana/promtail:3.0.0
+    networks: [rcab_net]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ../observability/promtail.yml:/etc/promtail/config.yml:ro
+    command: -config.file=/etc/promtail/config.yml
+    depends_on: [loki]
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    networks: [rcab_net]
+    volumes:
+      - prom-data:/prometheus
+      - ../observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ../observability/alert_rules.yml:/etc/prometheus/alert_rules.yml:ro
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    networks: [rcab_net]
+    volumes:
+      - ../observability/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.1.0
+    networks: [rcab_net]
+    env_file:
+      - path: /opt/rcab/compose/env/grafana.env
+        required: false
+    environment:
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ../observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ../observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on: [prometheus, loki]
+    restart: unless-stopped
+
+  uptime-kuma:
+    image: louislam/uptime-kuma:1
+    networks: [rcab_net]
+    volumes:
+      - uptime-kuma-data:/app/data
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
 networks:
   rcab_net:
     driver: bridge
@@ -177,3 +248,7 @@ volumes:
   jenkins-home:
   certbot-etc:
   certbot-webroot:
+  loki-data:
+  prom-data:
+  grafana-data:
+  uptime-kuma-data:

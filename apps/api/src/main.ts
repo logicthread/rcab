@@ -1,6 +1,7 @@
 import { Pool } from 'pg';
 import Redis from 'ioredis';
 import { createApp, createState, type AppState } from './app';
+import { logger } from './logger';
 
 const PORT = Number(process.env.PORT ?? 3000);
 const DATABASE_URL = process.env.DATABASE_URL ?? 'postgres://rcab:rcab@postgres:5432/rcab';
@@ -13,14 +14,14 @@ const redis = new Redis(REDIS_URL, { lazyConnect: true, maxRetriesPerRequest: nu
 async function pingPostgres(): Promise<void> {
   await pool.query('SELECT 1');
   state.postgres = true;
-  console.log('[api] postgres connected');
+  logger.info('postgres connected');
 }
 
 async function pingRedis(): Promise<void> {
   await redis.connect();
   await redis.ping();
   state.redis = true;
-  console.log('[api] redis connected');
+  logger.info('redis connected');
 }
 
 async function retry(fn: () => Promise<void>, name: string, attempts = 30, delayMs = 1000): Promise<void> {
@@ -30,7 +31,7 @@ async function retry(fn: () => Promise<void>, name: string, attempts = 30, delay
       return;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.log(`[api] ${name} attempt ${i}/${attempts} failed: ${msg}`);
+      logger.warn({ attempt: i, attempts, err: msg }, `${name} connection attempt failed`);
       if (i === attempts) throw err;
       await new Promise((r) => setTimeout(r, delayMs));
     }
@@ -39,19 +40,19 @@ async function retry(fn: () => Promise<void>, name: string, attempts = 30, delay
 
 const server = createApp(state);
 server.listen(PORT, () => {
-  console.log(`[api] http server listening on :${PORT}`);
+  logger.info({ port: PORT }, 'http server listening');
 });
 
 Promise.all([retry(pingPostgres, 'postgres'), retry(pingRedis, 'redis')]).catch((err) => {
-  console.error('[api] dependency wiring failed', err);
+  logger.fatal({ err }, 'dependency wiring failed');
   process.exitCode = 1;
 });
 
 function shutdown(signal: string): void {
-  console.log(`[api] received ${signal}, shutting down`);
+  logger.info({ signal }, 'shutting down');
   server.close(() => {
     Promise.all([pool.end(), redis.quit()])
-      .catch((err) => console.error('[api] error during shutdown', err))
+      .catch((err) => logger.error({ err }, 'error during shutdown'))
       .finally(() => process.exit(0));
   });
 }

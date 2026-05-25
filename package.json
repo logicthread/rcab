@@ -11,14 +11,18 @@
     "lint": "turbo lint",
     "dev": "turbo dev",
     "dev:up": "bash scripts/dev-up.sh",
-    "dev:down": "docker compose --env-file .env.dev -f infra/docker/docker-compose.dev.yml down",
-    "dev:logs": "docker compose --env-file .env.dev -f infra/docker/docker-compose.dev.yml logs -f",
+    "dev:up:slim": "docker compose --env-file .env.dev -f infra/docker/docker-compose.dev.yml up -d --build",
+    "dev:down": "docker compose --env-file .env.dev -f infra/docker/docker-compose.dev.yml --profile obs down",
+    "dev:down:slim": "docker compose --env-file .env.dev -f infra/docker/docker-compose.dev.yml down",
+    "dev:logs": "docker compose --env-file .env.dev -f infra/docker/docker-compose.dev.yml --profile obs logs -f",
     "dev:smoke": "bash scripts/dev-smoke.sh",
     "test:int": "turbo test:int",
     "prod:up": "docker compose -f infra/docker/docker-compose.prod.yml -f infra/docker/docker-compose.prod-test.yml up -d --build",
     "prod:down": "docker compose -f infra/docker/docker-compose.prod.yml -f infra/docker/docker-compose.prod-test.yml down -v",
     "prod:smoke": "bash scripts/prod-smoke.sh",
-    "prod:test": "pnpm prod:up && pnpm prod:smoke; rc=$?; pnpm prod:down; exit $rc",
+    "obs:smoke": "bash scripts/obs-smoke.sh",
+    "prod:test": "pnpm prod:up && pnpm prod:smoke && pnpm obs:smoke; rc=$?; pnpm prod:down; exit $rc",
+    "setup:uptime-kuma": "tsx scripts/setup-uptime-kuma.ts",
     "system:probe": "echo 'system:probe not yet implemented — see RCAB-E1.S9'"
   },
   "devDependencies": {
@@ -26,11 +30,19 @@
     "@typescript-eslint/parser": "^8.32.1",
     "eslint": "^9.27.0",
     "prettier": "^3.5.3",
+    "socket.io-client": "^4.8.3",
+    "tsx": "^4.22.3",
     "turbo": "^2.5.4",
     "typescript": "^5.8.3"
   },
   "packageManager": "pnpm@10.33.4",
   "pnpm": {
-    "onlyBuiltDependencies": ["esbuild", "cpu-features", "protobufjs", "ssh2", "unrs-resolver"]
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "cpu-features",
+      "protobufjs",
+      "ssh2",
+      "unrs-resolver"
+    ]
   }
 }
