@@ -1,0 +1,158 @@
+name: rcab-dev
+
+# All build contexts and bind mounts are relative to the repo root.
+# Run via: pnpm dev:up   (which invokes docker compose with --env-file .env.dev)
+
+services:
+  postgres:
+    image: postgis/postgis:16-3.4
+    networks: [rcab_dev_net]
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-rcab}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-rcab}
+      POSTGRES_DB: ${POSTGRES_DB:-rcab}
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-rcab} -d $${POSTGRES_DB:-rcab}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    networks: [rcab_dev_net]
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 3s
+    restart: unless-stopped
+
+  # One-shot: downloads the OSM PBF if not present in the osrm-data volume.
+  # Uses alpine + curl because the official osrm/osrm-backend image is based
+  # on Debian Stretch (EOL) and apt cannot install curl in it any more.
+  osrm-prep:
+    image: alpine:3.19
+    networks: [rcab_dev_net]
+    environment:
+      OSM_PBF_URL: ${OSM_PBF_URL:-https://download.geofabrik.de/asia/india/north-eastern-zone-latest.osm.pbf}
+    volumes:
+      - osrm-data:/data
+    command: >
+      sh -c '
+        set -eu
+        apk add --no-cache curl
+        cd /data
+        if [ ! -f region.osm.pbf ]; then
+          echo "[osrm-prep] downloading PBF from $$OSM_PBF_URL"
+          curl -fL --output region.osm.pbf "$$OSM_PBF_URL"
+        else
+          echo "[osrm-prep] PBF already present"
+        fi
+      '
+    restart: "no"
+
+  # One-shot: extracts + partitions + customizes the OSRM graph.
+  # Skipped if region.osrm.mldgr already exists.
+  osrm-extract:
+    image: osrm/osrm-backend:latest
+    networks: [rcab_dev_net]
+    volumes:
+      - osrm-data:/data
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - >
+        set -e;
+        cd /data;
+        if [ ! -f region.osrm.mldgr ]; then
+          echo "[osrm-extract] extracting";
+          osrm-extract -p /opt/car.lua region.osm.pbf;
+          echo "[osrm-extract] partitioning";
+          osrm-partition region.osrm;
+          echo "[osrm-extract] customizing";
+          osrm-customize region.osrm;
+        else
+          echo "[osrm-extract] osrm graph already present";
+        fi
+    depends_on:
+      osrm-prep:
+        condition: service_completed_successfully
+    restart: "no"
+
+  # Serves the OSRM HTTP API.
+  osrm:
+    image: osrm/osrm-backend:latest
+    networks: [rcab_dev_net]
+    volumes:
+      - osrm-data:/data
+    command: ["osrm-routed", "--algorithm", "mld", "--port", "5000", "/data/region.osrm"]
+    depends_on:
+      osrm-extract:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  api:
+    build:
+      context: ../..
+      dockerfile: infra/docker/api/Dockerfile.dev
+    networks: [rcab_dev_net]
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+      DATABASE_URL: postgres://${POSTGRES_USER:-rcab}:${POSTGRES_PASSWORD:-rcab}@postgres:5432/${POSTGRES_DB:-rcab}
+      REDIS_URL: redis://redis:6379
+      OSRM_URL: http://osrm:5000
+    volumes:
+      - ../../apps/api:/workspace/apps/api
+      - ../../packages/shared/src:/workspace/packages/shared/src
+      - ../../packages/api-client/src:/workspace/packages/api-client/src
+      # Anonymous volumes preserve the image's installed node_modules across bind mounts.
+      - /workspace/node_modules
+      - /workspace/apps/api/node_modules
+      - /workspace/packages/shared/node_modules
+      - /workspace/packages/api-client/node_modules
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ../..
+      dockerfile: infra/docker/web/Dockerfile.dev
+    networks: [rcab_dev_net]
+    ports:
+      - "3002:3000"
+    environment:
+      NODE_ENV: development
+      NEXT_PUBLIC_API_URL: http://localhost:3000
+    volumes:
+      - ../../apps/web:/workspace/apps/web
+      - ../../packages/shared/src:/workspace/packages/shared/src
+      - ../../packages/api-client/src:/workspace/packages/api-client/src
+      - /workspace/node_modules
+      - /workspace/apps/web/node_modules
+      - /workspace/apps/web/.next
+      - /workspace/packages/shared/node_modules
+      - /workspace/packages/api-client/node_modules
+    restart: unless-stopped
+
+networks:
+  rcab_dev_net:
+    driver: bridge
+
+volumes:
+  pg-data:
+  redis-data:
+  osrm-data:

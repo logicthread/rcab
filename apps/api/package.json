@@ -4,15 +4,20 @@
   "private": true,
   "scripts": {
     "build": "tsc",
+    "dev": "tsx watch src/main.ts",
+    "start": "node dist/main.js",
     "test": "vitest run",
-    "dev": "ts-node src/main.ts",
     "lint": "eslint src/"
   },
   "dependencies": {
-    "@rcab/shared": "workspace:*"
+    "@rcab/shared": "workspace:*",
+    "ioredis": "^5.4.1",
+    "pg": "^8.13.1"
   },
   "devDependencies": {
     "@types/node": "^22.15.21",
+    "@types/pg": "^8.11.10",
+    "tsx": "^4.19.2",
     "vitest": "^3.2.2"
   }
 }

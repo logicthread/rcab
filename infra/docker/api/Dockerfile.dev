@@ -1,0 +1,35 @@
+FROM node:20-bookworm-slim
+
+ENV PNPM_HOME=/root/.local/share/pnpm
+ENV PATH=$PNPM_HOME:$PATH
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends curl ca-certificates git \
+  && rm -rf /var/lib/apt/lists/* \
+  && corepack enable \
+  && corepack prepare pnpm@10.33.4 --activate
+
+WORKDIR /workspace
+
+# Copy workspace manifests first for better Docker layer caching.
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
+COPY tsconfig.base.json ./
+COPY apps/api/package.json ./apps/api/
+COPY apps/web/package.json ./apps/web/
+COPY packages/shared/package.json ./packages/shared/
+COPY packages/api-client/package.json ./packages/api-client/
+
+RUN pnpm install --frozen-lockfile
+
+# Source is provided via bind mount at runtime in the dev compose file.
+# Build shared packages once so api can resolve them on first start.
+COPY packages ./packages
+RUN pnpm --filter @rcab/shared --filter @rcab/api-client build
+
+COPY apps/api ./apps/api
+
+WORKDIR /workspace/apps/api
+
+EXPOSE 3000
+
+CMD ["pnpm", "dev"]

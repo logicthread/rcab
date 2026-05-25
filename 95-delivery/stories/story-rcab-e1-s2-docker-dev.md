@@ -1,7 +1,7 @@
 ---
 title: RCAB-E1.S2 — Docker dev environment (docker-compose.dev + devcontainer)
 tags: [layer/delivery, kind/story]
-status: ready
+status: done
 phase: 0
 epic: [[epic-e1-foundation]]
 demo: 0

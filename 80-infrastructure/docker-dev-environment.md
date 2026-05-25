@@ -26,7 +26,9 @@ audience: both
 | `web` | local Dockerfile.dev (node:20) | `./apps/web → /workspace/apps/web` | Next.js HMR |
 | `postgres` | `postgis/postgis:16-3.4` | — | n/a |
 | `redis` | `redis:7-alpine` | — | n/a |
-| `osrm` | local Dockerfile with a fixture city PBF | — | n/a |
+| `osrm-prep` (one-shot) | `alpine:3.19` | downloads PBF into `osrm-data` volume on first up | — |
+| `osrm-extract` (one-shot) | `osrm/osrm-backend:latest` | extracts + partitions + customizes the OSRM graph; skipped if already present | — |
+| `osrm` | `osrm/osrm-backend:latest` | serves `osrm-routed --algorithm mld` on `:5000` | n/a |
 | `mailhog` (optional) | `mailhog/mailhog` | — | for future email work |
 | `loki + promtail + prometheus + grafana + uptime-kuma` | per [[observability]] | — | n/a |
 
@@ -42,8 +44,8 @@ infra/
       Dockerfile.dev
     web/
       Dockerfile.dev
-    osrm/
-      Dockerfile
+    # No osrm/ Dockerfile in Phase-0 — the dev compose uses
+    # alpine + osrm/osrm-backend directly. See ADR-0009 for rationale.
       pbf/
         fixture-city.osm.pbf      # ~ 50 MB; committed via Git LFS
   .devcontainer/
@@ -55,13 +57,14 @@ infra/
 ## Bring-up
 
 ```bash
-cp .env.dev.example .env.dev      # first time only
-pnpm dev:up                       # docker compose up -d
+# `.env.dev` is auto-created from `.env.dev.example` on first `dev:up`.
+pnpm dev:up                       # docker compose up -d --build
+pnpm dev:smoke                    # polls api / until 200 (or DEV_SMOKE_TIMEOUT)
 pnpm dev:logs                     # tail
 pnpm dev:down                     # docker compose down
 ```
 
-`pnpm dev:up` blocks until `/v1/health/ready` returns 200; the operator sees a friendly progress UI rather than racing into `curl` themselves.
+`pnpm dev:up` brings containers up in the background. `pnpm dev:smoke` (added in [[story-rcab-e1-s2-docker-dev]]) polls the api root until it reports postgres + redis ready. Once [[story-rcab-e1-s8-health-endpoints]] lands, smoke will poll `/v1/health/ready` instead and the two commands may be merged into a single blocking `dev:up`.
 
 ## Hot reload contracts
 
