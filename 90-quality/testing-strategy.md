@@ -16,8 +16,8 @@ audience: both
 
 | Layer | Tool | Scope |
 |---|---|---|
-| Unit | Jest | services, state machines, algorithms (top-K, similarity, rating aggregation). Mocks at the infra boundary |
-| Integration | Jest + Testcontainers | spin up real Postgres + Redis; exercise modules end-to-end with real SQL & Redis commands |
+| Unit | Vitest | services, state machines, algorithms (top-K, similarity, rating aggregation). Mocks at the infra boundary |
+| Integration | Vitest + Testcontainers | spin up real Postgres + Redis; exercise modules end-to-end with real SQL & Redis commands |
 | Contract | Pact (optional Phase-1) | for client ↔ server contracts |
 | E2E | Playwright | web flows |
 | Load | k6 | dispatch path, quote path, peak driver-online concurrency |

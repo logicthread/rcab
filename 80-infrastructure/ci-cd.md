@@ -32,7 +32,7 @@ flowchart LR
 |---|---|
 | `lint` | ESLint, Prettier, `tsc --noEmit`, `dart analyze` |
 | `test:unit` | Jest, Flutter unit tests |
-| `test:integration` | Spins up `postgres` + `redis` services in Actions; runs migrations + integration tests against real DBs |
+| `test:integration` | Spins up `postgres` + `redis` services in Actions; runs `pnpm test:int` (Vitest + Testcontainers) against real DBs |
 | `test:e2e` | Playwright against a built web image fronted by a local mock API — runs nightly, not blocking on PR |
 | `test:load` | k6 against staging — runs nightly |
 | `build:api` | Docker image, tagged with commit SHA and `main`-rolling |

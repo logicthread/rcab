@@ -26,14 +26,22 @@ Both produce the same schema and the same OSRM behavior. The Testcontainers harn
 ```
 infra/
   docker/
-    docker-compose.test.yml
-    api/Dockerfile.test           # extends Dockerfile.dev, sets NODE_ENV=test
-test-fixtures/                    # shared package
-  src/
-    seed-pilot-city.ts
-    fake-drivers.ts
-    fake-rides.ts
-  package.json
+    docker-compose.test.yml       # postgres (tmpfs), redis (no persistence), osrm (--profile osrm)
+packages/
+  test-fixtures/                  # @rcab/test-fixtures workspace package
+    src/
+      migrations.ts               # runMigrations() — stub until E1.S7 adds real SQL
+      seeds.ts                    # seedPilotCity(), seedDrivers(), … expanded per story
+      index.ts
+apps/
+  api/
+    vitest.config.int.ts          # integration test runner config
+    test/
+      setup.int.ts                # globalSetup: starts PG + Redis containers, runs migrations
+      integration/
+        pg-roundtrip.int.spec.ts
+        redis-roundtrip.int.spec.ts
+        osrm-connectivity.int.spec.ts
 ```
 
 ## Configuration
@@ -45,16 +53,21 @@ test-fixtures/                    # shared package
 ## API integration tests (Testcontainers)
 
 ```ts
-// pseudo
-beforeAll(async () => {
-  pg = await new PostgreSqlContainer().start();
-  redis = await new RedisContainer().start();
+// apps/api/test/setup.int.ts (vitest globalSetup)
+export async function setup() {
+  if (process.env.RCAB_SKIP_INT === '1') { process.env.RCAB_INT_SKIPPED = '1'; return; }
+  [pg, redis] = await Promise.all([
+    new PostgreSqlContainer('postgis/postgis:16-3.4').start(),
+    new RedisContainer('redis:7-alpine').start(),
+  ]);
+  process.env.TEST_POSTGRES_URI = pg.getConnectionUri();
+  process.env.TEST_REDIS_URL    = redis.getConnectionUrl();
   await runMigrations(pg.getConnectionUri());
-});
-afterAll(async () => { await pg.stop(); await redis.stop(); });
+}
+export async function teardown() { await Promise.allSettled([pg?.stop(), redis?.stop()]); }
 ```
 
-A shared `bootstrapTestModule()` in `apps/api/test/setup.ts` wires these container handles into a real Nest module. Modules are not mocked.
+Test runner is **Vitest** (not Jest — the monorepo standardised on Vitest at E1.S1). Each integration test file uses `describe.skipIf(process.env.RCAB_INT_SKIPPED === '1')(...)`. The API is plain Node HTTP + raw `pg`/`ioredis`; there is no NestJS module to bootstrap at this stage.
 
 ## Load tests (k6)
 
