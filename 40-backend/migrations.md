@@ -15,8 +15,9 @@ audience: both
 ## Tooling
 
 - **Drizzle Kit** for generation; **Drizzle migrate** for application.
-- Migration files live in `apps/api/migrations/NNNN__short_name.sql`.
-- Migrations run via a dedicated container (`api migrate up`) before the API container starts in docker-compose.
+- Migration files live in `apps/api/migrations/NNNN_short_name.sql`.
+- Migrations run via a dedicated `migrator` container (`node dist/migrate.js`) before the API container starts in docker-compose.
+- Drizzle schema definitions live in `apps/api/src/db/schema.ts` (used for type-safe queries, not for migration generation in Phase-0).
 
 ## Rules
 

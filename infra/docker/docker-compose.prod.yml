@@ -87,7 +87,8 @@ services:
     restart: "no"
 
   postgres:
-    image: postgis/postgis:16-3.4@sha256:44126d872ac91993766c341e369c539e8196614321765d36a6f1bab0419a5fa5
+    build:
+      context: ./postgres
     platform: linux/amd64
     networks: [rcab_net]
     env_file:
@@ -106,7 +107,7 @@ services:
   redis:
     image: redis:7-alpine@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99
     networks: [rcab_net]
-    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD}"]
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec", "--requirepass", "${REDIS_PASSWORD}"]
     volumes:
       - redis-data:/data
     healthcheck:

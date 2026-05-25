@@ -5,7 +5,8 @@ name: rcab-dev
 
 services:
   postgres:
-    image: postgis/postgis:16-3.4
+    build:
+      context: ./postgres
     networks: [rcab_dev_net]
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-rcab}
@@ -24,7 +25,7 @@ services:
   redis:
     image: redis:7-alpine
     networks: [rcab_dev_net]
-    command: ["redis-server", "--appendonly", "yes"]
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
     volumes:
       - redis-data:/data
     healthcheck:

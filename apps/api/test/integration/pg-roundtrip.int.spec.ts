@@ -36,4 +36,41 @@ describe.skipIf(skip)('postgres round-trip', () => {
     `);
     expect(rows).toHaveLength(1);
   });
+
+  it('0001_init migration was applied', async () => {
+    const { rows } = await client.query(
+      `SELECT name FROM _rcab_migrations WHERE name = '0001_init.sql'`,
+    );
+    expect(rows).toHaveLength(1);
+  });
+
+  it('app_user table exists with expected columns', async () => {
+    const { rows } = await client.query(`
+      SELECT column_name FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = 'app_user'
+      ORDER BY ordinal_position
+    `);
+    const columns = rows.map((r) => r.column_name);
+    expect(columns).toContain('id');
+    expect(columns).toContain('firebase_uid');
+    expect(columns).toContain('phone_e164');
+    expect(columns).toContain('role');
+    expect(columns).toContain('status');
+  });
+
+  it('uuid-ossp extension is loaded', async () => {
+    const { rows } = await client.query(
+      `SELECT extname FROM pg_extension WHERE extname = 'uuid-ossp'`,
+    );
+    expect(rows).toHaveLength(1);
+  });
+
+  it('driver and vehicle tables exist', async () => {
+    const { rows } = await client.query(`
+      SELECT table_name FROM information_schema.tables
+      WHERE table_schema = 'public' AND table_name IN ('driver', 'vehicle', 'client')
+      ORDER BY table_name
+    `);
+    expect(rows.map((r) => r.table_name)).toEqual(['client', 'driver', 'vehicle']);
+  });
 });
