@@ -125,6 +125,12 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:3000/v1/health/live || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
     restart: unless-stopped
 
   web:
@@ -148,6 +154,88 @@ services:
       - /workspace/packages/api-client/node_modules
     restart: unless-stopped
 
+  # --- Observability (profile: obs) ---
+
+  loki:
+    image: grafana/loki:3.0.0
+    networks: [rcab_dev_net]
+    volumes:
+      - loki-data:/loki
+      - ../../infra/observability/loki.yml:/etc/loki/local-config.yaml:ro
+    command: -config.file=/etc/loki/local-config.yaml
+    profiles: [obs]
+    restart: unless-stopped
+
+  promtail:
+    image: grafana/promtail:3.0.0
+    networks: [rcab_dev_net]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ../../infra/observability/promtail.yml:/etc/promtail/config.yml:ro
+    command: -config.file=/etc/promtail/config.yml
+    depends_on: [loki]
+    profiles: [obs]
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    networks: [rcab_dev_net]
+    ports:
+      - "9090:9090"
+    volumes:
+      - prom-data:/prometheus
+      - ../../infra/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ../../infra/observability/alert_rules.yml:/etc/prometheus/alert_rules.yml:ro
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=15d'
+    depends_on:
+      api:
+        condition: service_healthy
+    profiles: [obs]
+    restart: unless-stopped
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    networks: [rcab_dev_net]
+    volumes:
+      - ../../infra/observability/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+    profiles: [obs]
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.1.0
+    networks: [rcab_dev_net]
+    ports:
+      - "3001:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ../../infra/observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ../../infra/observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on: [prometheus, loki]
+    profiles: [obs]
+    restart: unless-stopped
+
+  uptime-kuma:
+    image: louislam/uptime-kuma:1
+    networks: [rcab_dev_net]
+    ports:
+      - "3003:3001"
+    volumes:
+      - uptime-kuma-data:/app/data
+    depends_on:
+      api:
+        condition: service_healthy
+    profiles: [obs]
+    restart: unless-stopped
+
 networks:
   rcab_dev_net:
     driver: bridge
@@ -156,3 +244,7 @@ volumes:
   pg-data:
   redis-data:
   osrm-data:
+  loki-data:
+  prom-data:
+  grafana-data:
+  uptime-kuma-data:

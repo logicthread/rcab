@@ -9,4 +9,13 @@ if [[ ! -f .env.dev ]]; then
   cp .env.dev.example .env.dev
 fi
 
-exec docker compose --env-file .env.dev -f infra/docker/docker-compose.dev.yml up -d --build "$@"
+docker compose --env-file .env.dev -f infra/docker/docker-compose.dev.yml --profile obs up -d --build "$@"
+
+echo ""
+echo "[dev:up] API:          http://localhost:3000"
+echo "[dev:up] Web:          http://localhost:3002"
+echo "[dev:up] Grafana:      http://localhost:3001  (admin / admin)"
+echo "[dev:up] Prometheus:   http://localhost:9090"
+echo "[dev:up] Uptime Kuma:  http://localhost:3003"
+echo ""
+echo "[dev:up] Slim mode (no observability): pnpm dev:up:slim"

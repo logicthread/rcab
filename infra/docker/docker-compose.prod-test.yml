@@ -64,3 +64,18 @@ services:
 
   backup:
     profiles: [disabled]
+
+  prometheus:
+    ports:
+      - "9090:9090"
+
+  grafana:
+    ports:
+      - "3001:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+
+  uptime-kuma:
+    ports:
+      - "3003:3001"
