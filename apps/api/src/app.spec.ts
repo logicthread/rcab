@@ -86,4 +86,46 @@ describe('api app', () => {
       server.close();
     }
   });
+
+  it('exposes /metrics with prometheus content-type', async () => {
+    const state = createState();
+    const server = createApp(state).listen(0);
+    try {
+      const addr = server.address() as import('node:net').AddressInfo;
+      const res = await fetch(`http://127.0.0.1:${addr.port}/metrics`);
+      expect(res.status).toBe(200);
+      expect(res.headers.get('content-type')).toContain('text/plain');
+      const text = await res.text();
+      expect(text).toContain('http_request_duration_seconds');
+      expect(text).toContain('process_cpu_seconds_total');
+    } finally {
+      server.close();
+    }
+  });
+
+  it('sets x-request-id response header', async () => {
+    const state = createState();
+    const server = createApp(state).listen(0);
+    try {
+      const addr = server.address() as import('node:net').AddressInfo;
+      const res = await fetch(`http://127.0.0.1:${addr.port}/v1/health/live`);
+      expect(res.headers.get('x-request-id')).toBeTruthy();
+    } finally {
+      server.close();
+    }
+  });
+
+  it('echoes x-request-id from client header', async () => {
+    const state = createState();
+    const server = createApp(state).listen(0);
+    try {
+      const addr = server.address() as import('node:net').AddressInfo;
+      const res = await fetch(`http://127.0.0.1:${addr.port}/v1/health/live`, {
+        headers: { 'x-request-id': 'test-trace-123' },
+      });
+      expect(res.headers.get('x-request-id')).toBe('test-trace-123');
+    } finally {
+      server.close();
+    }
+  });
 });
