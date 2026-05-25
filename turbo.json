@@ -14,6 +14,12 @@
     "test:int": {
       "cache": false
     },
+    "test:e2e": {
+      "cache": false
+    },
+    "test:load": {
+      "cache": false
+    },
     "dev": {
       "cache": false,
       "persistent": true
