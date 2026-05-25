@@ -8,7 +8,12 @@ export function createState(): AppState {
 }
 
 export function handle(state: AppState, req: IncomingMessage, res: ServerResponse): void {
-  if (req.url === '/' || req.url === '/v1/health') {
+  if (req.url === '/v1/health/live') {
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ ok: true }));
+    return;
+  }
+  if (req.url === '/' || req.url === '/v1/health' || req.url === '/v1/health/ready') {
     const ready = state.postgres && state.redis;
     const body: Health & AppState = {
       ok: ready,
