@@ -41,7 +41,8 @@
       "Bash(docker volume *)",
       "Bash(pnpm -F *)",
       "Bash(pnpm test:int)",
-      "Bash(pnpm test:int *)"
+      "Bash(pnpm test:int *)",
+      "Bash(RCAB_SKIP_INT=1 pnpm test:int)"
     ],
     "deny": [
       "Bash(rm -rf /*)",
