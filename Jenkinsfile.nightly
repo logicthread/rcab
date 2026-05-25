@@ -1,0 +1,41 @@
+pipeline {
+    agent any
+
+    triggers {
+        cron('H 2 * * *')
+    }
+
+    options {
+        timeout(time: 60, unit: 'MINUTES')
+    }
+
+    stages {
+        stage('Install') {
+            steps {
+                sh 'pnpm install --frozen-lockfile'
+            }
+        }
+
+        stage('E2E tests') {
+            steps {
+                sh 'pnpm test:e2e'
+            }
+        }
+
+        stage('Load tests') {
+            steps {
+                sh 'pnpm test:load'
+            }
+        }
+    }
+
+    post {
+        always {
+            cleanWs()
+        }
+        failure {
+            echo "Nightly run FAILED — ${env.BUILD_URL}"
+            // TODO RCAB-E1.S5: open Linear issue via Linear API when integration is available
+        }
+    }
+}

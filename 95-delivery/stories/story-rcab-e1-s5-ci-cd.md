@@ -1,5 +1,5 @@
 ---
-title: RCAB-E1.S5 — CI/CD pipeline (GitHub Actions)
+title: RCAB-E1.S5 — CI/CD pipeline (Jenkins in docker-compose)
 tags: [layer/delivery, kind/story]
 status: in_progress
 phase: 0
@@ -13,34 +13,35 @@ owner: claude
 audience: both
 ---
 
-# RCAB-E1.S5 — CI/CD pipeline (GitHub Actions)
+# RCAB-E1.S5 — CI/CD pipeline (Jenkins in docker-compose)
 
 ## Goal
 
-Every push gets linted and tested. Every merge to `main` builds container images and (on a manual gate) deploys to a staging VPS. The pipeline is the same artifact path that production will use.
+Every push gets linted and tested. Every merge to `main` builds container images and (on a manual gate) deploys to a staging VPS. Jenkins runs as a service in the existing docker-compose stack; GitHub is a plain git remote.
 
 ## User-facing acceptance criteria
 
-- `Given` a PR, `When` checks run, `Then` `lint`, `test:unit`, `test:int`, `build` are all green (or the PR is blocked from merging).
-- `Given` a merge to `main`, `When` the deploy job is approved by a maintainer, `Then` the staging VPS is updated and `/v1/health/ready` returns 200 within 90 seconds of the deploy job's completion.
+- `Given` a push or PR, `When` Jenkins runs the pipeline, `Then` `lint`, `test:unit`, `test:int`, `build` stages all pass (or the pipeline is marked failed).
+- `Given` a merge to `main`, `When` the deploy stage is approved via the Jenkins `input` gate, `Then` the staging VPS is updated and `/v1/health/ready` returns 200 within 90 seconds.
 
 ## Technical acceptance criteria
 
-- `.github/workflows/ci.yml` runs on every PR: lint, unit, integration (with Postgres + Redis services), build images (no push).
-- `.github/workflows/deploy.yml` runs on push to `main` and `release/*`: pushes images to `ghcr.io/rcab/*`, then a gated `deploy-staging` job SSHes (or uses GitHub OIDC → ssh action) to the VPS and runs `docker compose pull && up -d`.
-- Required PR checks: `lint`, `test:unit`, `test:int`, `build`.
-- A nightly cron workflow runs `test:e2e` and `test:load` against staging; failures open a Linear issue but don't block merges.
-- Build matrix: `apps/api`, `apps/web`, `apps/driver-app` (debug APK as artifact only).
-- Branch protection on `main`: PR required, status checks required, one review.
+- `Jenkinsfile` at repo root: declarative pipeline with stages — Install → Lint → Unit tests → Integration tests → Build images → Push to GHCR (main/release only) → Deploy to staging (main/release, `input` gate).
+- `Jenkinsfile.nightly`: cron `H 2 * * *`, runs `test:e2e` and `test:load`; failures echo a stub message (Linear integration deferred).
+- `infra/docker/jenkins/Dockerfile`: `jenkins/jenkins:lts-jdk21` base + Docker CLI + Node 20 + pnpm 10.
+- Jenkins service added to `docker-compose.prod.yml`, bound to `127.0.0.1:8080`, Docker socket mounted.
+- Build matrix: `apps/api` and `apps/web` Docker images; `apps/driver-app` deferred to a dedicated agent (Flutter build is not in the Jenkins container).
+- Jenkins credentials to configure: `ghcr-pat`, `vps-host`, `vps-ssh-key`.
 
 ## Test plan
 
-- Self-tested: the pipeline running green on its own bootstrap PR.
+- Self-tested: pipeline running green against a test push to the repo.
 
 ## Out of scope
 
 - Promotion from staging to prod (manual gate for Phase-0; automate later).
-- Helm / Kubernetes / Argo anything.
+- Jenkins GitHub plugin / commit status reporting to GitHub.
+- Flutter build in Jenkins (needs separate Flutter-capable agent).
 
 ## See also
 - [[epic-e1-foundation]] · [[ci-cd]] · [[testing-strategy]]
