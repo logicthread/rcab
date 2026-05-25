@@ -1,7 +1,7 @@
 ---
 title: RCAB-E1.S5 — CI/CD pipeline (Jenkins in docker-compose)
 tags: [layer/delivery, kind/story]
-status: in_progress
+status: done
 phase: 0
 epic: [[epic-e1-foundation]]
 demo: 0
