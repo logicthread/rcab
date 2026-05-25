@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-mcp-config.json",
+  "mcpServers": {
+    "context7": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@upstash/context7-mcp"]
+    }
+  }
+}
