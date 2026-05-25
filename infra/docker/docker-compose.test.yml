@@ -1,0 +1,117 @@
+name: rcab-test
+
+# Bring up once for manual test runs or CI smoke:
+#   docker compose -f infra/docker/docker-compose.test.yml up -d
+#
+# Include OSRM (adds ~60 s on a cold volume):
+#   docker compose -f infra/docker/docker-compose.test.yml --profile osrm up -d
+#
+# Testcontainers (pnpm test:int) starts its own Postgres + Redis per suite;
+# this file exists for local dev parity and as the CI service-container reference.
+
+services:
+  postgres:
+    image: postgis/postgis:16-3.4
+    networks: [rcab_test_net]
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_USER: rcab_test
+      POSTGRES_PASSWORD: rcab_test
+      POSTGRES_DB: rcab_test
+    tmpfs:
+      - /var/lib/postgresql/data:size=512m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rcab_test -d rcab_test"]
+      interval: 3s
+      timeout: 2s
+      retries: 30
+      start_period: 3s
+    restart: "no"
+
+  redis:
+    image: redis:7-alpine
+    networks: [rcab_test_net]
+    ports:
+      - "6380:6379"
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 2s
+      retries: 30
+      start_period: 2s
+    restart: "no"
+
+  # OSRM services are opt-in via --profile osrm.
+  # On a cold machine, osrm-prep + osrm-extract take ~60 s for the fixture PBF.
+  # Once the osrm-test-data volume is populated, subsequent runs skip both steps.
+
+  osrm-prep:
+    image: alpine:3.19
+    profiles: [osrm]
+    networks: [rcab_test_net]
+    environment:
+      OSM_PBF_URL: ${OSM_PBF_URL:-https://download.geofabrik.de/asia/india/north-eastern-zone-latest.osm.pbf}
+    volumes:
+      - osrm-test-data:/data
+    command: >
+      sh -c '
+        set -eu
+        apk add --no-cache curl
+        cd /data
+        if [ ! -f region.osm.pbf ]; then
+          echo "[osrm-prep] downloading PBF from $$OSM_PBF_URL"
+          curl -fL --output region.osm.pbf "$$OSM_PBF_URL"
+        else
+          echo "[osrm-prep] PBF already present"
+        fi
+      '
+    restart: "no"
+
+  osrm-extract:
+    image: osrm/osrm-backend:latest
+    profiles: [osrm]
+    networks: [rcab_test_net]
+    volumes:
+      - osrm-test-data:/data
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - >
+        set -e;
+        cd /data;
+        if [ ! -f region.osrm.mldgr ]; then
+          echo "[osrm-extract] extracting";
+          osrm-extract -p /opt/car.lua region.osm.pbf;
+          echo "[osrm-extract] partitioning";
+          osrm-partition region.osrm;
+          echo "[osrm-extract] customizing";
+          osrm-customize region.osrm;
+        else
+          echo "[osrm-extract] graph already present";
+        fi
+    depends_on:
+      osrm-prep:
+        condition: service_completed_successfully
+    restart: "no"
+
+  osrm:
+    image: osrm/osrm-backend:latest
+    profiles: [osrm]
+    networks: [rcab_test_net]
+    ports:
+      - "5001:5000"
+    volumes:
+      - osrm-test-data:/data
+    command: ["osrm-routed", "--algorithm", "mld", "--port", "5000", "/data/region.osrm"]
+    depends_on:
+      osrm-extract:
+        condition: service_completed_successfully
+    restart: "no"
+
+networks:
+  rcab_test_net:
+    driver: bridge
+
+volumes:
+  osrm-test-data:

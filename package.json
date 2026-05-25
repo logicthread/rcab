@@ -14,6 +14,7 @@
     "dev:down": "docker compose --env-file .env.dev -f infra/docker/docker-compose.dev.yml down",
     "dev:logs": "docker compose --env-file .env.dev -f infra/docker/docker-compose.dev.yml logs -f",
     "dev:smoke": "bash scripts/dev-smoke.sh",
+    "test:int": "turbo test:int",
     "system:probe": "echo 'system:probe not yet implemented — see RCAB-E1.S9'"
   },
   "devDependencies": {

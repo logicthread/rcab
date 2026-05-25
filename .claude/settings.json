@@ -34,7 +34,14 @@
       "Bash(npm view *)",
       "Bash(npm list *)",
       "Bash(sw_vers*)",
-      "Bash(sysctl -n *)"
+      "Bash(sysctl -n *)",
+      "Bash(docker pull *)",
+      "Bash(docker rm -f *)",
+      "Bash(docker network *)",
+      "Bash(docker volume *)",
+      "Bash(pnpm -F *)",
+      "Bash(pnpm test:int)",
+      "Bash(pnpm test:int *)"
     ],
     "deny": [
       "Bash(rm -rf /*)",

@@ -7,6 +7,7 @@
     "dev": "tsx watch src/main.ts",
     "start": "node dist/main.js",
     "test": "vitest run",
+    "test:int": "vitest run --config vitest.config.int.ts",
     "lint": "eslint src/"
   },
   "dependencies": {
@@ -15,8 +16,12 @@
     "pg": "^8.13.1"
   },
   "devDependencies": {
+    "@rcab/test-fixtures": "workspace:*",
+    "@testcontainers/postgresql": "^12.0.0",
+    "@testcontainers/redis": "^12.0.0",
     "@types/node": "^22.15.21",
     "@types/pg": "^8.11.10",
+    "testcontainers": "^12.0.0",
     "tsx": "^4.19.2",
     "vitest": "^3.2.2"
   }
