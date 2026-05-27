@@ -19,15 +19,9 @@ import 'package:driver_app/features/profile/profile_screen.dart';
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// In-memory [TokenStore] that doesn't touch [FlutterSecureStorage].
+/// In-memory [TokenStore] — overrides every method so the underlying
+/// [FlutterSecureStorage] is never called (no platform channels in tests).
 class _FakeTokenStore extends TokenStore {
-  _FakeTokenStore() : super(storage: _neverCallStorage());
-
-  static FlutterSecureStorage _neverCallStorage() {
-    // We override all methods so the delegate is never reached.
-    return const FlutterSecureStorage();
-  }
-
   final Map<String, String> _data = {};
 
   @override

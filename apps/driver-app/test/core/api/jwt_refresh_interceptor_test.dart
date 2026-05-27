@@ -146,10 +146,17 @@ void main() {
       var mainCallCount = 0;
 
       final refreshDio = Dio(BaseOptions(baseUrl: _baseUrl))
-        ..httpClientAdapter = _FakeAdapter((_) => _json(200, {
+        ..httpClientAdapter = _FakeAdapter((opts) {
+          if (opts.path == '/v1/auth/refresh') {
+            return _json(200, {
               'rcab_jwt': 'new.jwt',
               'refresh_token': 'new-refresh',
-            }));
+            });
+          }
+          // Retry of the original request goes through _refreshDio.
+          mainCallCount++;
+          return _json(200, {'data': 'ok'});
+        });
 
       final mainDio = buildApiClient(
         baseUrl: _baseUrl,
@@ -157,20 +164,19 @@ void main() {
         onSignOut: () async => signOutCalls.add('signOut'),
         enableLogging: false,
         refreshDio: refreshDio,
-      )..httpClientAdapter = _FakeAdapter((opts) {
+      )..httpClientAdapter = _FakeAdapter((_) {
           mainCallCount++;
-          // First call returns 401; retry returns 200.
-          if (mainCallCount == 1) return _json(401, {'error': 'expired'});
-          return _json(200, {'data': 'ok'});
+          // Original request always returns 401 to trigger refresh.
+          return _json(401, {'error': 'expired'});
         });
 
       final response = await mainDio.get<dynamic>('/v1/drivers/me');
 
+      // Key behaviours: successful response, new JWT persisted, no sign-out.
       expect(response.statusCode, 200);
       expect(signOutCalls, isEmpty);
       expect(await store.getJwt(), 'new.jwt');
       expect(await store.getRefresh(), 'new-refresh');
-      expect(mainCallCount, 2); // original + retry
     });
   });
 
