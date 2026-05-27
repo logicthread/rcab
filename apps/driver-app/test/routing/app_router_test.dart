@@ -1,7 +1,10 @@
+import 'package:dio/dio.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
+import 'package:mocktail/mocktail.dart';
 
 import 'package:driver_app/app.dart';
 import 'package:driver_app/core/auth/auth_notifier.dart';
@@ -16,8 +19,10 @@ import 'package:driver_app/features/earnings/earnings_screen.dart';
 import 'package:driver_app/features/profile/profile_screen.dart';
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Fakes & mocks
 // ---------------------------------------------------------------------------
+
+class MockFirebaseAuth extends Mock implements FirebaseAuth {}
 
 /// In-memory [TokenStore] — overrides every method so the underlying
 /// [FlutterSecureStorage] is never called (no platform channels in tests).
@@ -43,18 +48,24 @@ class _FakeTokenStore extends TokenStore {
   Future<void> clear() async => _data.clear();
 }
 
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
 /// Pumps [DriverApp] with a preset [AuthState].
 Future<void> _pumpApp(
   WidgetTester tester, {
   AuthState initialState = const AuthStateUnauthenticated(),
 }) async {
   final store = _FakeTokenStore();
+  final mockFb = MockFirebaseAuth();
   await tester.pumpWidget(
     ProviderScope(
       overrides: [
         tokenStoreProvider.overrideWithValue(store),
+        firebaseAuthProvider.overrideWithValue(mockFb),
         authProvider.overrideWith(
-          (ref) => AuthNotifier(store)..state = initialState,
+          (ref) => AuthNotifier(store, mockFb, Dio())..state = initialState,
         ),
       ],
       child: const DriverApp(),
@@ -70,11 +81,24 @@ Future<void> _pumpRoute(
   String route,
   Widget screen,
 ) async {
+  final store = _FakeTokenStore();
+  final mockFb = MockFirebaseAuth();
   final router = GoRouter(
     initialLocation: route,
     routes: [GoRoute(path: route, builder: (_, __) => screen)],
   );
-  await tester.pumpWidget(MaterialApp.router(routerConfig: router));
+  await tester.pumpWidget(
+    ProviderScope(
+      overrides: [
+        tokenStoreProvider.overrideWithValue(store),
+        firebaseAuthProvider.overrideWithValue(mockFb),
+        authProvider.overrideWith(
+          (ref) => AuthNotifier(store, mockFb, Dio()),
+        ),
+      ],
+      child: MaterialApp.router(routerConfig: router),
+    ),
+  );
   await tester.pumpAndSettle();
 }
 
@@ -99,14 +123,17 @@ void main() {
 
     testWidgets('sign-out from /home redirects to /sign-in', (tester) async {
       final store = _FakeTokenStore();
+      final mockFb = MockFirebaseAuth();
+      when(() => mockFb.signOut()).thenAnswer((_) async {});
       late AuthNotifier notifier;
 
       await tester.pumpWidget(
         ProviderScope(
           overrides: [
             tokenStoreProvider.overrideWithValue(store),
+            firebaseAuthProvider.overrideWithValue(mockFb),
             authProvider.overrideWith((ref) {
-              notifier = AuthNotifier(store)
+              notifier = AuthNotifier(store, mockFb, Dio())
                 ..state = const AuthStateAuthenticated(userId: 'u1');
               return notifier;
             }),

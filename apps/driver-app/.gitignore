@@ -43,3 +43,6 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Firebase — obtain from Firebase console; see android/app/google-services.json.example
+android/app/google-services.json

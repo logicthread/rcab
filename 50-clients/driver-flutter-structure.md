@@ -27,7 +27,7 @@ apps/driver-app/
       fcm/                   # token registration, handlers
       logger/
     features/
-      auth/                  # phone OTP via Firebase
+      auth/                  # phone OTP via Firebase (E.164 input → verifyPhoneNumber → exchange)
       home/                  # online toggle, dashboard summary
       offer/                 # incoming ride offer UI
       ride/                  # active ride screen

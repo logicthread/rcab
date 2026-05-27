@@ -1,15 +1,20 @@
 // Smoke test: app boots and shows the sign-in screen when unauthenticated.
 // More thorough routing tests live in test/routing/app_router_test.dart.
 
+import 'package:dio/dio.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mocktail/mocktail.dart';
 
 import 'package:driver_app/app.dart';
 import 'package:driver_app/core/auth/auth_notifier.dart';
 import 'package:driver_app/core/auth/auth_state.dart';
 import 'package:driver_app/core/auth/token_store.dart';
 import 'package:driver_app/di/providers.dart';
+
+class MockFirebaseAuth extends Mock implements FirebaseAuth {}
 
 class _FakeTokenStore extends TokenStore {
   final Map<String, String> _data = {};
@@ -34,13 +39,16 @@ void main() {
   testWidgets('cold launch (unauthenticated) shows sign-in screen',
       (tester) async {
     final store = _FakeTokenStore();
+    final mockFb = MockFirebaseAuth();
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
           tokenStoreProvider.overrideWithValue(store),
+          firebaseAuthProvider.overrideWithValue(mockFb),
           authProvider.overrideWith(
             (ref) =>
-                AuthNotifier(store)..state = const AuthStateUnauthenticated(),
+                AuthNotifier(store, mockFb, Dio())
+                  ..state = const AuthStateUnauthenticated(),
           ),
         ],
         child: const DriverApp(),

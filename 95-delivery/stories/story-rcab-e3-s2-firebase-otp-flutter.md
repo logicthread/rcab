@@ -1,7 +1,7 @@
 ---
 title: RCAB-E3.S2 — Firebase OTP sign-in in Flutter
 tags: [layer/delivery, kind/story]
-status: ready
+status: done
 phase: 0
 epic: [[epic-e3-driver-presence]]
 demo: 2

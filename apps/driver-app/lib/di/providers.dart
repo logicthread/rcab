@@ -1,4 +1,5 @@
 import 'package:dio/dio.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/auth/auth_notifier.dart';
@@ -10,12 +11,11 @@ import '../core/api/api_client.dart';
 
 final tokenStoreProvider = Provider<TokenStore>((ref) => TokenStore());
 
-// ── Auth ──────────────────────────────────────────────────────────────────────
+// ── Firebase ──────────────────────────────────────────────────────────────────
 
-final authProvider =
-    StateNotifierProvider<AuthNotifier, AuthState>((ref) {
-  return AuthNotifier(ref.read(tokenStoreProvider));
-});
+final firebaseAuthProvider = Provider<FirebaseAuth>(
+  (ref) => FirebaseAuth.instance,
+);
 
 // ── API client ────────────────────────────────────────────────────────────────
 
@@ -33,11 +33,30 @@ const _kEnableLogging = bool.fromEnvironment(
   defaultValue: true,
 );
 
+/// Plain Dio with only the base URL — no JWT interceptor.
+///
+/// Used for unauthenticated endpoints (e.g. firebase-exchange) to avoid a
+/// circular provider dependency between [authProvider] and [apiClientProvider].
+final _exchangeDioProvider = Provider<Dio>(
+  (ref) => Dio(BaseOptions(baseUrl: _kApiBaseUrl)),
+);
+
+/// Full API client with JWT attach + transparent token refresh.
 final apiClientProvider = Provider<Dio>((ref) {
   return buildApiClient(
     baseUrl: _kApiBaseUrl,
     tokenStore: ref.read(tokenStoreProvider),
     onSignOut: () => ref.read(authProvider.notifier).signOut(),
     enableLogging: _kEnableLogging,
+  );
+});
+
+// ── Auth ──────────────────────────────────────────────────────────────────────
+
+final authProvider = StateNotifierProvider<AuthNotifier, AuthState>((ref) {
+  return AuthNotifier(
+    ref.read(tokenStoreProvider),
+    ref.read(firebaseAuthProvider),
+    ref.read(_exchangeDioProvider),
   );
 });
