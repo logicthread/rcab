@@ -1,7 +1,7 @@
 ---
 title: RCAB-E2.S6 — Auth integration tests + negative cases
 tags: [layer/delivery, kind/story]
-status: ready
+status: in_progress
 phase: 0
 epic: [[epic-e2-auth]]
 demo: 1

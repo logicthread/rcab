@@ -44,7 +44,7 @@ audience: both
 | RCAB-E2.S3 | [[story-rcab-e2-s3-web-otp-flow]] — Web OTP flow (reCAPTCHA + signInWithPhoneNumber) | ■ |
 | RCAB-E2.S4 | [[story-rcab-e2-s4-google-link]] — Google link/login endpoints + ID-token verify | ■ |
 | RCAB-E2.S5 | [[story-rcab-e2-s5-cookie-csrf]] — Refresh-token cookie + CSRF posture | ■ |
-| RCAB-E2.S6 | [[story-rcab-e2-s6-auth-integration-tests]] — Auth integration tests + negative cases | □ |
+| RCAB-E2.S6 | [[story-rcab-e2-s6-auth-integration-tests]] — Auth integration tests + negative cases | ▶ |
 
 ## E3 — Driver presence → Demo 2 · "The driver is online"
 *Driver app shell, go online, Redis geo index, location stream.* See [[epic-e3-driver-presence]].
