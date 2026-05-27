@@ -8,6 +8,14 @@ import { FirebaseAdminService } from '../../infra/firebase/firebase-admin.servic
 const PHONE_E164_RE = /^\+[1-9]\d{7,14}$/;
 const REFRESH_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
+export interface RefreshRow {
+  user_id: string;
+  role: string;
+  phone_e164: string;
+  expires_at: Date;
+  revoked_at: Date | null;
+}
+
 export interface TokenResponse {
   access_token: string;
   token_type: 'bearer';
@@ -73,6 +81,67 @@ export class AuthService {
       refresh_token: refreshToken,
       user: { id: user.id, role: user.role, phone_e164: user.phone_e164 },
     };
+  }
+
+  async refresh(refreshToken: string): Promise<TokenResponse> {
+    const result = await this.pool.query<RefreshRow & { phone_e164: string }>(
+      `SELECT art.user_id, art.expires_at, art.revoked_at, au.role, au.phone_e164
+       FROM auth_refresh_token art
+       JOIN app_user au ON au.id = art.user_id
+       WHERE art.token = $1`,
+      [refreshToken],
+    );
+
+    if (result.rows.length === 0) {
+      throw new UnauthorizedException({ code: 'invalid_refresh_token', message: 'Refresh token not found' });
+    }
+
+    const row = result.rows[0];
+    if (row.revoked_at !== null) {
+      throw new UnauthorizedException({ code: 'invalid_refresh_token', message: 'Refresh token has been revoked' });
+    }
+    if (new Date(row.expires_at) < new Date()) {
+      throw new UnauthorizedException({ code: 'invalid_refresh_token', message: 'Refresh token has expired' });
+    }
+
+    const newRefreshToken = randomUUID();
+    const expiresAt = new Date(Date.now() + REFRESH_TTL_MS);
+
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query(
+        'UPDATE auth_refresh_token SET revoked_at = now() WHERE token = $1',
+        [refreshToken],
+      );
+      await client.query(
+        'INSERT INTO auth_refresh_token (token, user_id, expires_at) VALUES ($1, $2, $3)',
+        [newRefreshToken, row.user_id, expiresAt],
+      );
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+
+    const accessToken = this.jwt.sign({ sub: row.user_id, role: row.role, auth_method: 'phone' });
+
+    return {
+      access_token: accessToken,
+      token_type: 'bearer',
+      expires_in: 900,
+      refresh_token: newRefreshToken,
+      user: { id: row.user_id, role: row.role, phone_e164: row.phone_e164 },
+    };
+  }
+
+  async revoke(refreshToken: string, userId: string): Promise<void> {
+    await this.pool.query(
+      'UPDATE auth_refresh_token SET revoked_at = now() WHERE token = $1 AND user_id = $2 AND revoked_at IS NULL',
+      [refreshToken, userId],
+    );
   }
 
   private async findOrCreateUser(

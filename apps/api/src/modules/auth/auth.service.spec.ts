@@ -166,4 +166,79 @@ describe('AuthService', () => {
       });
     });
   });
+
+  describe('refresh', () => {
+    const validRow = {
+      user_id: 'user-abc',
+      role: 'client',
+      phone_e164: '+12025551234',
+      expires_at: new Date(Date.now() + 86400_000),
+      revoked_at: null,
+    };
+
+    it('returns new tokens and revokes old token atomically', async () => {
+      mockPoolQuery.mockResolvedValueOnce({ rows: [validRow] });
+      mockClientQuery.mockResolvedValue({ rows: [] });
+
+      const result = await service.refresh('old-token');
+
+      expect(result.access_token).toBe('signed-jwt');
+      expect(result.refresh_token).toMatch(/^[0-9a-f-]{36}$/);
+      expect(result.user.id).toBe('user-abc');
+
+      expect(mockClientQuery).toHaveBeenCalledWith(
+        expect.stringContaining('UPDATE auth_refresh_token SET revoked_at'),
+        ['old-token'],
+      );
+      expect(mockClientQuery).toHaveBeenCalledWith(
+        expect.stringContaining('INSERT INTO auth_refresh_token'),
+        expect.any(Array),
+      );
+    });
+
+    it('throws 401 when refresh token is not found', async () => {
+      mockPoolQuery.mockResolvedValueOnce({ rows: [] });
+
+      await expect(service.refresh('unknown-token')).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('throws 401 when refresh token is revoked', async () => {
+      mockPoolQuery.mockResolvedValueOnce({
+        rows: [{ ...validRow, revoked_at: new Date() }],
+      });
+
+      await expect(service.refresh('revoked-token')).rejects.toMatchObject({
+        response: { code: 'invalid_refresh_token' },
+      });
+    });
+
+    it('throws 401 when refresh token is expired', async () => {
+      mockPoolQuery.mockResolvedValueOnce({
+        rows: [{ ...validRow, expires_at: new Date(Date.now() - 1000) }],
+      });
+
+      await expect(service.refresh('expired-token')).rejects.toMatchObject({
+        response: { code: 'invalid_refresh_token' },
+      });
+    });
+  });
+
+  describe('revoke', () => {
+    it('sets revoked_at on the matching token', async () => {
+      mockPoolQuery.mockResolvedValueOnce({ rowCount: 1 });
+
+      await service.revoke('some-token', 'user-abc');
+
+      expect(mockPoolQuery).toHaveBeenCalledWith(
+        expect.stringContaining('UPDATE auth_refresh_token SET revoked_at'),
+        ['some-token', 'user-abc'],
+      );
+    });
+
+    it('is a no-op when token does not exist or already revoked', async () => {
+      mockPoolQuery.mockResolvedValueOnce({ rowCount: 0 });
+
+      await expect(service.revoke('nonexistent-token', 'user-abc')).resolves.toBeUndefined();
+    });
+  });
 });
