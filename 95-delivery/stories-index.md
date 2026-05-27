@@ -51,7 +51,7 @@ audience: both
 
 | ID | Title | Status |
 |---|---|---|
-| RCAB-E3.S1 | [[story-rcab-e3-s1-flutter-app-skeleton]] — Flutter app skeleton: routing, theme, Riverpod, dio + refresh | □ |
+| RCAB-E3.S1 | [[story-rcab-e3-s1-flutter-app-skeleton]] — Flutter app skeleton: routing, theme, Riverpod, dio + refresh | ▶ |
 | RCAB-E3.S2 | [[story-rcab-e3-s2-firebase-otp-flutter]] — Firebase OTP in Flutter | □ |
 | RCAB-E3.S3 | [[story-rcab-e3-s3-vehicle-registration]] — Vehicle registration screen + API | □ |
 | RCAB-E3.S4 | [[story-rcab-e3-s4-driver-online-toggle]] — Online / offline toggle + foreground service | □ |

@@ -54,11 +54,14 @@ apps/driver-app/
 | `socket_io_client` | Realtime |
 | `firebase_auth` | Phone OTP |
 | `firebase_messaging` | FCM |
-| `flutter_background_service` + `flutter_foreground_task` | Foreground service for location |
+| `flutter_foreground_task` | Foreground service for location (Android) |
 | `geolocator` | Location samples |
 | `freezed` + `json_serializable` | Models |
 | `flutter_local_notifications` | Heads-up notifications |
 | `url_launcher` | Google Maps deeplink |
+| `flutter_secure_storage` | JWT + refresh token persistence |
+| `permission_handler` | Runtime permission requests + OEM battery settings |
+| `shared_preferences` | Lightweight flags (e.g. OEM onboarding shown) |
 
 ## Why Riverpod
 
