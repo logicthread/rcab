@@ -1,7 +1,7 @@
 ---
 title: RCAB-E2.S2 — rcab JWT issue/refresh + revocation
 tags: [layer/delivery, kind/story]
-status: ready
+status: in_progress
 phase: 0
 epic: [[epic-e2-auth]]
 demo: 1

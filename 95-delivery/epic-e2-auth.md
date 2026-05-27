@@ -25,7 +25,7 @@ Completing every story in this epic ⇒ Demo 1 passes.
 | ID | Title | Status |
 |---|---|---|
 | RCAB-E2.S1 | [[story-rcab-e2-s1-otp-exchange]] — OTP exchange endpoint + Firebase Admin verifier | ■ |
-| RCAB-E2.S2 | [[story-rcab-e2-s2-jwt-refresh]] — rcab JWT issue/refresh + revocation | □ |
+| RCAB-E2.S2 | [[story-rcab-e2-s2-jwt-refresh]] — rcab JWT issue/refresh + revocation | ▶ |
 | RCAB-E2.S3 | [[story-rcab-e2-s3-web-otp-flow]] — Web OTP flow (reCAPTCHA + signInWithPhoneNumber) | □ |
 | RCAB-E2.S4 | [[story-rcab-e2-s4-google-link]] — Google link/login endpoints + ID-token verify | □ |
 | RCAB-E2.S5 | [[story-rcab-e2-s5-cookie-csrf]] — Refresh-token cookie + CSRF posture | □ |
