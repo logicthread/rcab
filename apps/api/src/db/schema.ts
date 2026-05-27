@@ -53,6 +53,16 @@ export const driver = pgTable('driver', {
   check('driver_availability_check', sql`${t.availability} IN ('offline','online','on_ride')`),
 ]);
 
+export const authRefreshToken = pgTable('auth_refresh_token', {
+  token:     text('token').primaryKey(),
+  userId:    uuid('user_id').notNull().references(() => appUser.id, { onDelete: 'cascade' }),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  index('auth_refresh_token_user_idx').on(t.userId),
+]);
+
 export const vehicle = pgTable('vehicle', {
   id: uuid('id').primaryKey(),
   driverId: uuid('driver_id').notNull().references(() => driver.userId, { onDelete: 'cascade' }),

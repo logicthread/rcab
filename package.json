@@ -45,7 +45,10 @@
       "cpu-features",
       "protobufjs",
       "ssh2",
-      "unrs-resolver"
+      "unrs-resolver",
+      "@nestjs/core",
+      "@firebase/util",
+      "@swc/core"
     ]
   }
 }
