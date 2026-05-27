@@ -21,7 +21,6 @@ describe('withAuth', () => {
     useAuthStore.setState({
       user: null,
       jwt: null,
-      refreshToken: null,
       silentRefresh: vi.fn().mockResolvedValue(undefined),
     });
   });

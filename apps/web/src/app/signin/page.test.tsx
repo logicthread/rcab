@@ -23,7 +23,7 @@ import SignInPage from './sign-in-client';
 
 describe('SignInPage', () => {
   beforeEach(() => {
-    useAuthStore.setState({ user: null, jwt: null, refreshToken: null });
+    useAuthStore.setState({ user: null, jwt: null });
     vi.clearAllMocks();
     vi.stubGlobal('fetch', vi.fn());
   });
@@ -36,7 +36,6 @@ describe('SignInPage', () => {
     useAuthStore.setState({
       user: { id: 'uid', role: 'client', phone_e164: '+12025551234' },
       jwt: 'some-jwt',
-      refreshToken: 'some-token',
     });
     render(<SignInPage />);
     expect(mockReplace).toHaveBeenCalledWith('/book');
@@ -83,7 +82,6 @@ describe('SignInPage', () => {
       json: () =>
         Promise.resolve({
           access_token: 'rcab-jwt',
-          refresh_token: 'rcab-rt',
           user: { id: 'uid', role: 'client', phone_e164: '+12025551234' },
         }),
     } as Response);

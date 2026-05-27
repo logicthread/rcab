@@ -13,43 +13,38 @@ export interface AuthUser {
 interface AuthState {
   user: AuthUser | null;
   jwt: string | null;
-  // Held in memory until S5 wires the HttpOnly cookie.
-  refreshToken: string | null;
-  setAuth: (user: AuthUser, jwt: string, refreshToken: string) => void;
+  setAuth: (user: AuthUser, jwt: string) => void;
   signOut: () => void;
   silentRefresh: () => Promise<void>;
 }
 
-export const useAuthStore = create<AuthState>((set, get) => ({
+export const useAuthStore = create<AuthState>((set) => ({
   user: null,
   jwt: null,
-  refreshToken: null,
 
-  setAuth(user, jwt, refreshToken) {
-    set({ user, jwt, refreshToken });
+  setAuth(user, jwt) {
+    set({ user, jwt });
   },
 
   signOut() {
-    set({ user: null, jwt: null, refreshToken: null });
+    set({ user: null, jwt: null });
   },
 
   async silentRefresh() {
-    const { refreshToken } = get();
-    if (!refreshToken) return;
     try {
+      // No body — browser sends the HttpOnly refresh_token cookie automatically.
       const res = await fetch(`${API_BASE}/v1/auth/refresh`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ refresh_token: refreshToken }),
+        credentials: 'include',
       });
       if (!res.ok) {
-        set({ user: null, jwt: null, refreshToken: null });
+        set({ user: null, jwt: null });
         return;
       }
-      const data = (await res.json()) as { access_token: string; refresh_token: string; user: AuthUser };
-      set({ jwt: data.access_token, refreshToken: data.refresh_token, user: data.user });
+      const data = (await res.json()) as { access_token: string; user: AuthUser };
+      set({ jwt: data.access_token, user: data.user });
     } catch {
-      set({ user: null, jwt: null, refreshToken: null });
+      set({ user: null, jwt: null });
     }
   },
 }));

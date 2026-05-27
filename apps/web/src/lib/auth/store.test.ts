@@ -3,7 +3,7 @@ import { useAuthStore } from './store';
 
 describe('useAuthStore', () => {
   beforeEach(() => {
-    useAuthStore.setState({ user: null, jwt: null, refreshToken: null });
+    useAuthStore.setState({ user: null, jwt: null });
     vi.stubGlobal('fetch', vi.fn());
   });
 
@@ -11,50 +11,51 @@ describe('useAuthStore', () => {
     vi.unstubAllGlobals();
   });
 
-  it('setAuth stores user, jwt, and refreshToken', () => {
+  it('setAuth stores user and jwt', () => {
     const user = { id: 'u1', role: 'client', phone_e164: '+12025551234' };
-    useAuthStore.getState().setAuth(user, 'jwt-value', 'rt-value');
+    useAuthStore.getState().setAuth(user, 'jwt-value');
     const state = useAuthStore.getState();
     expect(state.user).toEqual(user);
     expect(state.jwt).toBe('jwt-value');
-    expect(state.refreshToken).toBe('rt-value');
   });
 
   it('signOut clears all auth state', () => {
     useAuthStore.setState({
       user: { id: 'u1', role: 'client', phone_e164: '+1' },
       jwt: 'jwt',
-      refreshToken: 'rt',
     });
     useAuthStore.getState().signOut();
     const state = useAuthStore.getState();
     expect(state.user).toBeNull();
     expect(state.jwt).toBeNull();
-    expect(state.refreshToken).toBeNull();
   });
 
-  it('silentRefresh is a no-op when no refreshToken', async () => {
-    await useAuthStore.getState().silentRefresh();
-    expect(fetch).not.toHaveBeenCalled();
-  });
-
-  it('silentRefresh updates state on successful refresh', async () => {
-    useAuthStore.setState({ refreshToken: 'old-rt' });
+  it('silentRefresh sends no body (relies on cookie)', async () => {
     vi.mocked(fetch).mockResolvedValue({
       ok: true,
-      json: () =>
-        Promise.resolve({
-          access_token: 'new-jwt',
-          refresh_token: 'new-rt',
-          user: { id: 'u1', role: 'client', phone_e164: '+1' },
-        }),
+      json: () => Promise.resolve({ access_token: 'new-jwt', user: { id: 'u1', role: 'client', phone_e164: '+1' } }),
+    } as Response);
+
+    await useAuthStore.getState().silentRefresh();
+
+    expect(fetch).toHaveBeenCalledWith(
+      expect.stringContaining('/v1/auth/refresh'),
+      expect.objectContaining({ method: 'POST', credentials: 'include' }),
+    );
+    const callArg = vi.mocked(fetch).mock.calls[0][1] as RequestInit;
+    expect(callArg.body).toBeUndefined();
+  });
+
+  it('silentRefresh updates jwt and user on successful refresh', async () => {
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ access_token: 'new-jwt', user: { id: 'u1', role: 'client', phone_e164: '+1' } }),
     } as Response);
 
     await useAuthStore.getState().silentRefresh();
 
     const state = useAuthStore.getState();
     expect(state.jwt).toBe('new-jwt');
-    expect(state.refreshToken).toBe('new-rt');
     expect(state.user?.id).toBe('u1');
   });
 
@@ -62,7 +63,6 @@ describe('useAuthStore', () => {
     useAuthStore.setState({
       user: { id: 'u1', role: 'client', phone_e164: '+1' },
       jwt: 'old-jwt',
-      refreshToken: 'bad-rt',
     });
     vi.mocked(fetch).mockResolvedValue({ ok: false } as Response);
 
@@ -71,11 +71,10 @@ describe('useAuthStore', () => {
     const state = useAuthStore.getState();
     expect(state.jwt).toBeNull();
     expect(state.user).toBeNull();
-    expect(state.refreshToken).toBeNull();
   });
 
   it('silentRefresh clears state when fetch throws', async () => {
-    useAuthStore.setState({ refreshToken: 'rt', jwt: 'jwt' });
+    useAuthStore.setState({ jwt: 'jwt', user: { id: 'u1', role: 'client', phone_e164: '+1' } });
     vi.mocked(fetch).mockRejectedValue(new Error('network error'));
 
     await useAuthStore.getState().silentRefresh();

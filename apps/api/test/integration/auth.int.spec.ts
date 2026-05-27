@@ -73,11 +73,21 @@ describe.skipIf(skip)('auth integration', () => {
     expect(res.body.access_token).toBeTruthy();
     expect(res.body.token_type).toBe('bearer');
     expect(res.body.expires_in).toBe(900);
-    expect(res.body.refresh_token).toMatch(/^[0-9a-f-]{36}$/);
+    expect(res.body.refresh_token).toBeUndefined(); // moved to HttpOnly cookie
     expect(res.body.user.phone_e164).toBe('+12025550001');
     expect(res.body.user.role).toBe('client');
 
-    // verify rows in DB
+    // cookie must be set
+    const setCookie = res.headers['set-cookie'] as string[] | string;
+    const cookieStr = Array.isArray(setCookie) ? setCookie.join('; ') : setCookie;
+    expect(cookieStr).toMatch(/refresh_token=/);
+    expect(cookieStr).toMatch(/HttpOnly/i);
+
+    // extract token from cookie and verify DB row
+    const rtMatch = cookieStr.match(/refresh_token=([^;]+)/);
+    const refreshToken = rtMatch?.[1];
+    expect(refreshToken).toBeTruthy();
+
     const userRows = await pool.query(
       "SELECT id, role, phone_e164, firebase_uid FROM app_user WHERE firebase_uid = 'test-uid-001'",
     );
@@ -86,7 +96,7 @@ describe.skipIf(skip)('auth integration', () => {
 
     const tokenRows = await pool.query(
       'SELECT user_id FROM auth_refresh_token WHERE token = $1',
-      [res.body.refresh_token],
+      [refreshToken],
     );
     expect(tokenRows.rows).toHaveLength(1);
     expect(tokenRows.rows[0].user_id).toBe(userRows.rows[0].id);

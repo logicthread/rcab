@@ -71,6 +71,7 @@ export default function SignInPage() {
       const res = await fetch(`${API_BASE}/v1/auth/firebase-exchange`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ id_token: firebaseIdToken }),
       });
 
@@ -80,11 +81,10 @@ export default function SignInPage() {
 
       const data = (await res.json()) as {
         access_token: string;
-        refresh_token: string;
         user: AuthUser;
       };
 
-      setAuth(data.user, data.access_token, data.refresh_token);
+      setAuth(data.user, data.access_token);
       router.replace('/book');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Invalid OTP');

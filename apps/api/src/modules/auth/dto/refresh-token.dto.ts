@@ -1,7 +1,8 @@
-import { IsString, IsNotEmpty } from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional } from 'class-validator';
 
 export class RefreshTokenDto {
+  @IsOptional()
   @IsString()
   @IsNotEmpty()
-  refresh_token!: string;
+  refresh_token?: string;
 }

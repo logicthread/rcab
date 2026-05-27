@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import { Test } from '@nestjs/testing';
 import type { INestApplication } from '@nestjs/common';
 import { Pool } from 'pg';
+import cookieParser from 'cookie-parser';
 import supertest from 'supertest';
 import { AppModule } from '../../src/app.module';
 import { PG_POOL } from '../../src/infra/db/drizzle.module';
@@ -24,6 +25,14 @@ function makeDecodedToken(overrides: Partial<auth.DecodedIdToken> = {}): auth.De
     firebase: { identities: {}, sign_in_provider: 'phone' },
     ...overrides,
   } as auth.DecodedIdToken;
+}
+
+function extractCookieToken(headers: Record<string, string | string[]>): string {
+  const setCookie = headers['set-cookie'] as string[] | string;
+  const cookieStr = Array.isArray(setCookie) ? setCookie.join('; ') : (setCookie ?? '');
+  const match = cookieStr.match(/refresh_token=([^;]+)/);
+  if (!match?.[1]) throw new Error('refresh_token cookie not found in response');
+  return match[1];
 }
 
 describe.skipIf(skip)('jwt refresh + revocation integration', () => {
@@ -49,6 +58,7 @@ describe.skipIf(skip)('jwt refresh + revocation integration', () => {
       .compile();
 
     app = moduleRef.createNestApplication();
+    app.use(cookieParser());
     await app.init();
   });
 
@@ -62,19 +72,21 @@ describe.skipIf(skip)('jwt refresh + revocation integration', () => {
     const server = app.getHttpServer();
     mockFirebase.verifyIdToken.mockResolvedValue(makeDecodedToken());
 
-    // Step 1: exchange Firebase token → get initial tokens
+    // Step 1: exchange → JWT in body, refresh token in cookie
     const exchange = await supertest(server)
       .post('/v1/auth/firebase-exchange')
       .send({ id_token: 'firebase-token' });
     expect(exchange.status).toBe(201);
-    const { access_token: jwt1, refresh_token: rt1 } = exchange.body;
+    const { access_token: jwt1 } = exchange.body;
+    const rt1 = extractCookieToken(exchange.headers as Record<string, string | string[]>);
 
-    // Step 2: refresh with rt1 → get new JWT + rt2, rt1 is now revoked
+    // Step 2: refresh with rt1 body → get new JWT + rt2 cookie, rt1 is now revoked
     const refresh1 = await supertest(server)
       .post('/v1/auth/refresh')
       .send({ refresh_token: rt1 });
     expect(refresh1.status).toBe(201);
-    const { access_token: jwt2, refresh_token: rt2 } = refresh1.body;
+    const { access_token: jwt2 } = refresh1.body;
+    const rt2 = extractCookieToken(refresh1.headers as Record<string, string | string[]>);
     expect(jwt2).toBeTruthy();
     expect(rt2).not.toBe(rt1);
 
@@ -90,7 +102,7 @@ describe.skipIf(skip)('jwt refresh + revocation integration', () => {
       .post('/v1/auth/refresh')
       .send({ refresh_token: rt2 });
     expect(refresh2.status).toBe(201);
-    const { refresh_token: rt3 } = refresh2.body;
+    const rt3 = extractCookieToken(refresh2.headers as Record<string, string | string[]>);
 
     // Step 4: logout using rt3 (authenticated with jwt2)
     const logout = await supertest(server)
@@ -124,11 +136,12 @@ describe.skipIf(skip)('jwt refresh + revocation integration', () => {
     expect(res.status).toBe(401);
   });
 
-  it('returns 400 when refresh_token body field is missing', async () => {
+  it('returns 401 when neither body nor cookie provides a refresh token', async () => {
     const res = await supertest(app.getHttpServer())
       .post('/v1/auth/refresh')
       .send({});
 
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(401);
+    expect(res.body.error?.code).toBe('invalid_refresh_token');
   });
 });
