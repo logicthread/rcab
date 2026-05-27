@@ -1,7 +1,7 @@
 ---
 title: RCAB-E2.S5 — Refresh-token cookie + CSRF posture
 tags: [layer/delivery, kind/story]
-status: in_progress
+status: done
 phase: 0
 epic: [[epic-e2-auth]]
 demo: 1
