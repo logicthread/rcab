@@ -22,6 +22,19 @@ audience: both
 | E2E | Playwright | web flows |
 | Load | k6 | dispatch path, quote path, peak driver-online concurrency |
 
+### Auth integration test suite (reference implementation)
+
+`apps/api/test/integration/auth.int.spec.ts` — 36 tests, single Testcontainers Postgres, `singleFork` pool.
+
+Patterns established here should be reused across future integration suites:
+
+- **Shared app per file:** one `beforeAll` builds the NestJS app; all `describe` blocks share it.
+- **Provider overrides:** `overrideProvider(FirebaseAdminService)`, `overrideProvider(GoogleVerifierService)`, `overrideProvider(REDIS)` with `vi.fn()` mocks; `overrideProvider(PG_POOL)` with a real test pool.
+- **Guard override for throttle:** `overrideGuard(ThrottlerGuard).useValue({ canActivate: () => true })` prevents in-memory rate-limit state from bleeding across tests. The dedicated `rate limiting` describe block spins its own app instance (no override) to test throttle behaviour in isolation.
+- **Cookie lifecycle:** use `supertest.agent(app.getHttpServer())` to carry cookies across requests in the same chain.
+- **Helpers:** `createTestUser(pool, phone)` seeds via raw SQL; `extractCookieToken(headers)` pulls the `refresh_token` from `Set-Cookie`.
+- **Expired JWTs:** `moduleRef.get(JwtService).sign({...}, { expiresIn: -1 })` — no direct `jsonwebtoken` dependency in tests.
+
 ### Required coverage
 
 - 100% of state-machine transitions (positive and negative).
