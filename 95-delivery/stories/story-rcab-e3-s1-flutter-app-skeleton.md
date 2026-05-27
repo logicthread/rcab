@@ -1,7 +1,7 @@
 ---
 title: RCAB-E3.S1 — Flutter app skeleton: routing, theme, Riverpod, dio + refresh
 tags: [layer/delivery, kind/story]
-status: in_progress
+status: done
 phase: 0
 epic: [[epic-e3-driver-presence]]
 demo: 2

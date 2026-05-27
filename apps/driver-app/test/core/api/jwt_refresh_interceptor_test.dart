@@ -72,25 +72,6 @@ class _FakeTokenStore extends TokenStore {
 
 const _baseUrl = 'https://api.test.local';
 
-/// Builds a main + refresh dio pair both controlled by fake adapters.
-({Dio main, Dio refresh}) _buildPair({
-  required _Handler mainHandler,
-  required _Handler refreshHandler,
-}) {
-  final refreshDio = Dio(BaseOptions(baseUrl: _baseUrl))
-    ..httpClientAdapter = _FakeAdapter(refreshHandler);
-
-  final mainDio = buildApiClient(
-    baseUrl: _baseUrl,
-    tokenStore: _FakeTokenStore(jwt: 'old.jwt', refresh: 'old-refresh'),
-    onSignOut: () async {},
-    enableLogging: false,
-    refreshDio: refreshDio,
-  )..httpClientAdapter = _FakeAdapter(mainHandler);
-
-  return (main: mainDio, refresh: refreshDio);
-}
-
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -143,7 +124,6 @@ void main() {
         () async {
       final store = _FakeTokenStore(jwt: 'old.jwt', refresh: 'old-refresh');
       final signOutCalls = <String>[];
-      var mainCallCount = 0;
 
       final refreshDio = Dio(BaseOptions(baseUrl: _baseUrl))
         ..httpClientAdapter = _FakeAdapter((opts) {
@@ -153,8 +133,7 @@ void main() {
               'refresh_token': 'new-refresh',
             });
           }
-          // Retry of the original request goes through _refreshDio.
-          mainCallCount++;
+          // Retry of the original request routes through _refreshDio.
           return _json(200, {'data': 'ok'});
         });
 
@@ -164,11 +143,10 @@ void main() {
         onSignOut: () async => signOutCalls.add('signOut'),
         enableLogging: false,
         refreshDio: refreshDio,
-      )..httpClientAdapter = _FakeAdapter((_) {
-          mainCallCount++;
+      )..httpClientAdapter = _FakeAdapter(
           // Original request always returns 401 to trigger refresh.
-          return _json(401, {'error': 'expired'});
-        });
+          (_) => _json(401, {'error': 'expired'}),
+        );
 
       final response = await mainDio.get<dynamic>('/v1/drivers/me');
 
