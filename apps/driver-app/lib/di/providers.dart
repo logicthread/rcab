@@ -6,6 +6,7 @@ import '../core/auth/auth_notifier.dart';
 import '../core/auth/auth_state.dart';
 import '../core/auth/token_store.dart';
 import '../core/api/api_client.dart';
+import '../features/profile/models/vehicle.dart';
 
 // ── Token store ───────────────────────────────────────────────────────────────
 
@@ -59,4 +60,14 @@ final authProvider = StateNotifierProvider<AuthNotifier, AuthState>((ref) {
     ref.read(firebaseAuthProvider),
     ref.read(_exchangeDioProvider),
   );
+});
+
+// ── Vehicles ──────────────────────────────────────────────────────────────────
+
+final vehiclesProvider = FutureProvider<List<Vehicle>>((ref) async {
+  final dio = ref.read(apiClientProvider);
+  final res = await dio.get<List<dynamic>>('/v1/vehicles');
+  return (res.data ?? [])
+      .map((e) => Vehicle.fromJson(e as Map<String, dynamic>))
+      .toList();
 });

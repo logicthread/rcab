@@ -10,6 +10,7 @@ import '../features/offer/offer_screen.dart';
 import '../features/ride/ride_screen.dart';
 import '../features/earnings/earnings_screen.dart';
 import '../features/profile/profile_screen.dart';
+import '../features/profile/vehicle_form_screen.dart';
 
 final routerProvider = Provider<GoRouter>((ref) {
   final refreshNotifier = _RouterRefreshNotifier(ref);
@@ -52,6 +53,12 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/profile',
         builder: (_, __) => const ProfileScreen(),
+        routes: [
+          GoRoute(
+            path: 'vehicle/add',
+            builder: (_, __) => const VehicleFormScreen(),
+          ),
+        ],
       ),
     ],
   );

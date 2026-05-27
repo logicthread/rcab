@@ -8,6 +8,8 @@ import { FirebaseModule } from './infra/firebase/firebase.module';
 import { GoogleModule } from './infra/google/google.module';
 import { HealthModule } from './modules/health/health.module';
 import { AuthModule } from './modules/auth/auth.module';
+import { VehiclesModule } from './modules/vehicles/vehicles.module';
+import { DriversModule } from './modules/drivers/drivers.module';
 import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
 import { MetricsMiddleware } from './common/middleware/metrics.middleware';
 import { AppExceptionFilter } from './common/filters/app-exception.filter';
@@ -21,6 +23,8 @@ import { AppExceptionFilter } from './common/filters/app-exception.filter';
     GoogleModule,
     HealthModule,
     AuthModule,
+    VehiclesModule,
+    DriversModule,
   ],
   providers: [
     { provide: APP_FILTER, useClass: AppExceptionFilter },
