@@ -1,9 +1,10 @@
-import { Injectable, UnauthorizedException, Inject } from '@nestjs/common';
+import { Injectable, UnauthorizedException, ConflictException, Inject } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { randomUUID } from 'node:crypto';
 import type { Pool } from 'pg';
 import { PG_POOL } from '../../infra/db/drizzle.module';
 import { FirebaseAdminService } from '../../infra/firebase/firebase-admin.service';
+import { GoogleVerifierService } from '../../infra/google/google-verifier.service';
 
 const PHONE_E164_RE = /^\+[1-9]\d{7,14}$/;
 const REFRESH_TTL_MS = 30 * 24 * 60 * 60 * 1000;
@@ -28,6 +29,7 @@ export interface TokenResponse {
 export class AuthService {
   constructor(
     private firebase: FirebaseAdminService,
+    private google: GoogleVerifierService,
     private jwt: JwtService,
     @Inject(PG_POOL) private pool: Pool,
   ) {}
@@ -142,6 +144,56 @@ export class AuthService {
       'UPDATE auth_refresh_token SET revoked_at = now() WHERE token = $1 AND user_id = $2 AND revoked_at IS NULL',
       [refreshToken, userId],
     );
+  }
+
+  async linkGoogle(userId: string, googleIdToken: string): Promise<void> {
+    const { sub, email } = await this.google.verifyIdToken(googleIdToken);
+
+    // Check if this google_sub is already linked to a different user
+    const existing = await this.pool.query<{ user_id: string }>(
+      'SELECT id AS user_id FROM app_user WHERE google_sub = $1',
+      [sub],
+    );
+    if (existing.rows.length > 0 && existing.rows[0].user_id !== userId) {
+      throw new ConflictException({ code: 'google_already_linked', message: 'Google account linked to another user' });
+    }
+
+    // Idempotent upsert — already linked to this user is a no-op
+    await this.pool.query(
+      'UPDATE app_user SET google_sub = $1, email = $2 WHERE id = $3',
+      [sub, email, userId],
+    );
+  }
+
+  async loginWithGoogle(googleIdToken: string): Promise<TokenResponse> {
+    const { sub } = await this.google.verifyIdToken(googleIdToken);
+
+    const result = await this.pool.query<{ id: string; role: string; phone_e164: string }>(
+      'SELECT id, role, phone_e164 FROM app_user WHERE google_sub = $1',
+      [sub],
+    );
+
+    if (result.rows.length === 0) {
+      throw new UnauthorizedException({ code: 'not_found', message: 'No account linked to this Google identity' });
+    }
+
+    const user = result.rows[0];
+    const accessToken = this.jwt.sign({ sub: user.id, role: user.role, auth_method: 'google' });
+
+    const refreshToken = randomUUID();
+    const expiresAt = new Date(Date.now() + REFRESH_TTL_MS);
+    await this.pool.query(
+      'INSERT INTO auth_refresh_token (token, user_id, expires_at) VALUES ($1, $2, $3)',
+      [refreshToken, user.id, expiresAt],
+    );
+
+    return {
+      access_token: accessToken,
+      token_type: 'bearer',
+      expires_in: 900,
+      refresh_token: refreshToken,
+      user: { id: user.id, role: user.role, phone_e164: user.phone_e164 },
+    };
   }
 
   private async findOrCreateUser(

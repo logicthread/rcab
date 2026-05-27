@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { UnauthorizedException } from '@nestjs/common';
+import { UnauthorizedException, ConflictException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { AuthService } from './auth.service';
 import { FirebaseAdminService } from '../../infra/firebase/firebase-admin.service';
+import { GoogleVerifierService } from '../../infra/google/google-verifier.service';
 import type { auth } from 'firebase-admin';
 
 function makeDecodedToken(overrides: Partial<auth.DecodedIdToken> = {}): auth.DecodedIdToken {
@@ -23,6 +24,7 @@ function makeDecodedToken(overrides: Partial<auth.DecodedIdToken> = {}): auth.De
 describe('AuthService', () => {
   let service: AuthService;
   let mockFirebase: FirebaseAdminService;
+  let mockGoogle: GoogleVerifierService;
   let mockJwt: JwtService;
   let mockPoolQuery: ReturnType<typeof vi.fn>;
   let mockClientQuery: ReturnType<typeof vi.fn>;
@@ -37,6 +39,10 @@ describe('AuthService', () => {
       verifyIdToken: vi.fn(),
     } as unknown as FirebaseAdminService;
 
+    mockGoogle = {
+      verifyIdToken: vi.fn(),
+    } as unknown as GoogleVerifierService;
+
     mockJwt = {
       sign: vi.fn().mockReturnValue('signed-jwt'),
     } as unknown as JwtService;
@@ -49,7 +55,7 @@ describe('AuthService', () => {
       }),
     };
 
-    service = new AuthService(mockFirebase, mockJwt, mockPool as any);
+    service = new AuthService(mockFirebase, mockGoogle, mockJwt, mockPool as unknown as import('pg').Pool);
   });
 
   describe('exchangeFirebaseToken', () => {
@@ -239,6 +245,89 @@ describe('AuthService', () => {
       mockPoolQuery.mockResolvedValueOnce({ rowCount: 0 });
 
       await expect(service.revoke('nonexistent-token', 'user-abc')).resolves.toBeUndefined();
+    });
+  });
+
+  describe('linkGoogle', () => {
+    const googlePayload = { sub: 'google-sub-123', email: 'user@example.com', email_verified: true };
+
+    it('sets google_sub and email on the user row', async () => {
+      vi.mocked(mockGoogle.verifyIdToken).mockResolvedValue(googlePayload);
+      mockPoolQuery
+        .mockResolvedValueOnce({ rows: [] }) // SELECT: google_sub not found
+        .mockResolvedValueOnce({ rowCount: 1 }); // UPDATE
+
+      await service.linkGoogle('user-abc', 'google-id-token');
+
+      expect(mockPoolQuery).toHaveBeenCalledWith(
+        expect.stringContaining('UPDATE app_user SET google_sub'),
+        ['google-sub-123', 'user@example.com', 'user-abc'],
+      );
+    });
+
+    it('is a no-op when google_sub is already linked to same user', async () => {
+      vi.mocked(mockGoogle.verifyIdToken).mockResolvedValue(googlePayload);
+      mockPoolQuery
+        .mockResolvedValueOnce({ rows: [{ user_id: 'user-abc' }] }) // SELECT: same user
+        .mockResolvedValueOnce({ rowCount: 1 }); // UPDATE
+
+      await expect(service.linkGoogle('user-abc', 'google-id-token')).resolves.toBeUndefined();
+    });
+
+    it('throws 409 when google_sub is linked to a different user', async () => {
+      vi.mocked(mockGoogle.verifyIdToken).mockResolvedValue(googlePayload);
+      mockPoolQuery.mockResolvedValueOnce({ rows: [{ user_id: 'other-user' }] });
+
+      await expect(service.linkGoogle('user-abc', 'google-id-token')).rejects.toThrow(
+        ConflictException,
+      );
+
+      try {
+        mockPoolQuery.mockResolvedValueOnce({ rows: [{ user_id: 'other-user' }] });
+        await service.linkGoogle('user-abc', 'google-id-token');
+      } catch (err) {
+        expect((err as ConflictException).getResponse()).toMatchObject({ code: 'google_already_linked' });
+      }
+    });
+
+    it('propagates token verification errors from GoogleVerifierService', async () => {
+      vi.mocked(mockGoogle.verifyIdToken).mockRejectedValue(
+        new UnauthorizedException({ code: 'invalid_google_token' }),
+      );
+
+      await expect(service.linkGoogle('user-abc', 'bad-token')).rejects.toThrow(
+        UnauthorizedException,
+      );
+    });
+  });
+
+  describe('loginWithGoogle', () => {
+    const googlePayload = { sub: 'google-sub-123', email: 'user@example.com', email_verified: true };
+
+    it('returns tokens when google_sub matches a user', async () => {
+      vi.mocked(mockGoogle.verifyIdToken).mockResolvedValue(googlePayload);
+      const user = { id: 'user-abc', role: 'client', phone_e164: '+12025551234' };
+      mockPoolQuery
+        .mockResolvedValueOnce({ rows: [user] }) // SELECT by google_sub
+        .mockResolvedValueOnce({ rows: [] }); // INSERT refresh token
+
+      const result = await service.loginWithGoogle('google-id-token');
+
+      expect(result.access_token).toBe('signed-jwt');
+      expect(result.refresh_token).toMatch(/^[0-9a-f-]{36}$/);
+      expect(result.user.id).toBe('user-abc');
+      expect(mockJwt.sign).toHaveBeenCalledWith(
+        expect.objectContaining({ sub: 'user-abc', auth_method: 'google' }),
+      );
+    });
+
+    it('throws 401 not_found when no account has that google_sub', async () => {
+      vi.mocked(mockGoogle.verifyIdToken).mockResolvedValue(googlePayload);
+      mockPoolQuery.mockResolvedValueOnce({ rows: [] });
+
+      await expect(service.loginWithGoogle('google-id-token')).rejects.toMatchObject({
+        response: { code: 'not_found' },
+      });
     });
   });
 });

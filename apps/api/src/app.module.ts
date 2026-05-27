@@ -5,6 +5,7 @@ import { ThrottlerModule } from '@nestjs/throttler';
 import { DrizzleModule } from './infra/db/drizzle.module';
 import { RedisModule } from './infra/redis/redis.module';
 import { FirebaseModule } from './infra/firebase/firebase.module';
+import { GoogleModule } from './infra/google/google.module';
 import { HealthModule } from './modules/health/health.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
@@ -17,6 +18,7 @@ import { AppExceptionFilter } from './common/filters/app-exception.filter';
     DrizzleModule,
     RedisModule,
     FirebaseModule,
+    GoogleModule,
     HealthModule,
     AuthModule,
   ],
