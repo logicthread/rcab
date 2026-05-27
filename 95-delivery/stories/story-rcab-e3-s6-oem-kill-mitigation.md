@@ -1,7 +1,7 @@
 ---
 title: RCAB-E3.S6 — OEM-kill mitigation onboarding
 tags: [layer/delivery, kind/story]
-status: ready
+status: done
 phase: 0
 epic: [[epic-e3-driver-presence]]
 demo: 2

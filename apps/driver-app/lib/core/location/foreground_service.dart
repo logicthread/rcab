@@ -58,6 +58,12 @@ class LocationTaskHandler extends TaskHandler {
   @override
   void onDestroy(DateTime timestamp, SendPort? sendPort) {
     lastEmitted = null;
+    // Best-effort: record kill time for the home-screen banner.
+    // May not fire on hard OS kills; the app-resume health check is the primary path.
+    FlutterForegroundTask.saveData(
+      key: 'last_service_kill_at',
+      value: DateTime.now().millisecondsSinceEpoch,
+    );
   }
 }
 

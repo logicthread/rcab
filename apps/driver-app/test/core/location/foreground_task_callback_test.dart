@@ -1,6 +1,7 @@
 import 'dart:isolate';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:driver_app/core/location/foreground_service.dart';
 
@@ -18,6 +19,11 @@ Position _pos(double lat, double lng) => Position.fromMap({
     });
 
 void main() {
+  // FlutterForegroundTask.saveData (called in onDestroy) uses SharedPreferences
+  // which requires the Flutter binding and a mock platform.
+  TestWidgetsFlutterBinding.ensureInitialized();
+  SharedPreferences.setMockInitialValues({});
+
   final now = DateTime.now();
 
   group('LocationTaskHandler — 10 m debounce', () {

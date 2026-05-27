@@ -56,7 +56,7 @@ audience: both
 | RCAB-E3.S3 | [[story-rcab-e3-s3-vehicle-registration]] — Vehicle registration screen + API | ■ |
 | RCAB-E3.S4 | [[story-rcab-e3-s4-driver-online-toggle]] — Online / offline toggle + foreground service | ■ |
 | RCAB-E3.S5 | [[story-rcab-e3-s5-location-streaming]] — Location streaming (WS) + Redis `GEOADD` | ■ |
-| RCAB-E3.S6 | [[story-rcab-e3-s6-oem-kill-mitigation]] — OEM-kill mitigation onboarding | □ |
+| RCAB-E3.S6 | [[story-rcab-e3-s6-oem-kill-mitigation]] — OEM-kill mitigation onboarding | ■ |
 
 ## E4 — Normal booking → Demo 3 · "Book a normal ride"
 *OSM picker, quote, request, top-K dispatch, ride lifecycle, rating prompt.* See [[epic-e4-normal-booking]].

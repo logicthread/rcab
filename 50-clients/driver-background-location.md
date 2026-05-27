@@ -46,10 +46,11 @@ Target: < 6% per hour at peak (on_ride). We hit this by:
 - Wake locks only when the WS or HTTP is actively sending.
 - Disabling sensor fusion features we don't need.
 
-## OEM kill mitigation
+## OEM kill mitigation (RCAB-E3.S6)
 
-- Display an onboarding step: "Add rcab to battery whitelist." Link to OS-specific settings via `permission_handler`.
-- Show a banner in the app if the service has been killed within 24 h.
+- One-time bottom sheet on first `goOnline()`: `showOemOnboardingIfNeeded()` gates on `SharedPreferences` key `oem_onboarding_shown`; "Open Settings" calls `Permission.ignoreBatteryOptimizations.request()` (triggers `ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`); "Skip" also sets the flag.
+- `ServiceKillBanner` (yellow `MaterialBanner` on `/home`) reads `last_service_kill_at` from `SharedPreferences`; shown if age < 24 h.
+- Kill detection: `LocationTaskHandler.onDestroy` writes `last_service_kill_at` via `FlutterForegroundTask.saveData` (best-effort — OS may not call on hard kill). Primary path: `HomeScreen` `WidgetsBindingObserver.didChangeAppLifecycleState` checks `FlutterForegroundTask.isRunningService` on resume and writes the timestamp if false while driver is online.
 
 ## See also
 - [[driver-flutter-structure]] · [[journey-driver-go-online]]
