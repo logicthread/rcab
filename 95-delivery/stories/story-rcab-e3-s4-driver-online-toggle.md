@@ -1,7 +1,7 @@
 ---
 title: RCAB-E3.S4 — Online / offline toggle + foreground service
 tags: [layer/delivery, kind/story]
-status: ready
+status: done
 phase: 0
 epic: [[epic-e3-driver-presence]]
 demo: 2

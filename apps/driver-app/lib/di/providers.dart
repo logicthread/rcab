@@ -6,6 +6,9 @@ import '../core/auth/auth_notifier.dart';
 import '../core/auth/auth_state.dart';
 import '../core/auth/token_store.dart';
 import '../core/api/api_client.dart';
+import '../core/driver/driver_state.dart';
+import '../core/driver/driver_state_notifier.dart';
+import '../core/location/foreground_service.dart';
 import '../features/profile/models/vehicle.dart';
 
 // ── Token store ───────────────────────────────────────────────────────────────
@@ -59,6 +62,22 @@ final authProvider = StateNotifierProvider<AuthNotifier, AuthState>((ref) {
     ref.read(tokenStoreProvider),
     ref.read(firebaseAuthProvider),
     ref.read(_exchangeDioProvider),
+  );
+});
+
+// ── Driver state ──────────────────────────────────────────────────────────────
+
+final _foregroundServiceProvider = Provider<ForegroundServiceManager>(
+  (_) => ForegroundServiceManager(),
+);
+
+final driverStateProvider =
+    StateNotifierProvider<DriverStateNotifier, DriverState>((ref) {
+  return DriverStateNotifier(
+    dio: ref.read(apiClientProvider),
+    apiBaseUrl: _kApiBaseUrl,
+    tokenStore: ref.read(tokenStoreProvider),
+    foregroundService: ref.read(_foregroundServiceProvider),
   );
 });
 
