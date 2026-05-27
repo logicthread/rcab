@@ -5,6 +5,7 @@ import 'package:socket_io_client/socket_io_client.dart' as io;
 
 import '../auth/token_store.dart';
 import '../location/foreground_service.dart';
+import '../realtime/location_bridge.dart';
 import 'driver_state.dart';
 
 class DriverStateNotifier extends StateNotifier<DriverState> {
@@ -13,12 +14,14 @@ class DriverStateNotifier extends StateNotifier<DriverState> {
     required String apiBaseUrl,
     required TokenStore tokenStore,
     required ForegroundServiceManager foregroundService,
+    LocationBridge? locationBridge,
     String? currentVehicleId,
     DriverState? initialState,
   })  : _dio = dio,
         _apiBaseUrl = apiBaseUrl,
         _tokenStore = tokenStore,
         _foregroundService = foregroundService,
+        _locationBridge = locationBridge ?? LocationBridge(),
         _currentVehicleId = currentVehicleId,
         super(initialState ?? const DriverOffline());
 
@@ -26,6 +29,7 @@ class DriverStateNotifier extends StateNotifier<DriverState> {
   final String _apiBaseUrl;
   final TokenStore _tokenStore;
   final ForegroundServiceManager _foregroundService;
+  final LocationBridge _locationBridge;
   String? _currentVehicleId;
   io.Socket? _socket;
 
@@ -82,6 +86,8 @@ class DriverStateNotifier extends StateNotifier<DriverState> {
     )
       ..on('force_offline', (_) => _onForceOffline())
       ..connect();
+
+    _locationBridge.start((data) => _socket?.emit('driver:location', data));
   }
 
   void _onForceOffline() {
@@ -92,6 +98,7 @@ class DriverStateNotifier extends StateNotifier<DriverState> {
   void simulateForceOffline() => _onForceOffline();
 
   Future<void> _stopLocal() async {
+    _locationBridge.stop();
     _socket?.disconnect();
     _socket?.dispose();
     _socket = null;

@@ -31,6 +31,13 @@ Android aggressively kills regular background work, especially on OEM ROMs (Xiao
 
 We **also** debounce: skip sending if movement < 10 m since last sample (still update local UI).
 
+## Implementation (RCAB-E3.S5)
+
+- `LocationTaskHandler` (in `lib/core/location/foreground_service.dart`) handles the 5 s tick: calls `Geolocator.getCurrentPosition(medium)`, measures `Geolocator.distanceBetween()` against `lastEmitted`, skips if < 10 m, otherwise calls `sendPort?.send({lat, lng, heading, speed})`.
+- `LocationBridge` (in `lib/core/realtime/location_bridge.dart`) listens on `FlutterForegroundTask.receivePort` in the main isolate and forwards each location map to `socket.emit('driver:location', ...)`.
+- Server-side 3 s throttle in `RealtimeGateway.handleDriverLocation` deduplicates bursts.
+- `locationStreamProvider` (`StreamProvider<Position>`) wraps `Geolocator.getPositionStream()` for future UI map dot (not the WS path).
+
 ## Battery budget
 
 Target: < 6% per hour at peak (on_ride). We hit this by:

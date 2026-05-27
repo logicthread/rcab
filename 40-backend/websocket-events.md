@@ -30,6 +30,7 @@ On connect, server places the socket in personal + role rooms:
 ### Driver
 | Event | Payload | When |
 |---|---|---|
+| `driver_state` | `{ availability, current_ride_id }` | Replayed to driver on WS reconnect (from `driver:state:<id>` Redis hash) |
 | `ride_offer` | `{ offer_id, request, ttl_ms, pickup, fare_est, est_pickup_eta_s }` | Top-K dispatch reaches this driver |
 | `ride_offer_revoked` | `{ offer_id, reason }` | Someone else accepted / client canceled |
 | `ride_state_changed` | `{ ride_id, state, by }` | Any state transition |

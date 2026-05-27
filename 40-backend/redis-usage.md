@@ -16,8 +16,8 @@ audience: both
 
 | Key | Type | Purpose | TTL |
 |---|---|---|---|
-| `active_drivers` | GEO | online drivers' positions; queried for dispatch | none — entries `ZREM`ed on offline |
-| `driver:state:<id>` | HASH | `{availability, last_seen, current_ride_id}` | none |
+| `active_drivers` | GEO | online drivers' positions; `GEOADD` on goOnline and each accepted `driver:location` WS event; `ZREM` on offline | none |
+| `driver:state:<id>` | HASH | `{availability, last_seen, current_ride_id}`; `last_seen` updated by goOnline and by each accepted location event; read on WS reconnect for state replay | none |
 | `offer:<offer_id>` | STRING (lock) | dispatch offer lock; first-to-set wins | 12s (`SET NX EX`) |
 | `offer:list:<request_id>` | SET | offer ids currently outstanding for a request | 5 min |
 | `request:<request_id>:dispatch` | HASH | retry counter, wave, last_tried_at | 10 min |

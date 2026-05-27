@@ -1,7 +1,7 @@
 ---
 title: RCAB-E3.S5 — Location streaming (WS) + Redis GEOADD
 tags: [layer/delivery, kind/story]
-status: ready
+status: done
 phase: 0
 epic: [[epic-e3-driver-presence]]
 demo: 2

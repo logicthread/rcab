@@ -4,6 +4,9 @@ import {
   OnGatewayInit,
   OnGatewayConnection,
   OnGatewayDisconnect,
+  SubscribeMessage,
+  MessageBody,
+  ConnectedSocket,
 } from '@nestjs/websockets';
 import { Inject, Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
@@ -14,12 +17,21 @@ import { REDIS } from '../../infra/redis/redis.module';
 import { RealtimeBus } from './realtime.bus';
 import type { JwtPayload } from '../../common/guards/auth.guard';
 
+interface LocationPayload {
+  lat: number;
+  lng: number;
+  heading: number;
+  speed: number;
+}
+
 @WebSocketGateway({ cors: { origin: '*' }, transports: ['websocket'] })
 export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
   server!: Server;
 
   private readonly log = new Logger(RealtimeGateway.name);
+  private readonly _locationThrottle = new Map<string, number>();
+  private static readonly THROTTLE_MS = 3000;
 
   constructor(
     private jwt: JwtService,
@@ -49,6 +61,7 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
       void client.join(`user:${payload.sub}`);
       if (payload.role === 'driver') {
         void client.join(`driver:${payload.sub}`);
+        void this._replayDriverState(client, payload.sub);
       }
       this.log.debug(`WS connected: ${payload.sub} (${payload.role})`);
     } catch {
@@ -56,8 +69,35 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     }
   }
 
+  @SubscribeMessage('driver:location')
+  async handleDriverLocation(
+    @MessageBody() data: LocationPayload,
+    @ConnectedSocket() client: Socket,
+  ): Promise<void> {
+    const driverId = client.data.userId as string | undefined;
+    if (!driverId || client.data.role !== 'driver') return;
+
+    const now = Date.now();
+    const last = this._locationThrottle.get(driverId) ?? 0;
+    if (now - last < RealtimeGateway.THROTTLE_MS) return;
+
+    this._locationThrottle.set(driverId, now);
+    await Promise.all([
+      this.redis.geoadd('active_drivers', data.lng, data.lat, driverId),
+      this.redis.hset(`driver:state:${driverId}`, 'last_seen', String(now)),
+    ]);
+  }
+
   handleDisconnect(client: Socket): void {
     this.log.debug(`WS disconnected: ${client.data.userId as string | undefined ?? 'unknown'}`);
+  }
+
+  private async _replayDriverState(client: Socket, driverId: string): Promise<void> {
+    const availability = await this.redis.hget(`driver:state:${driverId}`, 'availability');
+    if (availability) {
+      const currentRideId = await this.redis.hget(`driver:state:${driverId}`, 'current_ride_id');
+      client.emit('driver_state', { availability, current_ride_id: currentRideId ?? null });
+    }
   }
 
   private _extractToken(client: Socket): string | null {

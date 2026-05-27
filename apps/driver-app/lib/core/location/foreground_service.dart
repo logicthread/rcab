@@ -1,22 +1,64 @@
 import 'dart:isolate';
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
+import 'package:geolocator/geolocator.dart';
 
-// Top-level task callback required by flutter_foreground_task.
-// Location streaming is wired in RCAB-E3.S5; this is a stub.
+// Allows test injection of a mock position getter.
+typedef GetPositionFn = Future<Position> Function();
+
+// Top-level entry point required by flutter_foreground_task (separate isolate).
 @pragma('vm:entry-point')
-void _taskCallback() {
-  FlutterForegroundTask.setTaskHandler(_StubTaskHandler());
+void startForegroundTask() {
+  FlutterForegroundTask.setTaskHandler(LocationTaskHandler());
 }
 
-class _StubTaskHandler extends TaskHandler {
+/// Exposed for testing via @visibleForTesting. Production code uses the
+/// top-level [startForegroundTask] callback which creates this class.
+@visibleForTesting
+class LocationTaskHandler extends TaskHandler {
+  static const double minMeters = 10.0;
+
+  Position? lastEmitted;
+
+  @visibleForTesting
+  GetPositionFn getPosition = () => Geolocator.getCurrentPosition(
+    desiredAccuracy: LocationAccuracy.medium,
+  );
+
   @override
   void onStart(DateTime timestamp, SendPort? sendPort) {}
 
   @override
-  void onRepeatEvent(DateTime timestamp, SendPort? sendPort) {}
+  Future<void> onRepeatEvent(DateTime timestamp, SendPort? sendPort) async {
+    Position pos;
+    try {
+      pos = await getPosition();
+    } catch (_) {
+      return;
+    }
+
+    final prev = lastEmitted;
+    if (prev != null) {
+      final dist = Geolocator.distanceBetween(
+        prev.latitude, prev.longitude,
+        pos.latitude, pos.longitude,
+      );
+      if (dist < minMeters) return;
+    }
+
+    lastEmitted = pos;
+    sendPort?.send({
+      'lat': pos.latitude,
+      'lng': pos.longitude,
+      'heading': pos.heading,
+      'speed': pos.speed,
+    });
+  }
 
   @override
-  void onDestroy(DateTime timestamp, SendPort? sendPort) {}
+  void onDestroy(DateTime timestamp, SendPort? sendPort) {
+    lastEmitted = null;
+  }
 }
 
 class ForegroundServiceManager {
@@ -42,7 +84,7 @@ class ForegroundServiceManager {
     await FlutterForegroundTask.startService(
       notificationTitle: 'rcab',
       notificationText: 'You are online',
-      callback: _taskCallback,
+      callback: startForegroundTask,
     );
   }
 

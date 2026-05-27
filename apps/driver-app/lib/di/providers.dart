@@ -1,6 +1,7 @@
 import 'package:dio/dio.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:geolocator/geolocator.dart';
 
 import '../core/auth/auth_notifier.dart';
 import '../core/auth/auth_state.dart';
@@ -78,6 +79,19 @@ final driverStateProvider =
     apiBaseUrl: _kApiBaseUrl,
     tokenStore: ref.read(tokenStoreProvider),
     foregroundService: ref.read(_foregroundServiceProvider),
+  );
+});
+
+// ── Location stream (local UI position dot) ───────────────────────────────────
+
+/// Wraps Geolocator.getPositionStream for UI widgets (e.g. future map dot).
+/// The foreground task uses one-shot getCurrentPosition to keep battery use deterministic.
+final locationStreamProvider = StreamProvider<Position>((ref) {
+  return Geolocator.getPositionStream(
+    locationSettings: const LocationSettings(
+      accuracy: LocationAccuracy.medium,
+      distanceFilter: 0,
+    ),
   );
 });
 
