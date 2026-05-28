@@ -1,7 +1,7 @@
 ---
 title: RCAB-E5.S2 — Matching service: slot vs. open decision
 tags: [layer/delivery, kind/story]
-status: in_progress
+status: done
 phase: 0
 epic: [[epic-e5-shared-booking]]
 demo: 4
