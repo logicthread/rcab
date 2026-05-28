@@ -25,8 +25,11 @@ audience: both
   - `scoreRoutes(a: RouteInput, b: RouteInput): Promise<number>` — Phase-0 Fréchet-lite score
   - `RouteInput = { originLat, originLng, destLat, destLng }`
   - `OsrmUnavailableException` thrown on OSRM error
-- `MatchingService` ← E5.S2
-  - `placeShared(requestId): { mode: 'slotted', sharedRideId } | { mode: 'opened', sharedRideId }`
+- `MatchingService` ← **implemented (E5.S2)**
+  - `findOrCreatePool(request: SharedRideRequest): Promise<MatchResult>`
+  - Decision: spatial pre-filter (1500 m) → score (≥ 0.7) → detour check (≤ 800 m) → best composite → Lua slot
+- `SharedRideRepository` ← **implemented (E5.S2)**
+  - `findCandidates`, `create`, `incrementSeats`
 
 ## Persistence
 
@@ -36,7 +39,7 @@ audience: both
 
 - Unit: route-similarity scoring with mocked HttpService + Redis (E5.S1 — 7 tests).
 - Integration: real Redis via Testcontainers; cache-hit verification (E5.S1 — 2 tests).
-- Integration (E5.S2+): slot vs. open decisions under simulated load.
+- Integration (E5.S2): Testcontainers Postgres+Redis — slot into seeded pool, seat_count in DB, open when all full (3 tests).
 
 ## See also
 - [[algo-shared-ride-matching]] · [[algo-route-similarity]]
