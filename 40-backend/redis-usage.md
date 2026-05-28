@@ -24,7 +24,7 @@ audience: both
 | `bull:scheduled-dispatch:*` | BullMQ keys | scheduled-booking jobs | per-job |
 | `socketio:*` | Socket.IO adapter | pub/sub for multi-node (kept since day 1) | n/a |
 | `cache:user:<id>:dashboard` | STRING JSON | client/driver dashboard read cache | 60s |
-| `route-cache:<origin_cell>:<dest_cell>` | STRING | OSRM-cached route polyline + distance | 1h |
+| `osrm:poly:<orig_geohash7>:<dest_geohash7>` | STRING JSON | OSRM polyline coords for a single O→D pair; used by `RouteSimilarityService` (E5.S1) | 1h |
 
 ## Lua scripts
 

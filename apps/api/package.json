@@ -11,7 +11,9 @@
     "lint": "eslint src/"
   },
   "dependencies": {
+    "@nestjs/axios": "^4.0.1",
     "@nestjs/common": "^10.4.22",
+    "@nestjs/config": "^4.0.4",
     "@nestjs/core": "^10.4.22",
     "@nestjs/jwt": "^10.2.0",
     "@nestjs/platform-express": "^10.4.22",
@@ -21,6 +23,7 @@
     "@nestjs/websockets": "^11.1.24",
     "@rcab/shared": "workspace:*",
     "@socket.io/redis-adapter": "^8.3.0",
+    "axios": "^1.16.1",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.15.1",
     "cookie-parser": "^1.4.7",
