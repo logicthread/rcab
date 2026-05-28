@@ -28,6 +28,21 @@ pipeline {
         stage('Unit tests') {
             steps {
                 sh 'pnpm test'
+                sh 'pnpm test:probe'
+            }
+        }
+
+        stage('System probe smoke') {
+            steps {
+                // Non-interactive: no installs, no k6, emits host + dep report only
+                sh 'pnpm system:probe --ci'
+                sh 'test -f system-probe-report.json'
+                sh 'node -e "const r = JSON.parse(require(\'fs\').readFileSync(\'system-probe-report.json\')); if (!r.host) process.exit(1);"'
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: 'system-probe-report.json', allowEmptyArchive: true
+                }
             }
         }
 

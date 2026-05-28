@@ -16,7 +16,7 @@ audience: both
 
 | Provider | Type | Responsibility |
 |---|---|---|
-| `authProvider` | `StateNotifier<AuthState>` | tokens, refresh, sign-out |
+| `authProvider` | `StateNotifier<AuthState>` | tokens, Firebase OTP exchange, sign-out, session restore |
 | `socketProvider` | `Provider<SocketClient>` | lazy WS connection, auto-reconnect |
 | `locationStreamProvider` | `StreamProvider<Position>` | from the foreground location service |
 | `driverStateProvider` | `StateNotifier<DriverState>` | offline / online / on_ride |

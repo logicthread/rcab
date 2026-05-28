@@ -39,7 +39,9 @@ The Phase-0 target is "single VPS, vertical scaling." The single most important 
 
 ## The capacity model
 
-For each measured path, the probe records the per-request CPU-ms and the per-request memory delta. Given a target CPU and memory budget (defaults: 70% sustained CPU, 70% RAM), it extrapolates to a sustainable RPS and converts via expected per-user request rates (in [[performance-budget]]) into a concurrent-active-user count.
+For each measured path the probe records **p95 latency, sustained RPS, and error rate** (via k6). Given the measured RPS achieved while staying within the [[performance-budget]] latency thresholds, it extrapolates a sustainable request rate and converts via expected per-user request rates into a concurrent-active-user count.
+
+> **Implementation note (E1.S9):** k6 measures client-side latency and throughput, not server-side CPU or RAM burn. A future iteration (post-E4, when real quote/dispatch routes exist) can layer in Prometheus scrapes of `/metrics` to add per-request CPU-ms and memory-delta tracking for a tighter model.
 
 Two numbers are reported:
 

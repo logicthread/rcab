@@ -31,6 +31,13 @@ Android aggressively kills regular background work, especially on OEM ROMs (Xiao
 
 We **also** debounce: skip sending if movement < 10 m since last sample (still update local UI).
 
+## Implementation (RCAB-E3.S5)
+
+- `LocationTaskHandler` (in `lib/core/location/foreground_service.dart`) handles the 5 s tick: calls `Geolocator.getCurrentPosition(medium)`, measures `Geolocator.distanceBetween()` against `lastEmitted`, skips if < 10 m, otherwise calls `sendPort?.send({lat, lng, heading, speed})`.
+- `LocationBridge` (in `lib/core/realtime/location_bridge.dart`) listens on `FlutterForegroundTask.receivePort` in the main isolate and forwards each location map to `socket.emit('driver:location', ...)`.
+- Server-side 3 s throttle in `RealtimeGateway.handleDriverLocation` deduplicates bursts.
+- `locationStreamProvider` (`StreamProvider<Position>`) wraps `Geolocator.getPositionStream()` for future UI map dot (not the WS path).
+
 ## Battery budget
 
 Target: < 6% per hour at peak (on_ride). We hit this by:
@@ -39,10 +46,11 @@ Target: < 6% per hour at peak (on_ride). We hit this by:
 - Wake locks only when the WS or HTTP is actively sending.
 - Disabling sensor fusion features we don't need.
 
-## OEM kill mitigation
+## OEM kill mitigation (RCAB-E3.S6)
 
-- Display an onboarding step: "Add rcab to battery whitelist." Link to OS-specific settings via `permission_handler`.
-- Show a banner in the app if the service has been killed within 24 h.
+- One-time bottom sheet on first `goOnline()`: `showOemOnboardingIfNeeded()` gates on `SharedPreferences` key `oem_onboarding_shown`; "Open Settings" calls `Permission.ignoreBatteryOptimizations.request()` (triggers `ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`); "Skip" also sets the flag.
+- `ServiceKillBanner` (yellow `MaterialBanner` on `/home`) reads `last_service_kill_at` from `SharedPreferences`; shown if age < 24 h.
+- Kill detection: `LocationTaskHandler.onDestroy` writes `last_service_kill_at` via `FlutterForegroundTask.saveData` (best-effort — OS may not call on hard kill). Primary path: `HomeScreen` `WidgetsBindingObserver.didChangeAppLifecycleState` checks `FlutterForegroundTask.isRunningService` on resume and writes the timestamp if false while driver is online.
 
 ## See also
 - [[driver-flutter-structure]] · [[journey-driver-go-online]]

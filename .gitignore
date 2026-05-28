@@ -51,6 +51,9 @@ coverage/
 **/android/.gradle/
 **/android/local.properties
 
+# Firebase secrets — never commit the real file; use *.example as the template
+apps/driver-app/android/app/google-services.json
+
 # Generated API client / migrations artifacts
 apps/*/src/generated/
 apps/api/migrations/*.snapshot

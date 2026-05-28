@@ -1,166 +1,122 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { createApp, type AppDeps } from './app';
-import type { AddressInfo } from 'node:net';
+import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
+import { Test } from '@nestjs/testing';
+import type { INestApplication } from '@nestjs/common';
+import supertest from 'supertest';
+import { AppModule } from './app.module';
+import { DRIZZLE_DB } from './infra/db/drizzle.module';
+import { FirebaseAdminService } from './infra/firebase/firebase-admin.service';
+import { HealthService } from './modules/health/health.service';
 
-const realFetch = globalThis.fetch;
+let app: INestApplication;
+let mockReadiness: ReturnType<typeof vi.fn>;
 
-function makeMockDeps(overrides: Partial<{
-  pgOk: boolean;
-  redisOk: boolean;
-  osrmOk: boolean;
-}> = {}): AppDeps {
-  const { pgOk = true, redisOk = true, osrmOk = true } = overrides;
-  return {
-    pool: {
-      query: pgOk
-        ? vi.fn().mockResolvedValue({ rows: [{ '?column?': 1 }] })
-        : vi.fn().mockRejectedValue(new Error('pg down')),
-    } as unknown as AppDeps['pool'],
-    redis: {
-      ping: redisOk
-        ? vi.fn().mockResolvedValue('PONG')
-        : vi.fn().mockRejectedValue(new Error('redis down')),
-    } as unknown as AppDeps['redis'],
-    osrmUrl: osrmOk ? 'http://osrm-mock:5000' : 'http://unreachable:9999',
+async function buildApp(): Promise<INestApplication> {
+  mockReadiness = vi.fn().mockResolvedValue({ ok: true, postgres: true, redis: true, osrm: true });
+
+  const mockHealth = {
+    liveness: vi.fn().mockReturnValue({ ok: true }),
+    readiness: mockReadiness,
   };
-}
 
-async function fetchFrom(
-  server: ReturnType<typeof createApp>,
-  path: string,
-  headers?: Record<string, string>,
-): Promise<{ status: number; body: Record<string, unknown>; headers: Headers }> {
-  const addr = server.address() as AddressInfo;
-  const res = await realFetch(`http://127.0.0.1:${addr.port}${path}`, { headers });
-  const body = await res.json() as Record<string, unknown>;
-  return { status: res.status, body, headers: res.headers };
+  const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
+    .overrideProvider(DRIZZLE_DB).useValue({})
+    .overrideProvider(HealthService).useValue(mockHealth)
+    .overrideProvider(FirebaseAdminService).useValue({ verifyIdToken: vi.fn() })
+    .compile();
+
+  const nestApp = moduleRef.createNestApplication();
+  await nestApp.init();
+  return nestApp;
 }
 
 describe('api app', () => {
+  beforeAll(async () => {
+    app = await buildApp();
+  });
+
+  afterAll(async () => {
+    await app?.close();
+    vi.unstubAllGlobals();
+  });
+
   beforeEach(() => {
+    mockReadiness.mockResolvedValue({ ok: true, postgres: true, redis: true, osrm: true });
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }));
   });
 
   afterEach(() => {
-    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   it('returns 200 from /v1/health/live regardless of dep state', async () => {
-    const server = createApp(makeMockDeps({ pgOk: false, redisOk: false })).listen(0);
-    try {
-      const { status, body } = await fetchFrom(server, '/v1/health/live');
-      expect(status).toBe(200);
-      expect(body).toEqual({ ok: true });
-    } finally {
-      server.close();
-    }
+    const res = await supertest(app.getHttpServer()).get('/v1/health/live');
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ ok: true });
   });
 
   it('returns 200 from /v1/health/ready when all deps are up', async () => {
-    const server = createApp(makeMockDeps()).listen(0);
-    try {
-      const { status, body } = await fetchFrom(server, '/v1/health/ready');
-      expect(status).toBe(200);
-      expect(body).toEqual({ ok: true, postgres: true, redis: true, osrm: true });
-    } finally {
-      server.close();
-    }
+    const res = await supertest(app.getHttpServer()).get('/v1/health/ready');
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ ok: true, postgres: true, redis: true, osrm: true });
   });
 
   it('returns 503 from /v1/health/ready when postgres is down', async () => {
-    const server = createApp(makeMockDeps({ pgOk: false })).listen(0);
-    try {
-      const { status, body } = await fetchFrom(server, '/v1/health/ready');
-      expect(status).toBe(503);
-      expect(body.ok).toBe(false);
-      expect(body.postgres).toBe(false);
-      expect(body.redis).toBe(true);
-    } finally {
-      server.close();
-    }
+    mockReadiness.mockResolvedValue({ ok: false, postgres: false, redis: true, osrm: true });
+
+    const res = await supertest(app.getHttpServer()).get('/v1/health/ready');
+    expect(res.status).toBe(503);
+    expect(res.body.ok).toBe(false);
+    expect(res.body.postgres).toBe(false);
+    expect(res.body.redis).toBe(true);
   });
 
   it('returns 503 from /v1/health/ready when redis is down', async () => {
-    const server = createApp(makeMockDeps({ redisOk: false })).listen(0);
-    try {
-      const { status, body } = await fetchFrom(server, '/v1/health/ready');
-      expect(status).toBe(503);
-      expect(body.ok).toBe(false);
-      expect(body.redis).toBe(false);
-      expect(body.postgres).toBe(true);
-    } finally {
-      server.close();
-    }
+    mockReadiness.mockResolvedValue({ ok: false, postgres: true, redis: false, osrm: true });
+
+    const res = await supertest(app.getHttpServer()).get('/v1/health/ready');
+    expect(res.status).toBe(503);
+    expect(res.body.ok).toBe(false);
+    expect(res.body.redis).toBe(false);
+    expect(res.body.postgres).toBe(true);
   });
 
   it('returns 503 from /v1/health/ready when osrm is down', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('fetch failed')));
-    const server = createApp(makeMockDeps({ osrmOk: false })).listen(0);
-    try {
-      const { status, body } = await fetchFrom(server, '/v1/health/ready');
-      expect(status).toBe(503);
-      expect(body.ok).toBe(false);
-      expect(body.osrm).toBe(false);
-    } finally {
-      server.close();
-    }
+    mockReadiness.mockResolvedValue({ ok: false, postgres: true, redis: true, osrm: false });
+
+    const res = await supertest(app.getHttpServer()).get('/v1/health/ready');
+    expect(res.status).toBe(503);
+    expect(res.body.ok).toBe(false);
+    expect(res.body.osrm).toBe(false);
   });
 
   it('returns 200 from / as alias for /v1/health/ready', async () => {
-    const server = createApp(makeMockDeps()).listen(0);
-    try {
-      const { status, body } = await fetchFrom(server, '/');
-      expect(status).toBe(200);
-      expect(body.ok).toBe(true);
-    } finally {
-      server.close();
-    }
+    const res = await supertest(app.getHttpServer()).get('/');
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
   });
 
   it('returns 404 for unknown routes', async () => {
-    const server = createApp(makeMockDeps()).listen(0);
-    try {
-      const { status, body } = await fetchFrom(server, '/no-such-thing');
-      expect(status).toBe(404);
-      expect(body).toEqual({ error: 'not_found' });
-    } finally {
-      server.close();
-    }
+    const res = await supertest(app.getHttpServer()).get('/no-such-thing');
+    expect(res.status).toBe(404);
+    expect(res.body.error?.code).toBe('not_found');
   });
 
   it('exposes /metrics with prometheus content-type', async () => {
-    const server = createApp(makeMockDeps()).listen(0);
-    try {
-      const addr = server.address() as AddressInfo;
-      const res = await realFetch(`http://127.0.0.1:${addr.port}/metrics`);
-      expect(res.status).toBe(200);
-      expect(res.headers.get('content-type')).toContain('text/plain');
-      const text = await res.text();
-      expect(text).toContain('http_request_duration_seconds');
-    } finally {
-      server.close();
-    }
+    const res = await supertest(app.getHttpServer()).get('/metrics');
+    expect(res.status).toBe(200);
+    expect(res.headers['content-type']).toContain('text/plain');
+    expect(res.text).toContain('http_request_duration_seconds');
   });
 
   it('sets x-request-id response header', async () => {
-    const server = createApp(makeMockDeps()).listen(0);
-    try {
-      const { headers } = await fetchFrom(server, '/v1/health/live');
-      expect(headers.get('x-request-id')).toBeTruthy();
-    } finally {
-      server.close();
-    }
+    const res = await supertest(app.getHttpServer()).get('/v1/health/live');
+    expect(res.headers['x-request-id']).toBeTruthy();
   });
 
   it('echoes x-request-id from client header', async () => {
-    const server = createApp(makeMockDeps()).listen(0);
-    try {
-      const { headers } = await fetchFrom(server, '/v1/health/live', {
-        'x-request-id': 'test-trace-123',
-      });
-      expect(headers.get('x-request-id')).toBe('test-trace-123');
-    } finally {
-      server.close();
-    }
+    const res = await supertest(app.getHttpServer())
+      .get('/v1/health/live')
+      .set('x-request-id', 'test-trace-123');
+    expect(res.headers['x-request-id']).toBe('test-trace-123');
   });
 });

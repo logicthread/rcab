@@ -32,31 +32,31 @@ audience: both
 | RCAB-E1.S6 | [[story-rcab-e1-s6-observability]] — Loki + Prometheus + Grafana + Uptime Kuma | ■ |
 | RCAB-E1.S7 | [[story-rcab-e1-s7-db-bootstrap]] — Postgres + Redis + OSRM containers, migration runner | ■ |
 | RCAB-E1.S8 | [[story-rcab-e1-s8-health-endpoints]] — `/v1/health/live`, `/v1/health/ready` | ■ |
-| RCAB-E1.S9 | [[story-rcab-e1-s9-system-probe]] — `pnpm system:probe` (host capability + load estimate) | □ |
+| RCAB-E1.S9 | [[story-rcab-e1-s9-system-probe]] — `pnpm system:probe` (host capability + load estimate) | ■ |
 
 ## E2 — Auth & Identity → Demo 1 · "I am a real user"
 *Firebase phone OTP, JWT issue/refresh, Google linking.* See [[epic-e2-auth]].
 
 | ID | Title | Status |
 |---|---|---|
-| RCAB-E2.S1 | OTP exchange endpoint + Firebase Admin verifier | · |
-| RCAB-E2.S2 | rcab JWT issue/refresh + revocation | · |
-| RCAB-E2.S3 | Web OTP flow (reCAPTCHA + signInWithPhoneNumber) | · |
-| RCAB-E2.S4 | Google link/login endpoints + ID-token verify | · |
-| RCAB-E2.S5 | Refresh-token cookie + CSRF posture | · |
-| RCAB-E2.S6 | Auth integration tests + negative cases | · |
+| RCAB-E2.S1 | [[story-rcab-e2-s1-otp-exchange]] — OTP exchange endpoint + Firebase Admin verifier | ■ |
+| RCAB-E2.S2 | [[story-rcab-e2-s2-jwt-refresh]] — rcab JWT issue/refresh + revocation | ■ |
+| RCAB-E2.S3 | [[story-rcab-e2-s3-web-otp-flow]] — Web OTP flow (reCAPTCHA + signInWithPhoneNumber) | ■ |
+| RCAB-E2.S4 | [[story-rcab-e2-s4-google-link]] — Google link/login endpoints + ID-token verify | ■ |
+| RCAB-E2.S5 | [[story-rcab-e2-s5-cookie-csrf]] — Refresh-token cookie + CSRF posture | ■ |
+| RCAB-E2.S6 | [[story-rcab-e2-s6-auth-integration-tests]] — Auth integration tests + negative cases | ■ |
 
 ## E3 — Driver presence → Demo 2 · "The driver is online"
 *Driver app shell, go online, Redis geo index, location stream.* See [[epic-e3-driver-presence]].
 
 | ID | Title | Status |
 |---|---|---|
-| RCAB-E3.S1 | Flutter app skeleton: routing, theme, Riverpod, dio + refresh | · |
-| RCAB-E3.S2 | Firebase OTP in Flutter | · |
-| RCAB-E3.S3 | Vehicle registration screen + API | · |
-| RCAB-E3.S4 | Online / offline toggle + foreground service | · |
-| RCAB-E3.S5 | Location streaming (WS) + Redis `GEOADD` | · |
-| RCAB-E3.S6 | OEM-kill mitigation onboarding | · |
+| RCAB-E3.S1 | [[story-rcab-e3-s1-flutter-app-skeleton]] — Flutter app skeleton: routing, theme, Riverpod, dio + refresh | ■ |
+| RCAB-E3.S2 | [[story-rcab-e3-s2-firebase-otp-flutter]] — Firebase OTP in Flutter | ■ |
+| RCAB-E3.S3 | [[story-rcab-e3-s3-vehicle-registration]] — Vehicle registration screen + API | ■ |
+| RCAB-E3.S4 | [[story-rcab-e3-s4-driver-online-toggle]] — Online / offline toggle + foreground service | ■ |
+| RCAB-E3.S5 | [[story-rcab-e3-s5-location-streaming]] — Location streaming (WS) + Redis `GEOADD` | ■ |
+| RCAB-E3.S6 | [[story-rcab-e3-s6-oem-kill-mitigation]] — OEM-kill mitigation onboarding | ■ |
 
 ## E4 — Normal booking → Demo 3 · "Book a normal ride"
 *OSM picker, quote, request, top-K dispatch, ride lifecycle, rating prompt.* See [[epic-e4-normal-booking]].
@@ -78,13 +78,13 @@ audience: both
 
 | ID | Title | Status |
 |---|---|---|
-| RCAB-E5.S1 | Route similarity scorer + cached OSRM polylines | · |
-| RCAB-E5.S2 | Matching service: slot vs. open decision | · |
-| RCAB-E5.S3 | Pool lifecycle (open → grow → close → start) | · |
-| RCAB-E5.S4 | Shared-ride dispatch (offer reflects pool span) | · |
-| RCAB-E5.S5 | Shared-ride pricing per seat | · |
-| RCAB-E5.S6 | Web booking UI — "Share" default + pool-update events | · |
-| RCAB-E5.S7 | Driver app — multi-stop ride screen, per-passenger drop | · |
+| RCAB-E5.S1 | [[story-rcab-e5-s1-route-similarity-scorer]] — Route similarity scorer + cached OSRM polylines | ■ |
+| RCAB-E5.S2 | [[story-rcab-e5-s2-matching-service-slot-vs-open]] — Matching service: slot vs. open decision | □ |
+| RCAB-E5.S3 | [[story-rcab-e5-s3-pool-lifecycle]] — Pool lifecycle (open → grow → close → start) | □ |
+| RCAB-E5.S4 | [[story-rcab-e5-s4-shared-ride-dispatch]] — Shared-ride dispatch (offer reflects pool span) | □ |
+| RCAB-E5.S5 | [[story-rcab-e5-s5-shared-ride-pricing]] — Shared-ride pricing per seat | □ |
+| RCAB-E5.S6 | [[story-rcab-e5-s6-web-booking-share-ui]] — Web booking UI — 'Share' default + pool-update events | □ |
+| RCAB-E5.S7 | [[story-rcab-e5-s7-driver-app-multi-stop]] — Driver app — multi-stop ride screen, per-passenger drop | □ |
 
 ## E6 — Scheduled booking → Demo 5 · "Scheduled works"
 *BullMQ delayed jobs, wake-up dispatch.* See [[epic-e6-scheduled-booking]].

@@ -21,7 +21,11 @@ audience: both
 
 ## Public providers
 
-- `MatchingService`
+- `RouteSimilarityService` ← **implemented (E5.S1)**
+  - `scoreRoutes(a: RouteInput, b: RouteInput): Promise<number>` — Phase-0 Fréchet-lite score
+  - `RouteInput = { originLat, originLng, destLat, destLng }`
+  - `OsrmUnavailableException` thrown on OSRM error
+- `MatchingService` ← E5.S2
   - `placeShared(requestId): { mode: 'slotted', sharedRideId } | { mode: 'opened', sharedRideId }`
 
 ## Persistence
@@ -30,8 +34,9 @@ audience: both
 
 ## Tests
 
-- Unit: route-similarity scoring on a fixture corpus.
-- Integration: slot vs. open decisions under simulated load.
+- Unit: route-similarity scoring with mocked HttpService + Redis (E5.S1 — 7 tests).
+- Integration: real Redis via Testcontainers; cache-hit verification (E5.S1 — 2 tests).
+- Integration (E5.S2+): slot vs. open decisions under simulated load.
 
 ## See also
 - [[algo-shared-ride-matching]] · [[algo-route-similarity]]

@@ -18,6 +18,8 @@ audience: both
 - Maintain socket → user mapping and room membership.
 - Expose a typed `RealtimeBus` that other modules call to emit events.
 - Use **Redis adapter from day one** (single-node usage is fine; the adapter is no-op overhead but enables multi-node later with zero code change).
+- Handle `driver:location` events from drivers with a **per-driver 3 s in-memory throttle** (`Map<driverId, lastAcceptedMs>`); accepted events call `GEOADD active_drivers` and `HSET driver:state:<id> last_seen`.
+- On WS reconnect of a known driver, **replay `driver_state { availability, current_ride_id }`** from `driver:state:<id>` Redis hash back to the connecting socket.
 
 ## Public providers
 

@@ -16,15 +16,15 @@ audience: both
 
 | Key | Type | Purpose | TTL |
 |---|---|---|---|
-| `active_drivers` | GEO | online drivers' positions; queried for dispatch | none — entries `ZREM`ed on offline |
-| `driver:state:<id>` | HASH | `{availability, last_seen, current_ride_id}` | none |
+| `active_drivers` | GEO | online drivers' positions; `GEOADD` on goOnline and each accepted `driver:location` WS event; `ZREM` on offline | none |
+| `driver:state:<id>` | HASH | `{availability, last_seen, current_ride_id}`; `last_seen` updated by goOnline and by each accepted location event; read on WS reconnect for state replay | none |
 | `offer:<offer_id>` | STRING (lock) | dispatch offer lock; first-to-set wins | 12s (`SET NX EX`) |
 | `offer:list:<request_id>` | SET | offer ids currently outstanding for a request | 5 min |
 | `request:<request_id>:dispatch` | HASH | retry counter, wave, last_tried_at | 10 min |
 | `bull:scheduled-dispatch:*` | BullMQ keys | scheduled-booking jobs | per-job |
 | `socketio:*` | Socket.IO adapter | pub/sub for multi-node (kept since day 1) | n/a |
 | `cache:user:<id>:dashboard` | STRING JSON | client/driver dashboard read cache | 60s |
-| `route-cache:<origin_cell>:<dest_cell>` | STRING | OSRM-cached route polyline + distance | 1h |
+| `osrm:poly:<orig_geohash7>:<dest_geohash7>` | STRING JSON | OSRM polyline coords for a single O→D pair; used by `RouteSimilarityService` (E5.S1) | 1h |
 
 ## Lua scripts
 
