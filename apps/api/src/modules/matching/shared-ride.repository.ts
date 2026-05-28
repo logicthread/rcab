@@ -117,4 +117,14 @@ export class SharedRideRepository {
       .set({ seatCount: newCount, updatedAt: new Date() })
       .where(eq(sharedRide.rideId, rideId));
   }
+
+  async closePool(
+    rideId: string,
+    reason: 'closed_full' | 'closed_timeout' | 'closed_started' | 'aborted',
+  ): Promise<void> {
+    await this.db
+      .update(sharedRide)
+      .set({ poolState: reason, poolClosedAt: new Date(), updatedAt: new Date() })
+      .where(eq(sharedRide.rideId, rideId));
+  }
 }

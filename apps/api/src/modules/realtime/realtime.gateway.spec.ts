@@ -135,7 +135,7 @@ describe('RealtimeGateway — handleConnection reconnect state replay', () => {
     });
 
     const client = makeSocket();
-    (client.handshake as Record<string, unknown>).auth = { token: 'tok' };
+    (client.handshake as unknown as Record<string, unknown>).auth = { token: 'tok' };
 
     gateway.handleConnection(client);
     // _replayDriverState is async; let microtasks flush
@@ -157,7 +157,7 @@ describe('RealtimeGateway — handleConnection reconnect state replay', () => {
     });
 
     const client = makeSocket();
-    (client.handshake as Record<string, unknown>).auth = { token: 'tok' };
+    (client.handshake as unknown as Record<string, unknown>).auth = { token: 'tok' };
 
     gateway.handleConnection(client);
     await Promise.resolve();
