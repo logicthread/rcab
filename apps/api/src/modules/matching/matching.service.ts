@@ -1,11 +1,8 @@
-import { Injectable, Inject } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
-import type Redis from 'ioredis';
-import { REDIS } from '../../infra/redis/redis.module';
 import { RouteSimilarityService, type RouteInput } from './route-similarity.service';
 import { SharedRideRepository, type SharedRideRow } from './shared-ride.repository';
+import { PoolLifecycleService, type PoolStatus } from './pool-lifecycle.service';
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
@@ -17,8 +14,8 @@ export interface SharedRideRequest {
 }
 
 export type MatchResult =
-  | { mode: 'slotted'; sharedRideId: string }
-  | { mode: 'opened';  sharedRideId: string };
+  | { mode: 'slotted'; sharedRideId: string; poolStatus: PoolStatus }
+  | { mode: 'opened';  sharedRideId: string; poolStatus: 'open' };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -41,18 +38,16 @@ export class MatchingService {
   private readonly similarityThreshold: number;
   private readonly detourBudgetM: number;
   private readonly maxSeats: number;
-  private readonly poolSlotScript: string;
 
   constructor(
     private readonly repo: SharedRideRepository,
     private readonly scorer: RouteSimilarityService,
-    @Inject(REDIS) private readonly redis: Redis,
+    private readonly lifecycle: PoolLifecycleService,
     config: ConfigService,
   ) {
     this.similarityThreshold = config.get<number>('MATCHING_SIMILARITY_THRESHOLD') ?? 0.7;
     this.detourBudgetM       = config.get<number>('MATCHING_DETOUR_BUDGET_M')       ?? 800;
     this.maxSeats            = config.get<number>('MATCHING_MAX_SEATS')             ?? 3;
-    this.poolSlotScript      = readFileSync(join(__dirname, 'lua', 'pool_slot.lua'), 'utf-8');
   }
 
   async findOrCreatePool(request: SharedRideRequest): Promise<MatchResult> {
@@ -66,7 +61,6 @@ export class MatchingService {
       destLat:   request.destLat,   destLng:   request.destLng,
     };
 
-    // Score each candidate and collect those that pass the threshold + detour check.
     type Scored = { pool: SharedRideRow; composite: number };
     const qualified: Scored[] = [];
 
@@ -94,42 +88,28 @@ export class MatchingService {
       qualified.push({ pool, composite: score - 0.0005 * (detourOrigin + detourDest) });
     }
 
-    // Best composite score first.
     qualified.sort((a, b) => b.composite - a.composite);
 
     for (const { pool } of qualified) {
-      if (await this.trySlot(pool)) {
-        return { mode: 'slotted', sharedRideId: pool.rideId };
+      const slot = await this.lifecycle.slotRequest(pool);
+      if (slot.slotted) {
+        return {
+          mode: 'slotted',
+          sharedRideId: pool.rideId,
+          poolStatus: slot.closedFull ? 'closed_full' : 'open',
+        };
       }
     }
 
-    const newPool = await this.repo.create({
-      originLat:    request.originLat,
-      originLng:    request.originLng,
-      destLat:      request.destLat,
-      destLng:      request.destLng,
-      maxSeats:     this.maxSeats,
+    const newPool = await this.lifecycle.openPool({
+      originLat:     request.originLat,
+      originLng:     request.originLng,
+      destLat:       request.destLat,
+      destLng:       request.destLng,
+      maxSeats:      this.maxSeats,
       detourBudgetM: this.detourBudgetM,
     });
 
-    return { mode: 'opened', sharedRideId: newPool.rideId };
-  }
-
-  private async trySlot(pool: SharedRideRow): Promise<boolean> {
-    const key    = `pool:${pool.rideId}:seats`;
-    const result = Number(
-      await this.redis.eval(
-        this.poolSlotScript,
-        1,
-        key,
-        String(pool.maxSeats),
-        String(pool.seatCount),
-      ),
-    );
-
-    if (result < 0) return false;
-
-    await this.repo.incrementSeats(pool.rideId, result);
-    return true;
+    return { mode: 'opened', sharedRideId: newPool.rideId, poolStatus: 'open' };
   }
 }

@@ -26,6 +26,8 @@ audience: both
 | `cache:user:<id>:dashboard` | STRING JSON | client/driver dashboard read cache | 60s |
 | `osrm:poly:<orig_geohash7>:<dest_geohash7>` | STRING JSON | OSRM polyline coords for a single O→D pair; used by `RouteSimilarityService` (E5.S1) | 1h |
 | `pool:<ride_id>:seats` | STRING int | Atomic seat counter for an open pool; seeded from Postgres on cold start; used by `pool_slot.lua` (E5.S2) | 5 min |
+| `pool:<ride_id>` | HASH | Pool lifecycle state for low-latency dispatch reads; fields: `state`, `seat_count`, `max_seats`, `expiry_job_id`, `closed_at`; written by `PoolLifecycleService` (E5.S3) | 10 min |
+| `bull:matching:*` | BullMQ keys | `matching` queue — currently carries `pool:expire:<ride_id>` delayed jobs (E5.S3) | per-job |
 
 ## Lua scripts
 

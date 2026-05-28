@@ -3,6 +3,7 @@ import { APP_FILTER, APP_PIPE } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { ScheduleModule } from '@nestjs/schedule';
+import { BullModule } from '@nestjs/bullmq';
 import { DrizzleModule } from './infra/db/drizzle.module';
 import { RedisModule } from './infra/redis/redis.module';
 import { FirebaseModule } from './infra/firebase/firebase.module';
@@ -12,14 +13,28 @@ import { AuthModule } from './modules/auth/auth.module';
 import { VehiclesModule } from './modules/vehicles/vehicles.module';
 import { DriversModule } from './modules/drivers/drivers.module';
 import { RealtimeModule } from './modules/realtime/realtime.module';
+import { RidesModule } from './modules/rides/rides.module';
 import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
 import { MetricsMiddleware } from './common/middleware/metrics.middleware';
 import { AppExceptionFilter } from './common/filters/app-exception.filter';
+
+function parseRedisConnection() {
+  const raw = process.env.REDIS_URL ?? 'redis://redis:6379';
+  const url = new URL(raw);
+  return {
+    host: url.hostname,
+    port: Number(url.port || 6379),
+    username: url.username || undefined,
+    password: url.password || undefined,
+    db: url.pathname && url.pathname.length > 1 ? Number(url.pathname.slice(1)) : 0,
+  };
+}
 
 @Module({
   imports: [
     ThrottlerModule.forRoot([{ name: 'default', ttl: 60000, limit: 1000 }]),
     ScheduleModule.forRoot(),
+    BullModule.forRoot({ connection: parseRedisConnection() }),
     DrizzleModule,
     RedisModule,
     FirebaseModule,
@@ -29,6 +44,7 @@ import { AppExceptionFilter } from './common/filters/app-exception.filter';
     VehiclesModule,
     DriversModule,
     RealtimeModule,
+    RidesModule,
   ],
   providers: [
     { provide: APP_FILTER, useClass: AppExceptionFilter },

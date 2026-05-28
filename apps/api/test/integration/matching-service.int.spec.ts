@@ -1,11 +1,23 @@
 import { Client } from 'pg';
 import Redis from 'ioredis';
+import { Queue } from 'bullmq';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import * as schema from '../../src/db/schema';
 import { MatchingService } from '../../src/modules/matching/matching.service';
 import { SharedRideRepository } from '../../src/modules/matching/shared-ride.repository';
+import { PoolLifecycleService, MATCHING_QUEUE } from '../../src/modules/matching/pool-lifecycle.service';
 import { randomUUID } from 'node:crypto';
+
+function parseRedis(url: string) {
+  const u = new URL(url);
+  return {
+    host: u.hostname,
+    port: Number(u.port || 6379),
+    username: u.username || undefined,
+    password: u.password || undefined,
+  };
+}
 
 const skip = process.env.RCAB_INT_SKIPPED === '1';
 
@@ -25,19 +37,24 @@ const POOL_B_DEST    = { lat: 22.620,  lng: 88.390  };
 describe.skipIf(skip)('MatchingService — integration (Postgres + Redis)', () => {
   let pgClient: Client;
   let redis: Redis;
+  let queue: Queue;
   let svc: MatchingService;
   let poolAId: string;
 
   beforeAll(async () => {
     pgClient = new Client({ connectionString: process.env.TEST_POSTGRES_URI });
     await pgClient.connect();
-    redis = new Redis(process.env.TEST_REDIS_URL!);
+    redis = new Redis(process.env.TEST_REDIS_URL!, { maxRetriesPerRequest: null });
 
     const pool = { query: (text: string, values?: unknown[]) => pgClient.query(text, values as never) };
     const db = drizzle(pool as never, { schema });
 
     const repo   = new SharedRideRepository(db as never);
     const config = { get: vi.fn().mockReturnValue(undefined) };
+
+    const conn = parseRedis(process.env.TEST_REDIS_URL!);
+    queue = new Queue(MATCHING_QUEUE, { connection: conn });
+    const lifecycle = new PoolLifecycleService(repo, queue as never, redis, config as never);
 
     // Mock RouteSimilarityService: return 0.95 for requests near pool A, 0.1 for pool B
     const scorer = {
@@ -47,7 +64,7 @@ describe.skipIf(skip)('MatchingService — integration (Postgres + Redis)', () =
       ),
     };
 
-    svc = new MatchingService(repo as never, scorer as never, redis, config as never);
+    svc = new MatchingService(repo as never, scorer as never, lifecycle, config as never);
 
     // Seed pool A (close, open)
     poolAId = randomUUID();
@@ -71,6 +88,8 @@ describe.skipIf(skip)('MatchingService — integration (Postgres + Redis)', () =
 
   afterAll(async () => {
     await pgClient.query('DELETE FROM shared_rides').catch(() => {});
+    await queue?.obliterate({ force: true }).catch(() => {});
+    await queue?.close().catch(() => {});
     await pgClient.end();
     await redis.quit();
   });
