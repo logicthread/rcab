@@ -2,6 +2,7 @@ import { Client } from 'pg';
 import Redis from 'ioredis';
 import { Queue } from 'bullmq';
 import { drizzle } from 'drizzle-orm/node-postgres';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import * as schema from '../../src/db/schema';
 import { SharedRideRepository } from '../../src/modules/matching/shared-ride.repository';
@@ -41,7 +42,10 @@ describe.skipIf(skip)('PoolLifecycleService — integration (Postgres + Redis + 
     queue = new Queue(MATCHING_QUEUE, { connection: conn });
 
     const config = { get: vi.fn().mockReturnValue(undefined) };
-    lifecycle = new PoolLifecycleService(repo, queue as never, redis, config as never);
+    const events = new EventEmitter2();
+    lifecycle = new PoolLifecycleService(
+      repo, queue as never, redis, events, config as never,
+    );
     processor = new PoolExpireProcessor(lifecycle);
   });
 
@@ -53,19 +57,23 @@ describe.skipIf(skip)('PoolLifecycleService — integration (Postgres + Redis + 
     await redis.quit();
   });
 
-  it('openPool writes DB row, Redis HASH, and enqueues a delayed pool:expire job', async () => {
+  it('openPool writes DB row + members[0] opener, Redis HASH, and enqueues delayed pool:expire', async () => {
     const pool = await lifecycle.openPool({
+      passengerId: 'p-opener-1',
       originLat: 22.5727, originLng: 88.3640,
       destLat:   22.5801, destLng:   88.3701,
       maxSeats: 3, detourBudgetM: 800,
     });
 
-    const { rows } = await pgClient.query<{ pool_state: string; seat_count: number }>(
-      'SELECT pool_state, seat_count FROM shared_rides WHERE ride_id = $1',
+    const { rows } = await pgClient.query<{ pool_state: string; seat_count: number; members: unknown }>(
+      'SELECT pool_state, seat_count, members FROM shared_rides WHERE ride_id = $1',
       [pool.rideId],
     );
     expect(rows[0].pool_state).toBe('open');
     expect(rows[0].seat_count).toBe(1);
+    const members = rows[0].members as Array<{ passenger_id: string }>;
+    expect(members).toHaveLength(1);
+    expect(members[0].passenger_id).toBe('p-opener-1');
 
     const hash = await redis.hgetall(`pool:${pool.rideId}`);
     expect(hash.state).toBe('open');
@@ -80,13 +88,22 @@ describe.skipIf(skip)('PoolLifecycleService — integration (Postgres + Redis + 
 
   it('slotRequest filling the last seat transitions pool to closed_full and removes the expiry job', async () => {
     const pool = await lifecycle.openPool({
+      passengerId: 'p-opener-2',
       originLat: 22.6000, originLng: 88.4000,
       destLat:   22.6100, destLng:   88.4100,
       maxSeats: 2, detourBudgetM: 800,
     });
 
     // Pool starts at seat_count=1. Slotting once should fill it (max=2).
-    const result = await lifecycle.slotRequest(pool);
+    const result = await lifecycle.slotRequest({
+      pool,
+      joiner: {
+        passenger_id: 'p-joiner-2',
+        origin_lat: 22.6005, origin_lng: 88.4005,
+        dest_lat:   22.6105, dest_lng:   88.4105,
+        joined_at: new Date().toISOString(),
+      },
+    });
     expect(result).toEqual({ slotted: true, closedFull: true, seatCount: 2 });
 
     const { rows } = await pgClient.query<{ pool_state: string; seat_count: number }>(
@@ -107,6 +124,7 @@ describe.skipIf(skip)('PoolLifecycleService — integration (Postgres + Redis + 
 
   it('PoolExpireProcessor → closePool(closed_timeout): DB + HASH updated; job NOT explicitly removed', async () => {
     const pool = await lifecycle.openPool({
+      passengerId: 'p-opener-3',
       originLat: 22.5500, originLng: 88.3500,
       destLat:   22.5600, destLng:   88.3600,
       maxSeats: 3, detourBudgetM: 800,

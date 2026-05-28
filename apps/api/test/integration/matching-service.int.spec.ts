@@ -2,6 +2,7 @@ import { Client } from 'pg';
 import Redis from 'ioredis';
 import { Queue } from 'bullmq';
 import { drizzle } from 'drizzle-orm/node-postgres';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import * as schema from '../../src/db/schema';
 import { MatchingService } from '../../src/modules/matching/matching.service';
@@ -54,7 +55,10 @@ describe.skipIf(skip)('MatchingService — integration (Postgres + Redis)', () =
 
     const conn = parseRedis(process.env.TEST_REDIS_URL!);
     queue = new Queue(MATCHING_QUEUE, { connection: conn });
-    const lifecycle = new PoolLifecycleService(repo, queue as never, redis, config as never);
+    const events = new EventEmitter2();
+    const lifecycle = new PoolLifecycleService(
+      repo, queue as never, redis, events, config as never,
+    );
 
     // Mock RouteSimilarityService: return 0.95 for requests near pool A, 0.1 for pool B
     const scorer = {
@@ -96,6 +100,7 @@ describe.skipIf(skip)('MatchingService — integration (Postgres + Redis)', () =
 
   it('slots the request into pool A and returns its ID', async () => {
     const result = await svc.findOrCreatePool({
+      passengerId: randomUUID(),
       originLat: REQUEST_ORIGIN.lat, originLng: REQUEST_ORIGIN.lng,
       destLat:   REQUEST_DEST.lat,   destLng:   REQUEST_DEST.lng,
     });
@@ -120,6 +125,7 @@ describe.skipIf(skip)('MatchingService — integration (Postgres + Redis)', () =
     );
 
     const result = await svc.findOrCreatePool({
+      passengerId: randomUUID(),
       originLat: REQUEST_ORIGIN.lat, originLng: REQUEST_ORIGIN.lng,
       destLat:   REQUEST_DEST.lat,   destLng:   REQUEST_DEST.lng,
     });

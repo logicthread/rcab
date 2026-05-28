@@ -3,6 +3,7 @@ import { APP_FILTER, APP_PIPE } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { ScheduleModule } from '@nestjs/schedule';
+import { EventEmitterModule } from '@nestjs/event-emitter';
 import { BullModule } from '@nestjs/bullmq';
 import { DrizzleModule } from './infra/db/drizzle.module';
 import { RedisModule } from './infra/redis/redis.module';
@@ -14,6 +15,7 @@ import { VehiclesModule } from './modules/vehicles/vehicles.module';
 import { DriversModule } from './modules/drivers/drivers.module';
 import { RealtimeModule } from './modules/realtime/realtime.module';
 import { RidesModule } from './modules/rides/rides.module';
+import { DispatchModule } from './modules/dispatch/dispatch.module';
 import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
 import { MetricsMiddleware } from './common/middleware/metrics.middleware';
 import { AppExceptionFilter } from './common/filters/app-exception.filter';
@@ -34,6 +36,7 @@ function parseRedisConnection() {
   imports: [
     ThrottlerModule.forRoot([{ name: 'default', ttl: 60000, limit: 1000 }]),
     ScheduleModule.forRoot(),
+    EventEmitterModule.forRoot(),
     BullModule.forRoot({ connection: parseRedisConnection() }),
     DrizzleModule,
     RedisModule,
@@ -45,6 +48,7 @@ function parseRedisConnection() {
     DriversModule,
     RealtimeModule,
     RidesModule,
+    DispatchModule,
   ],
   providers: [
     { provide: APP_FILTER, useClass: AppExceptionFilter },

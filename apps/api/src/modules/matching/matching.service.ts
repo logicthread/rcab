@@ -7,6 +7,7 @@ import { PoolLifecycleService, type PoolStatus } from './pool-lifecycle.service'
 // ── Public types ──────────────────────────────────────────────────────────────
 
 export interface SharedRideRequest {
+  passengerId: string;
   originLat: number;
   originLng: number;
   destLat: number;
@@ -90,8 +91,20 @@ export class MatchingService {
 
     qualified.sort((a, b) => b.composite - a.composite);
 
+    const joinedAt = new Date().toISOString();
+
     for (const { pool } of qualified) {
-      const slot = await this.lifecycle.slotRequest(pool);
+      const slot = await this.lifecycle.slotRequest({
+        pool,
+        joiner: {
+          passenger_id: request.passengerId,
+          origin_lat:   request.originLat,
+          origin_lng:   request.originLng,
+          dest_lat:     request.destLat,
+          dest_lng:     request.destLng,
+          joined_at:    joinedAt,
+        },
+      });
       if (slot.slotted) {
         return {
           mode: 'slotted',
@@ -108,6 +121,7 @@ export class MatchingService {
       destLng:       request.destLng,
       maxSeats:      this.maxSeats,
       detourBudgetM: this.detourBudgetM,
+      passengerId:   request.passengerId,
     });
 
     return { mode: 'opened', sharedRideId: newPool.rideId, poolStatus: 'open' };
