@@ -11,6 +11,7 @@ export async function runMigrations(connectionUri: string): Promise<void> {
     // Extensions are installed via init.sql in Docker, but Testcontainers
     // uses the base image directly — create extensions here for test parity.
     await client.query('CREATE EXTENSION IF NOT EXISTS "uuid-ossp"');
+    await client.query('CREATE EXTENSION IF NOT EXISTS postgis');
 
     await client.query(`
       CREATE TABLE IF NOT EXISTS _rcab_migrations (
