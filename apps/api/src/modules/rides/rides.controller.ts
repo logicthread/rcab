@@ -1,8 +1,11 @@
 import {
   Controller,
   Post,
+  Get,
+  Param,
   Body,
   NotImplementedException,
+  NotFoundException,
   Logger,
   UseGuards,
   Req,
@@ -12,6 +15,7 @@ import type { Request } from 'express';
 import { AuthGuard, type JwtPayload } from '../../common/guards/auth.guard';
 import { MatchingService, type MatchResult } from '../matching/matching.service';
 import { SharedRideRepository } from '../matching/shared-ride.repository';
+import { RideStopRepository } from '../matching/ride-stop.repository';
 import { PricingService } from '../pricing/pricing.service';
 import type { Money } from '../pricing/money';
 import type { SeatQuote } from '../pricing/pricing.types';
@@ -41,6 +45,20 @@ export interface QuoteResponse {
   };
 }
 
+export interface RideStopsResponse {
+  rideId: string;
+  poolStatus: string;
+  stops: Array<{
+    sequenceIndex: number;
+    passengerId: string;
+    type: 'pickup' | 'dropoff';
+    lat: number;
+    lng: number;
+    confirmed: boolean;
+    confirmedAt: string | null;
+  }>;
+}
+
 const SHARED_QUOTE_SEATS = 2;
 
 @Controller('v1/rides')
@@ -52,6 +70,7 @@ export class RidesController {
     private readonly matching: MatchingService,
     private readonly pricing: PricingService,
     private readonly repo: SharedRideRepository,
+    private readonly stops: RideStopRepository,
   ) {}
 
   @Post('quote')
@@ -133,6 +152,37 @@ export class RidesController {
       perSeatPrice: seatQuote?.perSeatPrice,
       seatMultiplier: seatQuote?.seatMultiplier,
       detourFactor: seatQuote?.detourFactor,
+    };
+  }
+
+  @Get(':id/stops')
+  async listStops(
+    @Req() req: Request & { user: JwtPayload },
+    @Param('id') rideId: string,
+  ): Promise<RideStopsResponse> {
+    const ride = await this.repo.findById(rideId);
+    if (!ride) {
+      throw new NotFoundException({ code: 'ride_not_found', message: 'ride not found' });
+    }
+    if (req.user.role !== 'driver' || ride.claimedByDriverId !== req.user.sub) {
+      throw new ForbiddenException({
+        code: 'forbidden',
+        message: "only the claimed driver can read this ride's stops",
+      });
+    }
+    const rows = await this.stops.findByRideId(rideId);
+    return {
+      rideId,
+      poolStatus: ride.poolState,
+      stops: rows.map((r) => ({
+        sequenceIndex: r.sequenceIndex,
+        passengerId: r.passengerId,
+        type: r.type,
+        lat: r.lat,
+        lng: r.lng,
+        confirmed: r.confirmedAt !== null,
+        confirmedAt: r.confirmedAt?.toISOString() ?? null,
+      })),
     };
   }
 

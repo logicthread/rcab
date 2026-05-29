@@ -6,7 +6,10 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import * as schema from '../../src/db/schema';
 import { SharedRideRepository } from '../../src/modules/matching/shared-ride.repository';
-import { PoolLifecycleService, MATCHING_QUEUE } from '../../src/modules/matching/pool-lifecycle.service';
+import {
+  PoolLifecycleService,
+  MATCHING_QUEUE,
+} from '../../src/modules/matching/pool-lifecycle.service';
 import { PoolExpireProcessor } from '../../src/modules/matching/pool-expire.processor';
 import type { Job } from 'bullmq';
 
@@ -34,7 +37,9 @@ describe.skipIf(skip)('PoolLifecycleService — integration (Postgres + Redis + 
     await pgClient.connect();
     redis = new Redis(process.env.TEST_REDIS_URL!, { maxRetriesPerRequest: null });
 
-    const pool = { query: (text: string, values?: unknown[]) => pgClient.query(text, values as never) };
+    const pool = {
+      query: (text: string, values?: unknown[]) => pgClient.query(text, values as never),
+    };
     const db = drizzle(pool as never, { schema });
     const repo = new SharedRideRepository(db as never);
 
@@ -43,8 +48,21 @@ describe.skipIf(skip)('PoolLifecycleService — integration (Postgres + Redis + 
 
     const config = { get: vi.fn().mockReturnValue(undefined) };
     const events = new EventEmitter2();
+    const bus = {
+      toDriver: vi.fn(),
+      toUser: vi.fn(),
+      toRide: vi.fn(),
+      toPool: vi.fn(),
+      joinPool: vi.fn().mockResolvedValue(undefined),
+      broadcast: vi.fn(),
+    };
     lifecycle = new PoolLifecycleService(
-      repo, queue as never, redis, events, config as never,
+      repo,
+      queue as never,
+      redis,
+      events,
+      bus as never,
+      config as never,
     );
     processor = new PoolExpireProcessor(lifecycle);
   });
@@ -60,15 +78,21 @@ describe.skipIf(skip)('PoolLifecycleService — integration (Postgres + Redis + 
   it('openPool writes DB row + members[0] opener, Redis HASH, and enqueues delayed pool:expire', async () => {
     const pool = await lifecycle.openPool({
       passengerId: 'p-opener-1',
-      originLat: 22.5727, originLng: 88.3640,
-      destLat:   22.5801, destLng:   88.3701,
-      maxSeats: 3, detourBudgetM: 800,
+      originLat: 22.5727,
+      originLng: 88.364,
+      destLat: 22.5801,
+      destLng: 88.3701,
+      maxSeats: 3,
+      detourBudgetM: 800,
     });
 
-    const { rows } = await pgClient.query<{ pool_state: string; seat_count: number; members: unknown }>(
-      'SELECT pool_state, seat_count, members FROM shared_rides WHERE ride_id = $1',
-      [pool.rideId],
-    );
+    const { rows } = await pgClient.query<{
+      pool_state: string;
+      seat_count: number;
+      members: unknown;
+    }>('SELECT pool_state, seat_count, members FROM shared_rides WHERE ride_id = $1', [
+      pool.rideId,
+    ]);
     expect(rows[0].pool_state).toBe('open');
     expect(rows[0].seat_count).toBe(1);
     const members = rows[0].members as Array<{ passenger_id: string }>;
@@ -89,9 +113,12 @@ describe.skipIf(skip)('PoolLifecycleService — integration (Postgres + Redis + 
   it('slotRequest filling the last seat transitions pool to closed_full and removes the expiry job', async () => {
     const pool = await lifecycle.openPool({
       passengerId: 'p-opener-2',
-      originLat: 22.6000, originLng: 88.4000,
-      destLat:   22.6100, destLng:   88.4100,
-      maxSeats: 2, detourBudgetM: 800,
+      originLat: 22.6,
+      originLng: 88.4,
+      destLat: 22.61,
+      destLng: 88.41,
+      maxSeats: 2,
+      detourBudgetM: 800,
     });
 
     // Pool starts at seat_count=1. Slotting once should fill it (max=2).
@@ -99,8 +126,10 @@ describe.skipIf(skip)('PoolLifecycleService — integration (Postgres + Redis + 
       pool,
       joiner: {
         passenger_id: 'p-joiner-2',
-        origin_lat: 22.6005, origin_lng: 88.4005,
-        dest_lat:   22.6105, dest_lng:   88.4105,
+        origin_lat: 22.6005,
+        origin_lng: 88.4005,
+        dest_lat: 22.6105,
+        dest_lng: 88.4105,
         joined_at: new Date().toISOString(),
       },
     });
@@ -125,9 +154,12 @@ describe.skipIf(skip)('PoolLifecycleService — integration (Postgres + Redis + 
   it('PoolExpireProcessor → closePool(closed_timeout): DB + HASH updated; job NOT explicitly removed', async () => {
     const pool = await lifecycle.openPool({
       passengerId: 'p-opener-3',
-      originLat: 22.5500, originLng: 88.3500,
-      destLat:   22.5600, destLng:   88.3600,
-      maxSeats: 3, detourBudgetM: 800,
+      originLat: 22.55,
+      originLng: 88.35,
+      destLat: 22.56,
+      destLng: 88.36,
+      maxSeats: 3,
+      detourBudgetM: 800,
     });
 
     // The processor would normally be invoked by BullMQ when the delayed job fires.

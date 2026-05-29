@@ -15,7 +15,9 @@ audience: both
 | `/sign-in` | Phone OTP + (optional) Google link | First-launch only |
 | `/home` | Big online/offline toggle, today's earnings, last ride | Default after sign-in |
 | `/offer/:id` | Ride offer with map, fare, accept/decline | Modal-style; auto-opens on `ride_offer` event |
-| `/ride/:id` | Active ride — stop list (shared), state buttons, "Navigate" → Google Maps | |
+| `/ride/:id` | Active solo ride — state buttons, "Navigate" → Google Maps | |
+| `/shared-ride/:id` | Active shared ride — ordered stop list (PICKUP/DROP per passenger), sequential confirm button, auto-routes to `/rating/:id` on last drop | RCAB-E5.S7 |
+| `/rating/:id` | Post-ride rating prompt (stub in E5.S7; full UI lands in RCAB-E7.S1) | |
 | `/earnings` | Today / week / month aggregates, ride list | |
 | `/profile` | Vehicle selector, license info | |
 

@@ -8,6 +8,7 @@ import { randomUUID } from 'node:crypto';
 import type { Job } from 'bullmq';
 import * as schema from '../../src/db/schema';
 import { SharedRideRepository } from '../../src/modules/matching/shared-ride.repository';
+import { RideStopRepository } from '../../src/modules/matching/ride-stop.repository';
 import {
   PoolLifecycleService,
   MATCHING_QUEUE,
@@ -36,16 +37,26 @@ describe.skipIf(skip)('DispatchService — integration (Postgres + Redis + BullM
   let dispatchQueue: Queue;
   let lifecycle: PoolLifecycleService;
   let dispatch: DispatchService;
-  let bus: { toDriver: ReturnType<typeof vi.fn>; toUser: ReturnType<typeof vi.fn>; toRide: ReturnType<typeof vi.fn>; broadcast: ReturnType<typeof vi.fn> };
+  let bus: {
+    toDriver: ReturnType<typeof vi.fn>;
+    toUser: ReturnType<typeof vi.fn>;
+    toRide: ReturnType<typeof vi.fn>;
+    toPool: ReturnType<typeof vi.fn>;
+    joinPool: ReturnType<typeof vi.fn>;
+    broadcast: ReturnType<typeof vi.fn>;
+  };
 
   beforeAll(async () => {
     pgClient = new Client({ connectionString: process.env.TEST_POSTGRES_URI });
     await pgClient.connect();
     redis = new Redis(process.env.TEST_REDIS_URL!, { maxRetriesPerRequest: null });
 
-    const pgPool = { query: (text: string, values?: unknown[]) => pgClient.query(text, values as never) };
+    const pgPool = {
+      query: (text: string, values?: unknown[]) => pgClient.query(text, values as never),
+    };
     const db = drizzle(pgPool as never, { schema });
     const repo = new SharedRideRepository(db as never);
+    const stopsRepo = new RideStopRepository(db as never);
 
     const conn = parseRedis(process.env.TEST_REDIS_URL!);
     matchingQueue = new Queue(MATCHING_QUEUE, { connection: conn });
@@ -54,19 +65,27 @@ describe.skipIf(skip)('DispatchService — integration (Postgres + Redis + BullM
     const events = new EventEmitter2();
     const config = { get: vi.fn().mockReturnValue(undefined) };
 
-    lifecycle = new PoolLifecycleService(
-      repo, matchingQueue as never, redis, events, config as never,
-    );
-
     bus = {
-      toDriver:  vi.fn(),
-      toUser:    vi.fn(),
-      toRide:    vi.fn(),
+      toDriver: vi.fn(),
+      toUser: vi.fn(),
+      toRide: vi.fn(),
+      toPool: vi.fn(),
+      joinPool: vi.fn().mockResolvedValue(undefined),
       broadcast: vi.fn(),
     };
 
+    lifecycle = new PoolLifecycleService(
+      repo,
+      matchingQueue as never,
+      redis,
+      events,
+      bus as never,
+      config as never,
+    );
+
     dispatch = new DispatchService(
       repo,
+      stopsRepo,
       lifecycle,
       bus as never,
       dispatchQueue as never,
@@ -77,6 +96,7 @@ describe.skipIf(skip)('DispatchService — integration (Postgres + Redis + BullM
   });
 
   afterAll(async () => {
+    await pgClient.query('DELETE FROM ride_stops').catch(() => {});
     await pgClient.query('DELETE FROM shared_rides').catch(() => {});
     await matchingQueue?.obliterate({ force: true }).catch(() => {});
     await dispatchQueue?.obliterate({ force: true }).catch(() => {});
@@ -94,9 +114,12 @@ describe.skipIf(skip)('DispatchService — integration (Postgres + Redis + BullM
 
     const pool = await lifecycle.openPool({
       passengerId: 'p-opener',
-      originLat: 22.5727, originLng: 88.3640,
-      destLat:   22.5801, destLng:   88.3701,
-      maxSeats: 2, detourBudgetM: 800,
+      originLat: 22.5727,
+      originLng: 88.364,
+      destLat: 22.5801,
+      destLng: 88.3701,
+      maxSeats: 2,
+      detourBudgetM: 800,
     });
     // close it cleanly so dispatch can pick it up
     await lifecycle.closePool(pool.rideId, 'closed_full');
@@ -129,9 +152,12 @@ describe.skipIf(skip)('DispatchService — integration (Postgres + Redis + BullM
 
     const pool = await lifecycle.openPool({
       passengerId: 'p-opener',
-      originLat: 22.5740, originLng: 88.3650,
-      destLat:   22.5810, destLng:   88.3710,
-      maxSeats: 2, detourBudgetM: 800,
+      originLat: 22.574,
+      originLng: 88.365,
+      destLat: 22.581,
+      destLng: 88.371,
+      maxSeats: 2,
+      detourBudgetM: 800,
     });
     await lifecycle.closePool(pool.rideId, 'closed_full');
 
@@ -160,9 +186,12 @@ describe.skipIf(skip)('DispatchService — integration (Postgres + Redis + BullM
 
     const pool = await lifecycle.openPool({
       passengerId: 'p-opener',
-      originLat: 22.5760, originLng: 88.3670,
-      destLat:   22.5830, destLng:   88.3730,
-      maxSeats: 2, detourBudgetM: 800,
+      originLat: 22.576,
+      originLng: 88.367,
+      destLat: 22.583,
+      destLng: 88.373,
+      maxSeats: 2,
+      detourBudgetM: 800,
     });
     await lifecycle.closePool(pool.rideId, 'closed_full');
 
@@ -185,20 +214,27 @@ describe.skipIf(skip)('DispatchService — integration (Postgres + Redis + BullM
     // @OnEvent metadata is only wired up when Nest builds the provider via DI.
     // We instantiate DispatchService directly here, so subscribe its handler
     // manually for this test only.
-    const events = (lifecycle as unknown as { events: { on: (e: string, f: (p: PoolClosedEventPayload) => void) => void } }).events;
+    const events = (
+      lifecycle as unknown as {
+        events: { on: (e: string, f: (p: PoolClosedEventPayload) => void) => void };
+      }
+    ).events;
     const handler = (payload: PoolClosedEventPayload): void => {
       void dispatch.onPoolClosed(payload);
     };
     events.on(POOL_CLOSED_EVENT, handler);
 
     const driverId = randomUUID();
-    await redis.geoadd('active_drivers', 88.3680, 22.5780, driverId);
+    await redis.geoadd('active_drivers', 88.368, 22.578, driverId);
 
     const pool = await lifecycle.openPool({
       passengerId: 'p-opener',
-      originLat: 22.5780, originLng: 88.3680,
-      destLat:   22.5850, destLng:   88.3740,
-      maxSeats: 2, detourBudgetM: 800,
+      originLat: 22.578,
+      originLng: 88.368,
+      destLat: 22.585,
+      destLng: 88.374,
+      maxSeats: 2,
+      detourBudgetM: 800,
     });
     // close via lifecycle → emits pool.closed → DispatchService.onPoolClosed fires
     await lifecycle.closePool(pool.rideId, 'closed_full');

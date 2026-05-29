@@ -53,6 +53,8 @@ On connect, server places the socket in personal + role rooms:
 |---|---|---|
 | `driver:location` | `{ lat, lng, heading, speed }` | sent every ~5s while online |
 | `ride_offer_response` | `{ offerId, sharedRideId?, accept }` | E5.S4. `accept=true` w/ `sharedRideId` triggers `DispatchService.claimPool` (atomic Lua); decline just releases the offer lock. If `sharedRideId` is omitted the server resolves it via `offer:meta:<offerId>`. |
+| `stop:pickup_confirmed` | `{ rideId, sequenceIndex }` | RCAB-E5.S7. Driver-only. Validated against `shared_rides.claimed_by_driver_id`. Must target the next pending stop with `type='pickup'`. Server updates `ride_stops.confirmed_at`, transitions `shared_rides.pool_state` to `closed_started` on the first pickup, and echoes the same event name back to the driver socket with `{ rideId, sequenceIndex, passengerId, type, confirmedAt, rideCompleted }`. |
+| `stop:drop_confirmed` | `{ rideId, sequenceIndex }` | RCAB-E5.S7. Same validation as `stop:pickup_confirmed` but for `type='dropoff'`. When the last pending stop is confirmed: `shared_rides.pool_state='completed'` + `completed_at` set, `driver:state:<driverId>.current_ride_id` cleared, and `ride:completed { rideId, completedAt }` broadcast to room `ride:<rideId>`. |
 | `ping` | `{}` | for liveness; server replies `pong` |
 
 ## Throttling and back-pressure
@@ -64,6 +66,7 @@ On connect, server places the socket in personal + role rooms:
 
 - Client reconnects with the same JWT.
 - Server replays critical state on reconnect: current ride (if any), pending offer (if any), driver state.
+- **Shared rides (RCAB-E5.S7):** the `driver_state` replay carries `current_ride_id`. The driver app then issues `GET /v1/rides/:id/stops` to hydrate stop statuses + `currentStopIndex` deterministically rather than receiving them through the socket. `ride:completed` is not replayed; if a ride completed while the driver was offline, the REST stop list returns all stops with `confirmed=true` and `poolStatus='completed'`.
 
 ## See also
 - [[module-realtime]] · [[ADR-0008-socketio-realtime]]

@@ -10,7 +10,9 @@ import '../core/api/api_client.dart';
 import '../core/driver/driver_state.dart';
 import '../core/driver/driver_state_notifier.dart';
 import '../core/location/foreground_service.dart';
+import '../core/realtime/realtime_socket.dart';
 import '../features/profile/models/vehicle.dart';
+import '../features/shared_ride/shared_ride_provider.dart';
 
 // ── Token store ───────────────────────────────────────────────────────────────
 
@@ -104,3 +106,17 @@ final vehiclesProvider = FutureProvider<List<Vehicle>>((ref) async {
       .map((e) => Vehicle.fromJson(e as Map<String, dynamic>))
       .toList();
 });
+
+// ── Realtime socket + shared-ride wiring (RCAB-E5.S7) ─────────────────────────
+
+final realtimeSocketProvider = Provider<IRealtimeSocket>((ref) {
+  final socket = RealtimeSocket(
+    apiBaseUrl: _kApiBaseUrl,
+    tokenStore: ref.read(tokenStoreProvider),
+  );
+  ref.onDispose(socket.dispose);
+  return socket;
+});
+
+final sharedRideSenderOverride =
+    sharedRideSenderProvider.overrideWith((ref) => ref.watch(realtimeSocketProvider));

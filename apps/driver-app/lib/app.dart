@@ -1,13 +1,50 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'core/auth/auth_state.dart';
+import 'di/providers.dart';
+import 'features/shared_ride/shared_ride_controller.dart';
 import 'routing/app_router.dart';
 
-class DriverApp extends ConsumerWidget {
+class DriverApp extends ConsumerStatefulWidget {
   const DriverApp({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<DriverApp> createState() => _DriverAppState();
+}
+
+class _DriverAppState extends ConsumerState<DriverApp> {
+  SharedRideController? _sharedRideCtrl;
+  bool _wiredAuthListener = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_wiredAuthListener) return;
+    _wiredAuthListener = true;
+    final container = ProviderScope.containerOf(context);
+    ref.listenManual<AuthState>(authProvider, (prev, next) {
+      if (next is AuthStateAuthenticated && _sharedRideCtrl == null) {
+        final router = ref.read(routerProvider);
+        _sharedRideCtrl = SharedRideController(
+          container: container,
+          router: router,
+        )..start();
+      } else if (next is! AuthStateAuthenticated && _sharedRideCtrl != null) {
+        _sharedRideCtrl?.stop();
+        _sharedRideCtrl = null;
+      }
+    }, fireImmediately: true);
+  }
+
+  @override
+  void dispose() {
+    _sharedRideCtrl?.stop();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final router = ref.watch(routerProvider);
     return MaterialApp.router(
       title: 'rcab Driver',

@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { RealtimeGateway, RIDE_OFFER_RESPONSE_EVENT } from './realtime.gateway';
+import {
+  RealtimeGateway,
+  RIDE_OFFER_RESPONSE_EVENT,
+  STOP_CONFIRM_REQUEST_EVENT,
+} from './realtime.gateway';
 import { JwtService } from '@nestjs/jwt';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { RealtimeBus } from './realtime.bus';
@@ -138,10 +142,10 @@ describe('RealtimeGateway — ride_offer_response handler', () => {
     );
 
     expect(seen).toHaveBeenCalledWith({
-      driverId:     DRIVER_ID,
-      offerId:      'offer-1',
+      driverId: DRIVER_ID,
+      offerId: 'offer-1',
       sharedRideId: 'pool-1',
-      accept:       true,
+      accept: true,
     });
   });
 
@@ -150,10 +154,7 @@ describe('RealtimeGateway — ride_offer_response handler', () => {
     events.on(RIDE_OFFER_RESPONSE_EVENT, seen);
     const client = makeSocket({ role: 'client' });
 
-    gateway.handleRideOfferResponse(
-      { offerId: 'offer-2', accept: true },
-      client,
-    );
+    gateway.handleRideOfferResponse({ offerId: 'offer-2', accept: true }, client);
 
     expect(seen).not.toHaveBeenCalled();
   });
@@ -172,6 +173,70 @@ describe('RealtimeGateway — ride_offer_response handler', () => {
   });
 });
 
+describe('RealtimeGateway — stop confirm handlers', () => {
+  let gateway: RealtimeGateway;
+  let events: EventEmitter2;
+
+  beforeEach(() => {
+    events = new EventEmitter2();
+    gateway = new RealtimeGateway(buildJwt(), buildBus(), events, buildRedis() as never);
+  });
+
+  it('emits STOP_CONFIRM_REQUEST_EVENT with type=pickup on stop:pickup_confirmed', () => {
+    const seen = vi.fn();
+    events.on(STOP_CONFIRM_REQUEST_EVENT, seen);
+    gateway.handleStopPickupConfirmed({ rideId: 'r-1', sequenceIndex: 0 }, makeSocket());
+    expect(seen).toHaveBeenCalledWith({
+      driverId: DRIVER_ID,
+      rideId: 'r-1',
+      sequenceIndex: 0,
+      type: 'pickup',
+    });
+  });
+
+  it('emits STOP_CONFIRM_REQUEST_EVENT with type=dropoff on stop:drop_confirmed', () => {
+    const seen = vi.fn();
+    events.on(STOP_CONFIRM_REQUEST_EVENT, seen);
+    gateway.handleStopDropConfirmed({ rideId: 'r-2', sequenceIndex: 3 }, makeSocket());
+    expect(seen).toHaveBeenCalledWith({
+      driverId: DRIVER_ID,
+      rideId: 'r-2',
+      sequenceIndex: 3,
+      type: 'dropoff',
+    });
+  });
+
+  it('ignores non-driver sockets', () => {
+    const seen = vi.fn();
+    events.on(STOP_CONFIRM_REQUEST_EVENT, seen);
+    gateway.handleStopPickupConfirmed(
+      { rideId: 'r-1', sequenceIndex: 0 },
+      makeSocket({ role: 'client' }),
+    );
+    expect(seen).not.toHaveBeenCalled();
+  });
+
+  it('ignores malformed sequenceIndex', () => {
+    const seen = vi.fn();
+    events.on(STOP_CONFIRM_REQUEST_EVENT, seen);
+    gateway.handleStopDropConfirmed(
+      { rideId: 'r-1', sequenceIndex: 1.5 } as unknown as { rideId: string; sequenceIndex: number },
+      makeSocket(),
+    );
+    expect(seen).not.toHaveBeenCalled();
+  });
+
+  it('ignores missing rideId', () => {
+    const seen = vi.fn();
+    events.on(STOP_CONFIRM_REQUEST_EVENT, seen);
+    gateway.handleStopPickupConfirmed(
+      { sequenceIndex: 0 } as unknown as { rideId: string; sequenceIndex: number },
+      makeSocket(),
+    );
+    expect(seen).not.toHaveBeenCalled();
+  });
+});
+
 describe('RealtimeGateway — handleConnection reconnect state replay', () => {
   let gateway: RealtimeGateway;
   let redis: ReturnType<typeof buildRedis>;
@@ -185,8 +250,8 @@ describe('RealtimeGateway — handleConnection reconnect state replay', () => {
 
   it('emits driver_state when driver:state:<id> exists in Redis', async () => {
     redis.hget
-      .mockResolvedValueOnce('online')   // availability
-      .mockResolvedValueOnce(null);      // current_ride_id
+      .mockResolvedValueOnce('online') // availability
+      .mockResolvedValueOnce(null); // current_ride_id
 
     (jwt.verify as ReturnType<typeof vi.fn>).mockReturnValue({
       sub: DRIVER_ID,

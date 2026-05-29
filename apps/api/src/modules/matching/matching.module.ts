@@ -5,6 +5,7 @@ import { BullModule } from '@nestjs/bullmq';
 import { RealtimeModule } from '../realtime/realtime.module';
 import { RouteSimilarityService } from './route-similarity.service';
 import { SharedRideRepository } from './shared-ride.repository';
+import { RideStopRepository } from './ride-stop.repository';
 import { MatchingService } from './matching.service';
 import { PoolLifecycleService, MATCHING_QUEUE } from './pool-lifecycle.service';
 import { PoolExpireProcessor } from './pool-expire.processor';
@@ -19,10 +20,17 @@ import { PoolExpireProcessor } from './pool-expire.processor';
   providers: [
     RouteSimilarityService,
     SharedRideRepository,
+    RideStopRepository,
     PoolLifecycleService,
     MatchingService,
     PoolExpireProcessor,
   ],
-  exports: [RouteSimilarityService, SharedRideRepository, PoolLifecycleService, MatchingService],
+  exports: [
+    RouteSimilarityService,
+    SharedRideRepository,
+    RideStopRepository,
+    PoolLifecycleService,
+    MatchingService,
+  ],
 })
 export class MatchingModule {}

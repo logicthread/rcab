@@ -22,6 +22,8 @@ audience: both
 | `driverStateProvider` | `StateNotifier<DriverState>` | offline / online / on_ride |
 | `incomingOfferProvider` | `StreamProvider<RideOffer?>` | derived from socket events |
 | `activeRideProvider` | `StreamProvider<RideState>` | server-truth ride state |
+| `sharedRideProvider` | `StateNotifierProvider<SharedRideNotifier, SharedRideState>` | RCAB-E5.S7 — ordered stops + currentStopIndex; consumes `ride_offer`/`stop:*_confirmed` echoes via `SharedRideController`; hydrates from `GET /v1/rides/:id/stops` on WS reconnect |
+| `realtimeSocketProvider` | `Provider<IRealtimeSocket>` | RCAB-E5.S7 — standalone Socket.IO connection used by shared-ride features. Phase-0 carve-out: coexists with `DriverStateNotifier._socket`; consolidation deferred |
 | `earningsProvider` | `FutureProvider<EarningsSummary>` | dashboard data, cached |
 
 ## Survives backgrounding
