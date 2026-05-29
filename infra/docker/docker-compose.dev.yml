@@ -106,6 +106,8 @@ services:
     networks: [rcab_dev_net]
     ports:
       - "3000:3000"
+    env_file:
+      - ../../.env.dev
     environment:
       NODE_ENV: development
       PORT: 3000

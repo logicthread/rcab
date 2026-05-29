@@ -47,9 +47,9 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
   private static readonly THROTTLE_MS = 3000;
 
   constructor(
-    private jwt: JwtService,
-    private bus: RealtimeBus,
-    private events: EventEmitter2,
+    @Inject(JwtService) private jwt: JwtService,
+    @Inject(RealtimeBus) private bus: RealtimeBus,
+    @Inject(EventEmitter2) private events: EventEmitter2,
     @Inject(REDIS) private redis: Redis,
   ) {}
 

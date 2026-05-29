@@ -1,11 +1,11 @@
-import { Controller, Get, HttpCode, Res } from '@nestjs/common';
+import { Controller, Get, HttpCode, Inject, Res } from '@nestjs/common';
 import type { Response } from 'express';
 import { register } from 'prom-client';
 import { HealthService } from './health.service';
 
 @Controller()
 export class HealthController {
-  constructor(private health: HealthService) {}
+  constructor(@Inject(HealthService) private health: HealthService) {}
 
   @Get('v1/health/live')
   live(): { ok: true } {

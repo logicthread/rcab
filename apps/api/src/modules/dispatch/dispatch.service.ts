@@ -67,7 +67,7 @@ export class DispatchService {
     @InjectQueue(DISPATCH_QUEUE) private readonly queue: Queue,
     @Inject(REDIS) private readonly redis: Redis,
     private readonly events: EventEmitter2,
-    config: ConfigService,
+    @Inject(ConfigService) config: ConfigService,
   ) {
     this.poolClaimScript = readFileSync(
       join(__dirname, 'lua', 'pool_claim.lua'),

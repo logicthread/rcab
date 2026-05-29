@@ -1,4 +1,4 @@
-import { IsEnum, IsLatitude, IsLongitude, IsNumber, IsOptional, IsUUID } from 'class-validator';
+import { IsEnum, IsLatitude, IsLongitude, IsNumber } from 'class-validator';
 
 export enum RideType {
   Normal = 'normal',
@@ -25,8 +25,4 @@ export class CreateRideDto {
   @IsNumber()
   @IsLongitude()
   destLng!: number;
-
-  @IsOptional()
-  @IsUUID()
-  passengerId?: string;
 }
