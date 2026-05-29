@@ -1,30 +1,62 @@
 'use client';
 
 import { useCallback, useEffect, useRef } from 'react';
+import dynamic from 'next/dynamic';
 import { withAuth } from '../../lib/auth/with-auth';
 import { useAuthStore } from '../../lib/auth/store';
 import { useBookingStore } from '../../lib/booking/store';
-import { PRESET_TRIPS, apiRideType, type Money, type PresetTrip } from '../../lib/booking/types';
+import {
+  MAP_DEFAULT_CENTER,
+  PRESET_TRIPS,
+  apiRideType,
+  type Money,
+  type Place,
+  type PresetTrip,
+} from '../../lib/booking/types';
 import { BookingApiError, createSharedRide, fetchQuote } from '../../lib/booking/api';
 import { connectBookingSocket } from '../../lib/booking/ws';
+import { reverseGeocode } from '../../lib/geo/nominatim';
+import { AddressSearch } from './address-search';
 import { RideTypeToggle } from './ride-type-toggle';
 import { PoolBadge } from './pool-badge';
 import { SoloFallbackBanner } from './solo-fallback-banner';
+
+// Leaflet touches `window`, so the map is client-only (no SSR).
+const MapPicker = dynamic(() => import('./map-picker').then((m) => m.MapPicker), {
+  ssr: false,
+  loading: () => (
+    <div
+      style={{
+        height: 340,
+        borderRadius: 8,
+        background: '#f5f5f5',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        color: '#737373',
+        fontSize: 13,
+      }}
+    >
+      Loading map…
+    </div>
+  ),
+});
 
 function formatMoney(m: Money | null | undefined): string {
   if (!m) return '—';
   return `₹${(m.amount / 100).toFixed(2)}`;
 }
 
-function isError(stage: string): stage is 'error' {
-  return stage === 'error';
-}
+const ROUTING_UNAVAILABLE_MSG =
+  "We can't route between these points yet — try pickup and drop within the city.";
 
 function BookPage() {
   const { user, jwt, signOut } = useAuthStore();
   const {
     rideType,
-    trip,
+    pickup,
+    dropoff,
+    activeField,
     stage,
     quote,
     quoteError,
@@ -33,7 +65,10 @@ function BookPage() {
     poolStatus,
     requestError,
     setRideType,
-    setTrip,
+    setActiveField,
+    setPoint,
+    applyPreset,
+    swapPoints,
     startQuoting,
     setQuote,
     setQuoteError,
@@ -46,28 +81,34 @@ function BookPage() {
   } = useBookingStore();
 
   const lastQuoteKey = useRef<string>('');
+  const bothSet = pickup !== null && dropoff !== null;
+  const quoteKey = bothSet
+    ? `${rideType}|${pickup!.lat},${pickup!.lng}|${dropoff!.lat},${dropoff!.lng}`
+    : '';
 
-  const quoteKey = `${rideType}|${trip.id}`;
-
+  // Quote whenever both endpoints are set and the route (or ride type) changes.
   useEffect(() => {
-    if (!jwt) return;
+    if (!jwt || !pickup || !dropoff) return;
     if (lastQuoteKey.current === quoteKey) return;
     lastQuoteKey.current = quoteKey;
     let cancelled = false;
     startQuoting();
-    fetchQuote(trip, apiRideType(rideType), jwt)
+    fetchQuote(pickup, dropoff, apiRideType(rideType), jwt)
       .then((res) => {
         if (!cancelled) setQuote(res);
       })
       .catch((err: unknown) => {
         if (cancelled) return;
-        const message = err instanceof BookingApiError ? err.message : 'Quote failed';
+        let message = 'Quote failed';
+        if (err instanceof BookingApiError) {
+          message = err.isRoutingUnavailable ? ROUTING_UNAVAILABLE_MSG : err.message;
+        }
         setQuoteError(message);
       });
     return () => {
       cancelled = true;
     };
-  }, [quoteKey, jwt, rideType, trip, startQuoting, setQuote, setQuoteError]);
+  }, [quoteKey, jwt, pickup, dropoff, rideType, startQuoting, setQuote, setQuoteError]);
 
   useEffect(() => {
     if (!jwt || !sharedRideId) return;
@@ -81,12 +122,30 @@ function BookPage() {
     };
   }, [jwt, sharedRideId, applyPoolUpdate]);
 
+  // Tap the map → set the active endpoint, then resolve a human label.
+  const handleMapClick = useCallback(
+    async (lat: number, lng: number) => {
+      const field = useBookingStore.getState().activeField;
+      const coordLabel = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+      setPoint(field, { lat, lng, label: coordLabel });
+      try {
+        const label = await reverseGeocode(lat, lng);
+        const current = useBookingStore.getState()[field];
+        if (current && current.lat === lat && current.lng === lng) {
+          setPoint(field, { lat, lng, label });
+        }
+      } catch {
+        /* keep the coordinate label */
+      }
+    },
+    [setPoint],
+  );
+
   const submit = useCallback(async () => {
-    if (!jwt) return;
-    if (rideType !== 'shared') return;
+    if (!jwt || rideType !== 'shared' || !pickup || !dropoff) return;
     startRequest();
     try {
-      const res = await createSharedRide(trip, jwt);
+      const res = await createSharedRide(pickup, dropoff, jwt);
       if (res.mode === 'opened') {
         setOpened(res.sharedRideId, 1, res.poolStatus);
       } else {
@@ -96,14 +155,16 @@ function BookPage() {
       const message = err instanceof BookingApiError ? err.message : 'Request failed';
       setRequestError(message);
     }
-  }, [jwt, rideType, trip, startRequest, setOpened, setSlotted, setRequestError]);
+  }, [jwt, rideType, pickup, dropoff, startRequest, setOpened, setSlotted, setRequestError]);
 
   const indicativeSeatPrice = rideType === 'shared' ? quote?.sharedEstimate?.perSeatPrice : null;
+  const routeCoords = quote?.geometry?.coordinates ?? null;
+  const mapCenter = pickup ?? MAP_DEFAULT_CENTER;
 
   return (
     <main
       style={{
-        maxWidth: 480,
+        maxWidth: 520,
         margin: '24px auto',
         padding: 16,
         fontFamily: 'system-ui, sans-serif',
@@ -126,21 +187,70 @@ function BookPage() {
         Signed in as <strong>{user?.phone_e164}</strong>
       </p>
 
-      <section style={{ marginTop: 16 }}>
-        <label style={{ fontSize: 13, fontWeight: 600 }}>Trip</label>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 6 }}>
+      <section style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <AddressSearch
+          label="Pickup"
+          placeholder="Search pickup or tap the map"
+          value={pickup}
+          active={activeField === 'pickup'}
+          testId="pickup-search"
+          onSelect={(p: Place) => setPoint('pickup', p)}
+          onFocus={() => setActiveField('pickup')}
+        />
+        <AddressSearch
+          label="Dropoff"
+          placeholder="Search dropoff or tap the map"
+          value={dropoff}
+          active={activeField === 'dropoff'}
+          testId="dropoff-search"
+          onSelect={(p: Place) => setPoint('dropoff', p)}
+          onFocus={() => setActiveField('dropoff')}
+        />
+        <button
+          type="button"
+          onClick={swapPoints}
+          disabled={!pickup && !dropoff}
+          style={{ alignSelf: 'flex-start', fontSize: 12, padding: '4px 8px' }}
+        >
+          ⇅ Swap
+        </button>
+      </section>
+
+      <section style={{ marginTop: 12 }}>
+        <div style={{ fontSize: 12, color: '#737373', marginBottom: 4 }}>
+          Quick picks (Guwahati)
+        </div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
           {PRESET_TRIPS.map((preset: PresetTrip) => (
-            <label key={preset.id} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <input
-                type="radio"
-                name="trip"
-                value={preset.id}
-                checked={preset.id === trip.id}
-                onChange={() => setTrip(preset)}
-              />
-              <span style={{ fontSize: 14 }}>{preset.label}</span>
-            </label>
+            <button
+              key={preset.id}
+              type="button"
+              onClick={() => applyPreset(preset)}
+              style={{
+                fontSize: 12,
+                padding: '6px 10px',
+                borderRadius: 16,
+                border: '1px solid #d4d4d4',
+                background: '#fafafa',
+                cursor: 'pointer',
+              }}
+            >
+              {preset.label}
+            </button>
           ))}
+        </div>
+      </section>
+
+      <section style={{ marginTop: 12 }}>
+        <MapPicker
+          pickup={pickup}
+          dropoff={dropoff}
+          routeCoords={routeCoords}
+          center={{ lat: mapCenter.lat, lng: mapCenter.lng }}
+          onMapClick={handleMapClick}
+        />
+        <div style={{ fontSize: 11, color: '#a3a3a3', marginTop: 4 }}>
+          Tap the map to set your {activeField}.
         </div>
       </section>
 
@@ -166,9 +276,18 @@ function BookPage() {
         }}
       >
         <div style={{ fontSize: 13, color: '#525252' }}>Quote</div>
+        {!bothSet && (
+          <div style={{ fontSize: 13, color: '#737373', marginTop: 4 }}>
+            Set a pickup and dropoff to see your fare.
+          </div>
+        )}
         {stage === 'quoting' && <div>Pricing…</div>}
-        {quoteError && <div style={{ color: '#b91c1c' }}>{quoteError}</div>}
-        {quote && (
+        {quoteError && (
+          <div data-testid="quote-error" style={{ color: '#b91c1c', marginTop: 4 }}>
+            {quoteError}
+          </div>
+        )}
+        {quote && stage !== 'error' && (
           <div style={{ marginTop: 6 }}>
             <div style={{ fontSize: 20, fontWeight: 700 }}>
               {rideType === 'shared'
@@ -217,7 +336,7 @@ function BookPage() {
             type="button"
             disabled
             data-testid="submit-private-disabled"
-            title="Private booking ships with E4"
+            title="Private booking ships with E4.S2"
             style={{
               width: '100%',
               padding: '12px 16px',
@@ -229,7 +348,7 @@ function BookPage() {
               cursor: 'not-allowed',
             }}
           >
-            Private booking ships with E4
+            Private booking ships with E4.S2
           </button>
         )}
         {requestError && (
@@ -254,10 +373,6 @@ function BookPage() {
             New booking
           </button>
         </section>
-      )}
-
-      {isError(stage) && quoteError && !quote && (
-        <p style={{ color: '#b91c1c', marginTop: 12 }}>{quoteError}</p>
       )}
     </main>
   );

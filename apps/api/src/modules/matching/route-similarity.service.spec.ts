@@ -8,7 +8,8 @@ import { OsrmUnavailableException } from './osrm-unavailable.exception';
 
 function buildRedis() {
   return {
-    get: vi.fn().mockResolvedValue(null) as ReturnType<typeof vi.fn> & ((key: string) => Promise<string | null>),
+    get: vi.fn().mockResolvedValue(null) as ReturnType<typeof vi.fn> &
+      ((key: string) => Promise<string | null>),
     set: vi.fn().mockResolvedValue('OK'),
   };
 }
@@ -42,14 +43,30 @@ function makeService(
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
 // Kolkata corridor: ~500m stretch along the same east-west street
-const CORRIDOR: [number, number][] = Array.from({ length: 10 }, (_, i) => [88.36 + i * 0.0005, 22.57]);
+const CORRIDOR: [number, number][] = Array.from({ length: 10 }, (_, i) => [
+  88.36 + i * 0.0005,
+  22.57,
+]);
 
 // Two routes far apart: ~111 km north (1 degree lat)
-const CORRIDOR_FAR: [number, number][] = Array.from({ length: 10 }, (_, i) => [88.36 + i * 0.0005, 23.57]);
+const CORRIDOR_FAR: [number, number][] = Array.from({ length: 10 }, (_, i) => [
+  88.36 + i * 0.0005,
+  23.57,
+]);
 
 const ROUTE_A: RouteInput = { originLat: 22.57, originLng: 88.36, destLat: 22.57, destLng: 88.364 };
-const ROUTE_B_SAME: RouteInput = { originLat: 22.57, originLng: 88.3601, destLat: 22.57, destLng: 88.3641 };
-const ROUTE_B_FAR: RouteInput = { originLat: 23.57, originLng: 88.36, destLat: 23.57, destLng: 88.364 };
+const ROUTE_B_SAME: RouteInput = {
+  originLat: 22.57,
+  originLng: 88.3601,
+  destLat: 22.57,
+  destLng: 88.3641,
+};
+const ROUTE_B_FAR: RouteInput = {
+  originLat: 23.57,
+  originLng: 88.36,
+  destLat: 23.57,
+  destLng: 88.364,
+};
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
@@ -109,16 +126,67 @@ describe('RouteSimilarityService', () => {
 
   describe('scoreRoutes — error handling', () => {
     it('throws OsrmUnavailableException when OSRM returns an HTTP error', async () => {
-      const http = { get: vi.fn().mockReturnValue(throwError(() => new AxiosError('connect EREFUSED'))) };
+      const http = {
+        get: vi.fn().mockReturnValue(throwError(() => new AxiosError('connect EREFUSED'))),
+      };
       const svc = makeService(redis, http as never);
-      await expect(svc.scoreRoutes(ROUTE_A, ROUTE_B_SAME)).rejects.toBeInstanceOf(OsrmUnavailableException);
+      await expect(svc.scoreRoutes(ROUTE_A, ROUTE_B_SAME)).rejects.toBeInstanceOf(
+        OsrmUnavailableException,
+      );
     });
 
     it('does not cache the polyline when OSRM errors', async () => {
       const http = { get: vi.fn().mockReturnValue(throwError(() => new AxiosError('timeout'))) };
       const svc = makeService(redis, http as never);
-      await expect(svc.scoreRoutes(ROUTE_A, ROUTE_B_SAME)).rejects.toBeInstanceOf(OsrmUnavailableException);
+      await expect(svc.scoreRoutes(ROUTE_A, ROUTE_B_SAME)).rejects.toBeInstanceOf(
+        OsrmUnavailableException,
+      );
       expect(redis.set).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe('RouteSimilarityService.getRouteGeometry', () => {
+  let redis: ReturnType<typeof buildRedis>;
+
+  beforeEach(() => {
+    redis = buildRedis();
+  });
+
+  // NE-India (Guwahati) — within the loaded OSRM dev graph.
+  const ROUTE: RouteInput = {
+    originLat: 26.1445,
+    originLng: 91.7362,
+    destLat: 26.1758,
+    destLng: 91.7898,
+  };
+  const LINE: [number, number][] = [
+    [91.7362, 26.1445],
+    [91.75, 26.16],
+    [91.7898, 26.1758],
+  ];
+
+  it('returns a GeoJSON LineString built from the OSRM geometry', async () => {
+    const http = buildHttp([LINE]);
+    const svc = makeService(redis, http);
+    const geo = await svc.getRouteGeometry(ROUTE);
+    expect(geo).toEqual({ type: 'LineString', coordinates: LINE });
+  });
+
+  it('reuses the osrm:poly cache (no HTTP on a cache hit)', async () => {
+    redis.get.mockResolvedValue(JSON.stringify(LINE));
+    const http = buildHttp([]);
+    const svc = makeService(redis, http);
+    const geo = await svc.getRouteGeometry(ROUTE);
+    expect(geo.coordinates).toEqual(LINE);
+    expect(http.get).not.toHaveBeenCalled();
+  });
+
+  it('throws OsrmUnavailableException when OSRM is unreachable or returns no route', async () => {
+    const http = {
+      get: vi.fn().mockReturnValue(throwError(() => new AxiosError('connect ECONNREFUSED'))),
+    };
+    const svc = makeService(redis, http as never);
+    await expect(svc.getRouteGeometry(ROUTE)).rejects.toBeInstanceOf(OsrmUnavailableException);
   });
 });

@@ -12,9 +12,11 @@
   "dependencies": {
     "@rcab/shared": "workspace:*",
     "firebase": "^12.13.0",
+    "leaflet": "^1.9.4",
     "next": "^14.2.29",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "react-leaflet": "^4.2.1",
     "socket.io-client": "^4.8.3",
     "zustand": "^5.0.13"
   },
@@ -22,6 +24,7 @@
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",
+    "@types/leaflet": "^1.9.12",
     "@types/node": "^22.15.21",
     "@types/react": "^18.3.23",
     "@types/react-dom": "^18.3.7",
