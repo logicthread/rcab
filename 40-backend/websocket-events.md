@@ -31,7 +31,7 @@ On connect, server places the socket in personal + role rooms:
 | Event | Payload | When |
 |---|---|---|
 | `driver_state` | `{ availability, current_ride_id }` | Replayed to driver on WS reconnect (from `driver:state:<id>` Redis hash) |
-| `ride_offer` | `{ offer_id, request, ttl_ms, pickup, fare_est, est_pickup_eta_s }` | Top-K dispatch reaches this driver |
+| `ride_offer` | `{ offer_id, request?, ttl_ms, pickup, fare_est, est_pickup_eta_s }` (solo) or `{ offerId, sharedRideId, ttlMs, stops[], passengerCount, waveNumber }` (shared, E5.S4) | Top-K dispatch reaches this driver. `stops[].type` ∈ `pickup`/`dropoff`; `stops[]` is ordered: pickups first (by proximity to pool origin centroid), then drops (by proximity to dest centroid). Each entry carries `passengerId` + `sequenceIndex`. |
 | `ride_offer_revoked` | `{ offer_id, reason }` | Someone else accepted / client canceled |
 | `ride_state_changed` | `{ ride_id, state, by }` | Any state transition |
 | `passenger_added` | `{ ride_id, request, new_route_polyline }` | Shared-ride: new joiner slotted |
@@ -51,6 +51,7 @@ On connect, server places the socket in personal + role rooms:
 | Event | Payload | Notes |
 |---|---|---|
 | `driver:location` | `{ lat, lng, heading, speed }` | sent every ~5s while online |
+| `ride_offer_response` | `{ offerId, sharedRideId?, accept }` | E5.S4. `accept=true` w/ `sharedRideId` triggers `DispatchService.claimPool` (atomic Lua); decline just releases the offer lock. If `sharedRideId` is omitted the server resolves it via `offer:meta:<offerId>`. |
 | `ping` | `{}` | for liveness; server replies `pong` |
 
 ## Throttling and back-pressure

@@ -38,6 +38,8 @@ stateDiagram-v2
 - `open → closed_timeout` fires from a BullMQ delayed job (`matching` queue, name `pool:expire`, default delay 60 s). The job ID format is `pool:expire:<ride_id>` so non-timeout transitions can `queue.remove()` it.
 - Terminal-state writes mirror to Postgres (`shared_rides.pool_state` + `pool_closed_at`) and to Redis HASH `pool:<id>` (`state`, `closed_at`) — see [[redis-usage]].
 - `closed_started` and `aborted` are emitted by E5.S4 (dispatch outcome), not by lifecycle itself.
+- `aborted` is written by `DispatchService.handleHardFail` after all dispatch waves expire without a driver claim. It calls `PoolLifecycleService.closePool(rideId, 'aborted')` and revokes outstanding offers. Per-member re-queue into the solo dispatch path is deferred to `TODO(RCAB-E4.S3)`.
+- `closed_full → claimed`: `DispatchService.claimPool` does not transition the pool state; it only stamps `claimed_by_driver_id` + `claimed_at` on the row (and the Redis HASH). The `closed_started` transition fires when the driver actually starts the ride (E4.S6).
 
 ## See also
 - [[entity-shared-ride]] · [[features-shared-rides]]
