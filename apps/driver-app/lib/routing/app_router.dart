@@ -8,6 +8,8 @@ import '../features/auth/sign_in_screen.dart';
 import '../features/home/home_screen.dart';
 import '../features/offer/offer_screen.dart';
 import '../features/ride/ride_screen.dart';
+import '../features/shared_ride/shared_ride_screen.dart';
+import '../features/rating/rating_screen.dart';
 import '../features/earnings/earnings_screen.dart';
 import '../features/profile/profile_screen.dart';
 import '../features/profile/vehicle_form_screen.dart';
@@ -45,6 +47,16 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/ride/:id',
         builder: (_, state) =>
             RideScreen(rideId: state.pathParameters['id']!),
+      ),
+      GoRoute(
+        path: '/shared-ride/:id',
+        builder: (_, state) =>
+            SharedRideScreen(rideId: state.pathParameters['id']!),
+      ),
+      GoRoute(
+        path: '/rating/:id',
+        builder: (_, state) =>
+            RatingScreen(rideId: state.pathParameters['id']!),
       ),
       GoRoute(
         path: '/earnings',

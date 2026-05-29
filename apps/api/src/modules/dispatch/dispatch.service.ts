@@ -23,21 +23,18 @@ import {
   type SharedRideMember,
   type SharedRideRow,
 } from '../matching/shared-ride.repository';
-import type {
-  ClaimResult,
-  OfferStop,
-  SharedRideOfferPayload,
-} from './dispatch.types';
+import { RideStopRepository } from '../matching/ride-stop.repository';
+import type { ClaimResult, OfferStop, SharedRideOfferPayload } from './dispatch.types';
 
 export const DISPATCH_QUEUE = 'dispatch';
-export const WAVE_TIMEOUT_JOB   = 'dispatch:wave-timeout';
-export const HARD_FAIL_JOB      = 'dispatch:hard-fail';
+export const WAVE_TIMEOUT_JOB = 'dispatch:wave-timeout';
+export const HARD_FAIL_JOB = 'dispatch:hard-fail';
 
 const STOPS_CACHE_TTL_S = 600;
-const OFFER_TTL_MS      = 12_000;
+const OFFER_TTL_MS = 12_000;
 
 interface WaveTimeoutJob {
-  rideId:     string;
+  rideId: string;
   waveNumber: number;
 }
 
@@ -62,6 +59,7 @@ export class DispatchService {
 
   constructor(
     private readonly repo: SharedRideRepository,
+    private readonly stops: RideStopRepository,
     private readonly lifecycle: PoolLifecycleService,
     private readonly bus: RealtimeBus,
     @InjectQueue(DISPATCH_QUEUE) private readonly queue: Queue,
@@ -69,18 +67,15 @@ export class DispatchService {
     private readonly events: EventEmitter2,
     @Inject(ConfigService) config: ConfigService,
   ) {
-    this.poolClaimScript = readFileSync(
-      join(__dirname, 'lua', 'pool_claim.lua'),
-      'utf-8',
-    );
+    this.poolClaimScript = readFileSync(join(__dirname, 'lua', 'pool_claim.lua'), 'utf-8');
 
     this.params = {
-      k1:               config.get<number>('DISPATCH_K1')                 ?? 5,
-      k2:               config.get<number>('DISPATCH_K2')                 ?? 10,
-      r1Meters:         config.get<number>('DISPATCH_R1_METERS')          ?? 2_000,
-      r2Meters:         config.get<number>('DISPATCH_R2_METERS')          ?? 4_000,
+      k1: config.get<number>('DISPATCH_K1') ?? 5,
+      k2: config.get<number>('DISPATCH_K2') ?? 10,
+      r1Meters: config.get<number>('DISPATCH_R1_METERS') ?? 2_000,
+      r2Meters: config.get<number>('DISPATCH_R2_METERS') ?? 4_000,
       waveOneTimeoutMs: config.get<number>('DISPATCH_WAVE_ONE_TIMEOUT_MS') ?? 30_000,
-      hardFailMs:       config.get<number>('DISPATCH_HARD_FAIL_MS')        ?? 60_000,
+      hardFailMs: config.get<number>('DISPATCH_HARD_FAIL_MS') ?? 60_000,
     };
   }
 
@@ -188,8 +183,8 @@ export class DispatchService {
 
       const payload: SharedRideOfferPayload = {
         offerId,
-        sharedRideId:   pool.rideId,
-        ttlMs:          OFFER_TTL_MS,
+        sharedRideId: pool.rideId,
+        ttlMs: OFFER_TTL_MS,
         stops,
         passengerCount: pool.members.length,
         waveNumber,
@@ -209,16 +204,12 @@ export class DispatchService {
           removeOnFail: 100,
         },
       );
-      await this.queue.add(
-        HARD_FAIL_JOB,
-        { rideId: pool.rideId } satisfies HardFailJob,
-        {
-          jobId: hardFailJobId(pool.rideId),
-          delay: this.params.hardFailMs,
-          removeOnComplete: true,
-          removeOnFail: 100,
-        },
-      );
+      await this.queue.add(HARD_FAIL_JOB, { rideId: pool.rideId } satisfies HardFailJob, {
+        jobId: hardFailJobId(pool.rideId),
+        delay: this.params.hardFailMs,
+        removeOnComplete: true,
+        removeOnFail: 100,
+      });
     }
   }
 
@@ -254,14 +245,47 @@ export class DispatchService {
 
     if (code === -2) return { ok: false, reason: 'not_found' };
     if (code === -1) return { ok: false, reason: 'not_closed' };
-    if (code === 0)  return { ok: false, reason: 'already_taken' };
+    if (code === 0) return { ok: false, reason: 'already_taken' };
 
     await this.repo.setClaimed(rideId, driverId, claimedAt);
+    await this.persistStops(rideId);
+    await this.redis.hset(`driver:state:${driverId}`, 'current_ride_id', rideId).catch(() => {
+      this.log.warn({ rideId, driverId }, 'failed to set driver:state.current_ride_id');
+    });
     await this.revokeAllOffers(rideId);
     await this.queue.remove(waveTimeoutJobId(rideId, 2)).catch(() => {});
     await this.queue.remove(hardFailJobId(rideId)).catch(() => {});
 
     return { ok: true, reason: 'claimed' };
+  }
+
+  private async persistStops(rideId: string): Promise<void> {
+    const cached = await this.redis.get(`pool:${rideId}:stops`);
+    if (!cached) {
+      this.log.warn({ rideId }, 'persistStops: no cached stops; cannot seed ride_stops');
+      return;
+    }
+    let parsed: OfferStop[];
+    try {
+      parsed = JSON.parse(cached) as OfferStop[];
+    } catch (err) {
+      this.log.warn({ err, rideId }, 'persistStops: malformed stops cache');
+      return;
+    }
+    try {
+      await this.stops.seed(
+        rideId,
+        parsed.map((s) => ({
+          sequenceIndex: s.sequenceIndex,
+          passengerId: s.passengerId,
+          type: s.type,
+          lat: s.lat,
+          lng: s.lng,
+        })),
+      );
+    } catch (err) {
+      this.log.error({ err, rideId }, 'persistStops: ride_stops seed failed');
+    }
   }
 
   private async revokeAllOffers(rideId: string): Promise<void> {
@@ -304,34 +328,26 @@ export class DispatchService {
 // ── Pure helpers ─────────────────────────────────────────────────────────────
 
 export function computeStops(pool: SharedRideRow): OfferStop[] {
-  const pickups = sortMembersByDistance(
-    pool.members,
-    pool.originLng,
-    pool.originLat,
-  );
-  const dropoffs = sortMembersByDistance(
-    pool.members,
-    pool.destLng,
-    pool.destLat,
-  );
+  const pickups = sortMembersByDistance(pool.members, pool.originLng, pool.originLat);
+  const dropoffs = sortMembersByDistance(pool.members, pool.destLng, pool.destLat);
 
   const stops: OfferStop[] = [];
   let seq = 0;
   for (const m of pickups) {
     stops.push({
-      type:          'pickup',
-      lat:           m.origin_lat,
-      lng:           m.origin_lng,
-      passengerId:   m.passenger_id,
+      type: 'pickup',
+      lat: m.origin_lat,
+      lng: m.origin_lng,
+      passengerId: m.passenger_id,
       sequenceIndex: seq++,
     });
   }
   for (const m of dropoffs) {
     stops.push({
-      type:          'dropoff',
-      lat:           m.dest_lat,
-      lng:           m.dest_lng,
-      passengerId:   m.passenger_id,
+      type: 'dropoff',
+      lat: m.dest_lat,
+      lng: m.dest_lng,
+      passengerId: m.passenger_id,
       sequenceIndex: seq++,
     });
   }
@@ -349,9 +365,7 @@ function sortMembersByDistance(
     const dLam = ((lng2 - lng1) * Math.PI) / 180;
     const phi1 = (lat1 * Math.PI) / 180;
     const phi2 = (lat2 * Math.PI) / 180;
-    const a =
-      Math.sin(dPhi / 2) ** 2 +
-      Math.cos(phi1) * Math.cos(phi2) * Math.sin(dLam / 2) ** 2;
+    const a = Math.sin(dPhi / 2) ** 2 + Math.cos(phi1) * Math.cos(phi2) * Math.sin(dLam / 2) ** 2;
     return 2 * R * Math.asin(Math.sqrt(a));
   };
 

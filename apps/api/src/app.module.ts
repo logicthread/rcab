@@ -17,6 +17,7 @@ import { DriversModule } from './modules/drivers/drivers.module';
 import { RealtimeModule } from './modules/realtime/realtime.module';
 import { RidesModule } from './modules/rides/rides.module';
 import { DispatchModule } from './modules/dispatch/dispatch.module';
+import { RideLifecycleModule } from './modules/ride-lifecycle/ride-lifecycle.module';
 import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
 import { MetricsMiddleware } from './common/middleware/metrics.middleware';
 import { AppExceptionFilter } from './common/filters/app-exception.filter';
@@ -51,6 +52,7 @@ function parseRedisConnection() {
     RealtimeModule,
     RidesModule,
     DispatchModule,
+    RideLifecycleModule,
   ],
   providers: [
     { provide: APP_FILTER, useClass: AppExceptionFilter },
