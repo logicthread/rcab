@@ -16,7 +16,7 @@ audience: both
 |---|---|---|
 | `/` (public) | Marketing landing | SSR; PWA install prompt for return visits |
 | `/sign-in` (public) | Phone + OTP, Google | [[journey-client-otp-signup]] |
-| `/book` | Booking screen | default landing post-auth |
+| `/book` | Booking screen | default landing post-auth. RCAB-E5.S6: preset trip picker + ride-type toggle (`Share` default), live quote, `Book share` submit, WS `pool:update` badge / solo-fallback banner. Private booking ships with E4. |
 | `/ride/:id` | Live ride tracking | redirects from /book once matched |
 | `/history` | Past rides + dispute | [[features-history-dashboard]] |
 | `/history/:id` | Single past ride detail | |

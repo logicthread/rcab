@@ -24,6 +24,7 @@ On connect, server places the socket in personal + role rooms:
 - `user:<user_id>` — all events for this user
 - `driver:<driver_id>` — driver-specific events
 - `ride:<ride_id>` — joined when a ride starts; left when it ends
+- `pool:<shared_ride_id>` — joined when the client opens or joins a shared-ride pool (server-side via `RealtimeBus.joinPool`); left implicitly when the socket disconnects
 
 ## Server → Client events
 
@@ -44,7 +45,7 @@ On connect, server places the socket in personal + role rooms:
 | `driver_assigned` | `{ ride_id, driver: {...}, vehicle: {...}, eta_s }` | Match made |
 | `driver_location` | `{ ride_id, lat, lng, heading }` | Throttled 1Hz while ride is live |
 | `ride_state_changed` | `{ ride_id, state }` | Ride lifecycle |
-| `pool_update` | `{ request_id, pool_size, pool_closed_at }` | Shared-ride pooling |
+| `pool:update` | `{ sharedRideId, seatCount, poolStatus }` | Shared-ride pool transitions (RCAB-E5.S6). `poolStatus` ∈ `open` / `closed_full` / `closed_timeout`. Targeted at room `pool:<shared_ride_id>`. Emitted by `PoolLifecycleService` after `openPool`, `slotRequest`, and `closePool('closed_timeout' \| 'closed_full')`. |
 
 ## Client → Server events
 
