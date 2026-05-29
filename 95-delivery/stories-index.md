@@ -84,7 +84,7 @@ audience: both
 | RCAB-E5.S4 | [[story-rcab-e5-s4-shared-ride-dispatch]] — Shared-ride dispatch (offer reflects pool span) | ■ |
 | RCAB-E5.S5 | [[story-rcab-e5-s5-shared-ride-pricing]] — Shared-ride pricing per seat | ■ |
 | RCAB-E5.S6 | [[story-rcab-e5-s6-web-booking-share-ui]] — Web booking UI — 'Share' default + pool-update events | ■ |
-| RCAB-E5.S7 | [[story-rcab-e5-s7-driver-app-multi-stop]] — Driver app — multi-stop ride screen, per-passenger drop | ▶ |
+| RCAB-E5.S7 | [[story-rcab-e5-s7-driver-app-multi-stop]] — Driver app — multi-stop ride screen, per-passenger drop | ■ |
 
 ## E6 — Scheduled booking → Demo 5 · "Scheduled works"
 *BullMQ delayed jobs, wake-up dispatch.* See [[epic-e6-scheduled-booking]].

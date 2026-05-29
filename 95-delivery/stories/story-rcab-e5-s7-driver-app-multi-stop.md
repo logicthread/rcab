@@ -1,7 +1,7 @@
 ---
 title: RCAB-E5.S7 — Driver app — multi-stop ride screen, per-passenger drop
 tags: [layer/delivery, kind/story]
-status: in_progress
+status: done
 phase: 0
 epic: [[epic-e5-shared-booking]]
 demo: 4
