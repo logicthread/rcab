@@ -6,20 +6,29 @@ import type { SharedRideRow } from './shared-ride.repository';
 
 // Kolkata: two nearby points ~200 m apart
 const REQUEST: SharedRideRequest = {
+  passengerId: 'p-joiner',
   originLat: 22.5726, originLng: 88.3639,
   destLat:   22.5800, destLng:   88.3700,
 };
 
 function pool(overrides: Partial<SharedRideRow> = {}): SharedRideRow {
   return {
-    rideId:        'pool-uuid-1',
-    seatCount:     1,
-    maxSeats:      3,
-    poolState:     'open',
-    poolClosedAt:  null,
-    detourBudgetM: 800,
+    rideId:            'pool-uuid-1',
+    seatCount:         1,
+    maxSeats:          3,
+    poolState:         'open',
+    poolClosedAt:      null,
+    detourBudgetM:     800,
     originLat: 22.5727, originLng: 88.3640,
     destLat:   22.5801, destLng:   88.3701,
+    members: [{
+      passenger_id: 'p-opener',
+      origin_lat: 22.5727, origin_lng: 88.3640,
+      dest_lat:   22.5801, dest_lng:   88.3701,
+      joined_at: '2026-05-29T00:00:00.000Z',
+    }],
+    claimedByDriverId: null,
+    claimedAt:         null,
     ...overrides,
   };
 }
@@ -96,6 +105,9 @@ describe('MatchingService.findOrCreatePool', () => {
 
       expect(result).toEqual({ mode: 'slotted', sharedRideId: 'pool-uuid-1', poolStatus: 'open' });
       expect(lifecycle.slotRequest).toHaveBeenCalledTimes(1);
+      expect(lifecycle.slotRequest).toHaveBeenCalledWith(expect.objectContaining({
+        joiner: expect.objectContaining({ passenger_id: 'p-joiner' }),
+      }));
       expect(lifecycle.openPool).not.toHaveBeenCalled();
     });
 
@@ -125,9 +137,10 @@ describe('MatchingService.findOrCreatePool', () => {
       expect(result.mode).toBe('opened');
       expect(result.sharedRideId).toBe('new-pool-uuid');
       expect(lifecycle.openPool).toHaveBeenCalledWith(expect.objectContaining({
-        originLat: REQUEST.originLat,
-        maxSeats: 3,
+        originLat:     REQUEST.originLat,
+        maxSeats:      3,
         detourBudgetM: 800,
+        passengerId:   'p-joiner',
       }));
     });
   });
@@ -144,7 +157,9 @@ describe('MatchingService.findOrCreatePool', () => {
 
       expect(result.mode).toBe('slotted');
       expect(result.sharedRideId).toBe('pool-a');
-      expect(lifecycle.slotRequest).toHaveBeenCalledWith(expect.objectContaining({ rideId: 'pool-a' }));
+      expect(lifecycle.slotRequest).toHaveBeenCalledWith(expect.objectContaining({
+        pool: expect.objectContaining({ rideId: 'pool-a' }),
+      }));
     });
   });
 

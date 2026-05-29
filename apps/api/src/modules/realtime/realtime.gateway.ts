@@ -9,6 +9,7 @@ import {
   ConnectedSocket,
 } from '@nestjs/websockets';
 import { Inject, Logger } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { JwtService } from '@nestjs/jwt';
 import type { Server, Socket } from 'socket.io';
 import { createAdapter } from '@socket.io/redis-adapter';
@@ -16,6 +17,18 @@ import type Redis from 'ioredis';
 import { REDIS } from '../../infra/redis/redis.module';
 import { RealtimeBus } from './realtime.bus';
 import type { JwtPayload } from '../../common/guards/auth.guard';
+
+export const RIDE_OFFER_RESPONSE_EVENT = 'dispatch.ride_offer_response';
+
+interface RideOfferResponsePayload {
+  offerId:       string;
+  sharedRideId?: string;
+  accept:        boolean;
+}
+
+export interface RideOfferResponseEvent extends RideOfferResponsePayload {
+  driverId: string;
+}
 
 interface LocationPayload {
   lat: number;
@@ -36,6 +49,7 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
   constructor(
     private jwt: JwtService,
     private bus: RealtimeBus,
+    private events: EventEmitter2,
     @Inject(REDIS) private redis: Redis,
   ) {}
 
@@ -86,6 +100,23 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
       this.redis.geoadd('active_drivers', data.lng, data.lat, driverId),
       this.redis.hset(`driver:state:${driverId}`, 'last_seen', String(now)),
     ]);
+  }
+
+  @SubscribeMessage('ride_offer_response')
+  handleRideOfferResponse(
+    @MessageBody() data: RideOfferResponsePayload,
+    @ConnectedSocket() client: Socket,
+  ): void {
+    const driverId = client.data.userId as string | undefined;
+    if (!driverId || client.data.role !== 'driver') return;
+    if (!data || typeof data.offerId !== 'string') return;
+
+    this.events.emit(RIDE_OFFER_RESPONSE_EVENT, {
+      driverId,
+      offerId:      data.offerId,
+      sharedRideId: data.sharedRideId,
+      accept:       Boolean(data.accept),
+    } satisfies RideOfferResponseEvent);
   }
 
   handleDisconnect(client: Socket): void {

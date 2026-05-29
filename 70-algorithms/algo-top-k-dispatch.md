@@ -60,6 +60,16 @@ on all offers expired and no accept:
 
 Two drivers may tap "accept" at the same millisecond. We need a single point of atomic decision. Redis is millisecond-fast; Postgres `SELECT FOR UPDATE` would also work but is heavier and brings the DB into the hot path.
 
+## Shared-ride variant (E5.S4)
+
+For pools closed by `closed_full` or `closed_timeout`, the same top-K machinery is reused but the offer payload is enriched and the claim is per-pool not per-offer:
+
+- Candidates: `GEORADIUS active_drivers <pool.origin> R k+excluded ASC` then filter against `pool:<ride_id>:offered`.
+- Payload: `ride_offer { offerId, sharedRideId, ttlMs, stops[], passengerCount, waveNumber }`. `stops[]` is computed once from `pool.members` (pickups sorted by proximity to `origin_centroid`, drops by proximity to `dest_centroid`) and cached at `pool:<ride_id>:stops` for stability across waves.
+- Wave-1 K=5 R=2 km; wave-2 K=10 R=4 km at 30 s; hard-fail 60 s.
+- Claim: `pool_claim.lua` atomically stamps `claimed_by` + `claimed_at` on `pool:<ride_id>` HASH. Result codes `1` / `0` / `-1` / `-2` (see [[redis-usage]]). On success: `setClaimed` in Postgres, revoke `offer:list:<ride_id>`, remove `dispatch:wave2-timeout:<ride_id>` + `dispatch:hard-fail:<ride_id>` BullMQ jobs.
+- Hard-fail: `DispatchService.handleHardFail` closes the pool to `aborted` and revokes outstanding offers. Solo re-queue is a deferred carve-out.
+
 ## Future ranking blend (Phase-1, gated by data)
 
 When we have ≥ 5 ratings per driver, replace pure-distance ordering with:

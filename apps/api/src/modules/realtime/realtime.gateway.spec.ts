@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { RealtimeGateway } from './realtime.gateway';
+import { RealtimeGateway, RIDE_OFFER_RESPONSE_EVENT } from './realtime.gateway';
 import { JwtService } from '@nestjs/jwt';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { RealtimeBus } from './realtime.bus';
 import type { Socket } from 'socket.io';
 
@@ -25,6 +26,10 @@ function buildBus() {
   return { setServer: vi.fn(), toDriver: vi.fn() } as unknown as RealtimeBus;
 }
 
+function buildEvents() {
+  return new EventEmitter2();
+}
+
 function makeSocket(overrides: { userId?: string; role?: string } = {}): Socket {
   return {
     data: { userId: overrides.userId ?? DRIVER_ID, role: overrides.role ?? 'driver' },
@@ -46,7 +51,7 @@ describe('RealtimeGateway — driver:location handler', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     redis = buildRedis();
-    gateway = new RealtimeGateway(buildJwt(), buildBus(), redis as never);
+    gateway = new RealtimeGateway(buildJwt(), buildBus(), buildEvents(), redis as never);
   });
 
   afterEach(() => {
@@ -113,6 +118,60 @@ describe('RealtimeGateway — driver:location handler', () => {
   });
 });
 
+describe('RealtimeGateway — ride_offer_response handler', () => {
+  let gateway: RealtimeGateway;
+  let events: EventEmitter2;
+
+  beforeEach(() => {
+    events = new EventEmitter2();
+    gateway = new RealtimeGateway(buildJwt(), buildBus(), events, buildRedis() as never);
+  });
+
+  it('emits dispatch.ride_offer_response with driverId from socket data', () => {
+    const seen = vi.fn();
+    events.on(RIDE_OFFER_RESPONSE_EVENT, seen);
+    const client = makeSocket();
+
+    gateway.handleRideOfferResponse(
+      { offerId: 'offer-1', sharedRideId: 'pool-1', accept: true },
+      client,
+    );
+
+    expect(seen).toHaveBeenCalledWith({
+      driverId:     DRIVER_ID,
+      offerId:      'offer-1',
+      sharedRideId: 'pool-1',
+      accept:       true,
+    });
+  });
+
+  it('ignores responses from non-driver sockets', () => {
+    const seen = vi.fn();
+    events.on(RIDE_OFFER_RESPONSE_EVENT, seen);
+    const client = makeSocket({ role: 'client' });
+
+    gateway.handleRideOfferResponse(
+      { offerId: 'offer-2', accept: true },
+      client,
+    );
+
+    expect(seen).not.toHaveBeenCalled();
+  });
+
+  it('ignores malformed payloads', () => {
+    const seen = vi.fn();
+    events.on(RIDE_OFFER_RESPONSE_EVENT, seen);
+    const client = makeSocket();
+
+    gateway.handleRideOfferResponse(
+      { offerId: 123 } as unknown as { offerId: string; accept: boolean },
+      client,
+    );
+
+    expect(seen).not.toHaveBeenCalled();
+  });
+});
+
 describe('RealtimeGateway — handleConnection reconnect state replay', () => {
   let gateway: RealtimeGateway;
   let redis: ReturnType<typeof buildRedis>;
@@ -121,7 +180,7 @@ describe('RealtimeGateway — handleConnection reconnect state replay', () => {
   beforeEach(() => {
     redis = buildRedis();
     jwt = buildJwt();
-    gateway = new RealtimeGateway(jwt, buildBus(), redis as never);
+    gateway = new RealtimeGateway(jwt, buildBus(), buildEvents(), redis as never);
   });
 
   it('emits driver_state when driver:state:<id> exists in Redis', async () => {

@@ -7,6 +7,7 @@ import {
   numeric,
   boolean,
   doublePrecision,
+  jsonb,
   check,
   index,
 } from 'drizzle-orm/pg-core';
@@ -64,20 +65,32 @@ export const authRefreshToken = pgTable('auth_refresh_token', {
   index('auth_refresh_token_user_idx').on(t.userId),
 ]);
 
+export interface SharedRideMember {
+  passenger_id: string;
+  origin_lat:   number;
+  origin_lng:   number;
+  dest_lat:     number;
+  dest_lng:     number;
+  joined_at:    string;
+}
+
 export const sharedRide = pgTable('shared_rides', {
-  rideId:        uuid('ride_id').primaryKey(),
-  seatCount:     integer('seat_count').notNull().default(0),
-  maxSeats:      integer('max_seats').notNull().default(3),
-  poolState:     text('pool_state').notNull().default('open'),
-  poolOpenedAt:  timestamp('pool_opened_at', { withTimezone: true }).notNull().defaultNow(),
-  poolClosedAt:  timestamp('pool_closed_at', { withTimezone: true }),
-  detourBudgetM: integer('detour_budget_m').notNull().default(800),
-  originLat:     doublePrecision('origin_lat').notNull(),
-  originLng:     doublePrecision('origin_lng').notNull(),
-  destLat:       doublePrecision('dest_lat').notNull(),
-  destLng:       doublePrecision('dest_lng').notNull(),
-  createdAt:     timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-  updatedAt:     timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  rideId:             uuid('ride_id').primaryKey(),
+  seatCount:          integer('seat_count').notNull().default(0),
+  maxSeats:           integer('max_seats').notNull().default(3),
+  poolState:          text('pool_state').notNull().default('open'),
+  poolOpenedAt:       timestamp('pool_opened_at', { withTimezone: true }).notNull().defaultNow(),
+  poolClosedAt:       timestamp('pool_closed_at', { withTimezone: true }),
+  detourBudgetM:      integer('detour_budget_m').notNull().default(800),
+  originLat:          doublePrecision('origin_lat').notNull(),
+  originLng:          doublePrecision('origin_lng').notNull(),
+  destLat:            doublePrecision('dest_lat').notNull(),
+  destLng:            doublePrecision('dest_lng').notNull(),
+  members:            jsonb('members').notNull().$type<SharedRideMember[]>().default([]),
+  claimedByDriverId:  uuid('claimed_by_driver_id'),
+  claimedAt:          timestamp('claimed_at', { withTimezone: true }),
+  createdAt:          timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt:          timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [
   index('shared_rides_state_idx').on(t.poolState),
   check('shared_rides_state_check', sql`${t.poolState} IN ('open','closed_full','closed_started','closed_timeout','aborted')`),
