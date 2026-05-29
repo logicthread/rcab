@@ -83,7 +83,7 @@ export class PricingService {
   constructor(
     private readonly http: HttpService,
     @Inject(REDIS) private readonly redis: Redis,
-    config: ConfigService,
+    @Inject(ConfigService) config: ConfigService,
   ) {
     this.osrmBase =
       config.get<string>('OSRM_BASE_URL') ?? config.get<string>('OSRM_URL') ?? 'http://osrm:5000';

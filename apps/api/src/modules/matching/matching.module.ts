@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { HttpModule } from '@nestjs/axios';
 import { ConfigModule } from '@nestjs/config';
 import { BullModule } from '@nestjs/bullmq';
+import { RealtimeModule } from '../realtime/realtime.module';
 import { RouteSimilarityService } from './route-similarity.service';
 import { SharedRideRepository } from './shared-ride.repository';
 import { MatchingService } from './matching.service';
@@ -12,6 +13,7 @@ import { PoolExpireProcessor } from './pool-expire.processor';
   imports: [
     HttpModule,
     ConfigModule,
+    RealtimeModule,
     BullModule.registerQueue({ name: MATCHING_QUEUE }),
   ],
   providers: [
@@ -21,11 +23,6 @@ import { PoolExpireProcessor } from './pool-expire.processor';
     MatchingService,
     PoolExpireProcessor,
   ],
-  exports: [
-    RouteSimilarityService,
-    SharedRideRepository,
-    PoolLifecycleService,
-    MatchingService,
-  ],
+  exports: [RouteSimilarityService, SharedRideRepository, PoolLifecycleService, MatchingService],
 })
 export class MatchingModule {}

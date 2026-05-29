@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { RouteSimilarityService, type RouteInput } from './route-similarity.service';
 import { SharedRideRepository, type SharedRideRow } from './shared-ride.repository';
@@ -44,7 +44,7 @@ export class MatchingService {
     private readonly repo: SharedRideRepository,
     private readonly scorer: RouteSimilarityService,
     private readonly lifecycle: PoolLifecycleService,
-    config: ConfigService,
+    @Inject(ConfigService) config: ConfigService,
   ) {
     this.similarityThreshold = config.get<number>('MATCHING_SIMILARITY_THRESHOLD') ?? 0.7;
     this.detourBudgetM       = config.get<number>('MATCHING_DETOUR_BUDGET_M')       ?? 800;

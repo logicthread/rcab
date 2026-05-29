@@ -7,6 +7,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type Redis from 'ioredis';
 import { REDIS } from '../../infra/redis/redis.module';
+import { RealtimeBus } from '../realtime/realtime.bus';
 import {
   SharedRideRepository,
   type SharedRideMember,
@@ -16,12 +17,15 @@ import {
 export const MATCHING_QUEUE = 'matching';
 export const POOL_EXPIRE_JOB = 'pool:expire';
 export const POOL_CLOSED_EVENT = 'pool.closed';
+export const POOL_UPDATE_EVENT = 'pool:update';
 
-export type PoolCloseReason =
-  | 'closed_full'
-  | 'closed_timeout'
-  | 'closed_started'
-  | 'aborted';
+export interface PoolUpdatePayload {
+  sharedRideId: string;
+  seatCount: number;
+  poolStatus: 'open' | 'closed_full' | 'closed_timeout';
+}
+
+export type PoolCloseReason = 'closed_full' | 'closed_timeout' | 'closed_started' | 'aborted';
 
 export type PoolStatus = 'open' | PoolCloseReason;
 
@@ -64,7 +68,8 @@ export class PoolLifecycleService {
     @InjectQueue(MATCHING_QUEUE) private readonly queue: Queue,
     @Inject(REDIS) private readonly redis: Redis,
     private readonly events: EventEmitter2,
-    config: ConfigService,
+    private readonly bus: RealtimeBus,
+    @Inject(ConfigService) config: ConfigService,
   ) {
     this.poolTimeoutMs = config.get<number>('MATCHING_POOL_TIMEOUT_MS') ?? 60_000;
     this.poolSlotScript = readFileSync(join(__dirname, 'lua', 'pool_slot.lua'), 'utf-8');
@@ -73,19 +78,19 @@ export class PoolLifecycleService {
   async openPool(params: OpenPoolParams): Promise<SharedRideRow> {
     const opener: SharedRideMember = {
       passenger_id: params.passengerId,
-      origin_lat:   params.originLat,
-      origin_lng:   params.originLng,
-      dest_lat:     params.destLat,
-      dest_lng:     params.destLng,
-      joined_at:    new Date().toISOString(),
+      origin_lat: params.originLat,
+      origin_lng: params.originLng,
+      dest_lat: params.destLat,
+      dest_lng: params.destLng,
+      joined_at: new Date().toISOString(),
     };
 
     const pool = await this.repo.create({
-      originLat:     params.originLat,
-      originLng:     params.originLng,
-      destLat:       params.destLat,
-      destLng:       params.destLng,
-      maxSeats:      params.maxSeats,
+      originLat: params.originLat,
+      originLng: params.originLng,
+      destLat: params.destLat,
+      destLng: params.destLng,
+      maxSeats: params.maxSeats,
       detourBudgetM: params.detourBudgetM,
       opener,
     });
@@ -103,6 +108,9 @@ export class PoolLifecycleService {
       max_seats: String(pool.maxSeats),
       expiry_job_id: jobId,
     });
+
+    await this.bus.joinPool(params.passengerId, pool.rideId);
+    this.emitPoolUpdate(pool.rideId, pool.seatCount, 'open');
 
     return pool;
   }
@@ -127,12 +135,14 @@ export class PoolLifecycleService {
     await this.repo.incrementSeats(pool.rideId, result);
     await this.repo.appendMember(pool.rideId, joiner);
     await this.writeHash(pool.rideId, { seat_count: String(result) });
+    await this.bus.joinPool(joiner.passenger_id, pool.rideId);
 
     if (result >= pool.maxSeats) {
       await this.closePool(pool.rideId, 'closed_full');
       return { slotted: true, closedFull: true, seatCount: result };
     }
 
+    this.emitPoolUpdate(pool.rideId, result, 'open');
     return { slotted: true, closedFull: false, seatCount: result };
   }
 
@@ -150,6 +160,8 @@ export class PoolLifecycleService {
     }
 
     if (reason === 'closed_full' || reason === 'closed_timeout') {
+      const seatCount = await this.readSeatCount(rideId);
+      this.emitPoolUpdate(rideId, seatCount, reason);
       this.events.emit(POOL_CLOSED_EVENT, { rideId, reason } satisfies PoolClosedEventPayload);
     }
   }
@@ -158,6 +170,28 @@ export class PoolLifecycleService {
     const key = `pool:${rideId}`;
     await this.redis.hset(key, fields);
     await this.redis.expire(key, HASH_TTL_SECONDS);
+  }
+
+  private async readSeatCount(rideId: string): Promise<number> {
+    const raw = await this.redis.hget(`pool:${rideId}`, 'seat_count');
+    const n = Number(raw);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  }
+
+  private emitPoolUpdate(
+    rideId: string,
+    seatCount: number,
+    poolStatus: PoolUpdatePayload['poolStatus'],
+  ): void {
+    try {
+      this.bus.toPool(rideId, POOL_UPDATE_EVENT, {
+        sharedRideId: rideId,
+        seatCount,
+        poolStatus,
+      } satisfies PoolUpdatePayload);
+    } catch (err) {
+      this.log.warn({ err, rideId, poolStatus }, 'emitPoolUpdate failed');
+    }
   }
 }
 

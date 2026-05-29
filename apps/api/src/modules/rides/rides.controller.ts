@@ -1,5 +1,15 @@
-import { Controller, Post, Body, NotImplementedException, Logger } from '@nestjs/common';
-import { randomUUID } from 'node:crypto';
+import {
+  Controller,
+  Post,
+  Body,
+  NotImplementedException,
+  Logger,
+  UseGuards,
+  Req,
+  ForbiddenException,
+} from '@nestjs/common';
+import type { Request } from 'express';
+import { AuthGuard, type JwtPayload } from '../../common/guards/auth.guard';
 import { MatchingService, type MatchResult } from '../matching/matching.service';
 import { SharedRideRepository } from '../matching/shared-ride.repository';
 import { PricingService } from '../pricing/pricing.service';
@@ -34,6 +44,7 @@ export interface QuoteResponse {
 const SHARED_QUOTE_SEATS = 2;
 
 @Controller('v1/rides')
+@UseGuards(AuthGuard)
 export class RidesController {
   private readonly log = new Logger(RidesController.name);
 
@@ -44,7 +55,11 @@ export class RidesController {
   ) {}
 
   @Post('quote')
-  async quote(@Body() dto: QuoteRideDto): Promise<QuoteResponse> {
+  async quote(
+    @Req() req: Request & { user: JwtPayload },
+    @Body() dto: QuoteRideDto,
+  ): Promise<QuoteResponse> {
+    this.assertClient(req.user);
     if (dto.type === RideType.Scheduled) {
       throw new NotImplementedException({
         code: 'not_implemented',
@@ -67,8 +82,6 @@ export class RidesController {
     };
 
     if (dto.type === RideType.Shared) {
-      // Indicative shared estimate for an empty pool that this rider would open.
-      // Detour factor = 1.0 by construction (no other passengers yet).
       const seatMultiplier = this.pricing.seatMultiplierFor(SHARED_QUOTE_SEATS);
       const { perSeatPrice, detourFactor } = this.pricing.quoteSeatFromMetrics({
         soloPrice: solo.fare,
@@ -88,7 +101,11 @@ export class RidesController {
   }
 
   @Post()
-  async create(@Body() dto: CreateRideDto): Promise<CreateRideResponse> {
+  async create(
+    @Req() req: Request & { user: JwtPayload },
+    @Body() dto: CreateRideDto,
+  ): Promise<CreateRideResponse> {
+    this.assertClient(req.user);
     if (dto.type !== RideType.Shared) {
       throw new NotImplementedException({
         code: 'not_implemented',
@@ -96,8 +113,7 @@ export class RidesController {
       });
     }
 
-    // TODO(RCAB-E4.S2): replace with authenticated user id once RideRequest entity lands.
-    const passengerId = dto.passengerId ?? randomUUID();
+    const passengerId = req.user.sub;
 
     const result = await this.matching.findOrCreatePool({
       passengerId,
@@ -120,6 +136,15 @@ export class RidesController {
     };
   }
 
+  private assertClient(user: JwtPayload): void {
+    if (user.role !== 'client') {
+      throw new ForbiddenException({
+        code: 'forbidden',
+        message: 'Client role required',
+      });
+    }
+  }
+
   private async priceMatchedSeat(
     result: MatchResult,
     dto: CreateRideDto,
@@ -136,7 +161,6 @@ export class RidesController {
         },
       });
     } catch (err) {
-      // Pricing failure must not block ride creation — return without seat fields.
       this.log.warn({ err, sharedRideId: result.sharedRideId }, 'seat pricing failed');
       return null;
     }

@@ -98,7 +98,7 @@ export class RouteSimilarityService {
   constructor(
     @Inject(REDIS) private readonly redis: Redis,
     private readonly http: HttpService,
-    config: ConfigService,
+    @Inject(ConfigService) config: ConfigService,
   ) {
     this.osrmBase = config.get<string>('OSRM_BASE_URL') ?? config.get<string>('OSRM_URL') ?? 'http://osrm:5000';
     this.saturation = config.get<number>('ROUTE_SIMILARITY_SATURATION_M') ?? 1200;
