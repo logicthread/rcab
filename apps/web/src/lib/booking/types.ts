@@ -7,11 +7,18 @@ export interface Money {
   currency: 'INR';
 }
 
+/** GeoJSON LineString of the OSRM road route. Coordinates are [lng, lat]. */
+export interface RouteGeometry {
+  type: 'LineString';
+  coordinates: [number, number][];
+}
+
 export interface QuoteResponse {
   type: ApiRideType;
   distanceM: number;
   durationS: number;
   soloFare: Money;
+  geometry: RouteGeometry;
   sharedEstimate?: {
     perSeatPrice: Money;
     seatMultiplier: number;
@@ -38,49 +45,51 @@ export interface PoolUpdateEvent {
   poolStatus: PoolStatus;
 }
 
+/** A point chosen on the map / via search, with a human-readable label. */
+export interface Place {
+  lat: number;
+  lng: number;
+  label: string;
+}
+
+/** Which endpoint a map tap or search selection sets. */
+export type PointField = 'pickup' | 'dropoff';
+
+/** Quick-pick seed trips. Guwahati (NE-India) — within the dev OSRM graph. */
 export interface PresetTrip {
   id: string;
   label: string;
-  originLat: number;
-  originLng: number;
-  originName: string;
-  destLat: number;
-  destLng: number;
-  destName: string;
+  pickup: Place;
+  dropoff: Place;
 }
 
 export const PRESET_TRIPS: PresetTrip[] = [
   {
-    id: 'indiranagar-whitefield',
-    label: 'Indiranagar → Whitefield',
-    originLat: 12.9719,
-    originLng: 77.6412,
-    originName: 'Indiranagar',
-    destLat: 12.9698,
-    destLng: 77.7499,
-    destName: 'Whitefield',
+    id: 'paltanbazaar-zooroad',
+    label: 'Paltan Bazaar → Zoo Road',
+    pickup: { lat: 26.175, lng: 91.751, label: 'Paltan Bazaar, Guwahati' },
+    dropoff: { lat: 26.167, lng: 91.7898, label: 'Zoo Road, Guwahati' },
   },
   {
-    id: 'koramangala-electronic-city',
-    label: 'Koramangala → Electronic City',
-    originLat: 12.9352,
-    originLng: 77.6245,
-    originName: 'Koramangala',
-    destLat: 12.8452,
-    destLng: 77.6602,
-    destName: 'Electronic City',
+    id: 'fancybazaar-dispur',
+    label: 'Fancy Bazaar → Dispur',
+    pickup: { lat: 26.1855, lng: 91.746, label: 'Fancy Bazaar, Guwahati' },
+    dropoff: { lat: 26.141, lng: 91.79, label: 'Dispur, Guwahati' },
   },
   {
-    id: 'mg-road-airport',
-    label: 'MG Road → Airport',
-    originLat: 12.9756,
-    originLng: 77.6094,
-    originName: 'MG Road',
-    destLat: 13.1986,
-    destLng: 77.7066,
-    destName: 'Kempegowda Intl',
+    id: 'guwahaticlub-ganeshguri',
+    label: 'Guwahati Club → Ganeshguri',
+    pickup: { lat: 26.181, lng: 91.77, label: 'Guwahati Club' },
+    dropoff: { lat: 26.148, lng: 91.792, label: 'Ganeshguri' },
   },
 ];
+
+/** Map default centre: Guwahati city centre (matches the dev OSRM graph). */
+export const MAP_DEFAULT_CENTER: Place = {
+  lat: 26.1445,
+  lng: 91.7362,
+  label: 'Guwahati',
+};
 
 export function apiRideType(rideType: RideType): ApiRideType {
   return rideType === 'shared' ? 'shared' : 'normal';

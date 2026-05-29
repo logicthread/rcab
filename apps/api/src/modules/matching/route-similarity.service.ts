@@ -17,6 +17,12 @@ export interface RouteInput {
 
 type Coord = [number, number]; // [lng, lat] — OSRM GeoJSON order
 
+/** GeoJSON LineString of the OSRM road route (coordinates are [lng, lat]). */
+export interface RouteGeometry {
+  type: 'LineString';
+  coordinates: Coord[];
+}
+
 interface OsrmRouteResponse {
   code: string;
   routes: Array<{ geometry: { coordinates: Coord[] } }>;
@@ -27,20 +33,40 @@ interface OsrmRouteResponse {
 const BASE32 = '0123456789bcdefghjkmnpqrstuvwxyz';
 
 function geohash7(lat: number, lng: number): string {
-  let idx = 0, bit = 0, even = true, hash = '';
-  let latMin = -90, latMax = 90, lngMin = -180, lngMax = 180;
+  let idx = 0,
+    bit = 0,
+    even = true,
+    hash = '';
+  let latMin = -90,
+    latMax = 90,
+    lngMin = -180,
+    lngMax = 180;
   while (hash.length < 7) {
     if (even) {
       const mid = (lngMin + lngMax) / 2;
-      if (lng >= mid) { idx = (idx << 1) | 1; lngMin = mid; }
-      else { idx <<= 1; lngMax = mid; }
+      if (lng >= mid) {
+        idx = (idx << 1) | 1;
+        lngMin = mid;
+      } else {
+        idx <<= 1;
+        lngMax = mid;
+      }
     } else {
       const mid = (latMin + latMax) / 2;
-      if (lat >= mid) { idx = (idx << 1) | 1; latMin = mid; }
-      else { idx <<= 1; latMax = mid; }
+      if (lat >= mid) {
+        idx = (idx << 1) | 1;
+        latMin = mid;
+      } else {
+        idx <<= 1;
+        latMax = mid;
+      }
     }
     even = !even;
-    if (++bit === 5) { hash += BASE32[idx]; bit = 0; idx = 0; }
+    if (++bit === 5) {
+      hash += BASE32[idx];
+      bit = 0;
+      idx = 0;
+    }
   }
   return hash;
 }
@@ -58,7 +84,8 @@ function haversineM([lng1, lat1]: Coord, [lng2, lat2]: Coord): number {
 function resample(coords: Coord[], n: number): Coord[] {
   if (coords.length === 1) return Array<Coord>(n).fill(coords[0]);
   const dists = [0];
-  for (let i = 1; i < coords.length; i++) dists.push(dists[i - 1] + haversineM(coords[i - 1], coords[i]));
+  for (let i = 1; i < coords.length; i++)
+    dists.push(dists[i - 1] + haversineM(coords[i - 1], coords[i]));
   const total = dists[dists.length - 1];
   if (total === 0) return Array<Coord>(n).fill(coords[0]);
   const out: Coord[] = [];
@@ -100,7 +127,8 @@ export class RouteSimilarityService {
     private readonly http: HttpService,
     @Inject(ConfigService) config: ConfigService,
   ) {
-    this.osrmBase = config.get<string>('OSRM_BASE_URL') ?? config.get<string>('OSRM_URL') ?? 'http://osrm:5000';
+    this.osrmBase =
+      config.get<string>('OSRM_BASE_URL') ?? config.get<string>('OSRM_URL') ?? 'http://osrm:5000';
     this.saturation = config.get<number>('ROUTE_SIMILARITY_SATURATION_M') ?? 1200;
   }
 
@@ -110,6 +138,16 @@ export class RouteSimilarityService {
     const r2 = resample(p2, RESAMPLE_N);
     const dBar = (meanNearestNeighbour(r1, r2) + meanNearestNeighbour(r2, r1)) / 2;
     return Math.max(0, 1 - dBar / this.saturation);
+  }
+
+  /**
+   * Public: the OSRM road geometry for a direct origin→dest route as a GeoJSON
+   * LineString. Reuses the same `osrm:poly:` cache that route scoring warms.
+   * Throws {@link OsrmUnavailableException} when OSRM is unreachable or returns
+   * no route for the given coordinates.
+   */
+  async getRouteGeometry(route: RouteInput): Promise<RouteGeometry> {
+    return { type: 'LineString', coordinates: await this.getPolyline(route) };
   }
 
   private async getPolyline(route: RouteInput): Promise<Coord[]> {

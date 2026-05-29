@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { RidesController } from './rides.controller';
+import { RideType } from './dto/create-ride.dto';
 import type { JwtPayload } from '../../common/guards/auth.guard';
 import type { SharedRideRow } from '../matching/shared-ride.repository';
 import type { RideStopRow } from '../matching/ride-stop.repository';
@@ -49,18 +50,31 @@ function makeController(
   opts: {
     ride?: SharedRideRow | null;
     stops?: RideStopRow[];
+    quoteSolo?: ReturnType<typeof vi.fn>;
+    getRouteGeometry?: ReturnType<typeof vi.fn>;
   } = {},
 ) {
   const matching = {} as never;
-  const pricing = {} as never;
+  const pricing = {
+    quoteSolo: opts.quoteSolo ?? vi.fn(),
+  };
   const repo = {
     findById: vi.fn().mockResolvedValue(opts.ride === undefined ? ride() : opts.ride),
   };
   const stops = {
     findByRideId: vi.fn().mockResolvedValue(opts.stops ?? []),
   };
-  const ctrl = new RidesController(matching, pricing, repo as never, stops as never);
-  return { ctrl, repo, stops };
+  const routeSim = {
+    getRouteGeometry: opts.getRouteGeometry ?? vi.fn(),
+  };
+  const ctrl = new RidesController(
+    matching,
+    pricing as never,
+    repo as never,
+    stops as never,
+    routeSim as never,
+  );
+  return { ctrl, repo, stops, pricing, routeSim };
 }
 
 describe('RidesController.listStops', () => {
@@ -129,5 +143,71 @@ describe('RidesController.listStops', () => {
         confirmedAt: null,
       },
     ]);
+  });
+});
+
+describe('RidesController.quote', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  const clientReq = { user: { sub: 'c-1', role: 'client' } as JwtPayload };
+  // NE-India (Guwahati) — within the loaded OSRM dev graph.
+  const soloDto = {
+    type: RideType.Normal,
+    originLat: 26.1445,
+    originLng: 91.7362,
+    destLat: 26.1758,
+    destLng: 91.7898,
+  } as never;
+  const GEOMETRY = {
+    type: 'LineString' as const,
+    coordinates: [
+      [91.7362, 26.1445],
+      [91.75, 26.16],
+      [91.7898, 26.1758],
+    ] as [number, number][],
+  };
+  const solo = {
+    fare: { amount: 18500, currency: 'INR' as const },
+    distanceM: 10197,
+    durationS: 796,
+  };
+
+  it('includes the OSRM route geometry alongside the solo fare', async () => {
+    const { ctrl } = makeController({
+      quoteSolo: vi.fn().mockResolvedValue(solo),
+      getRouteGeometry: vi.fn().mockResolvedValue(GEOMETRY),
+    });
+    const res = await ctrl.quote(clientReq as never, soloDto);
+    expect(res.soloFare).toEqual(solo.fare);
+    expect(res.distanceM).toBe(10197);
+    expect(res.durationS).toBe(796);
+    expect(res.geometry).toEqual(GEOMETRY);
+    expect(res.geometry.coordinates.length).toBeGreaterThan(2);
+  });
+
+  it('fetches fare and geometry from the same origin/dest pair', async () => {
+    const quoteSolo = vi.fn().mockResolvedValue(solo);
+    const getRouteGeometry = vi.fn().mockResolvedValue(GEOMETRY);
+    const { ctrl } = makeController({ quoteSolo, getRouteGeometry });
+    await ctrl.quote(clientReq as never, soloDto);
+    const expectedRoute = expect.objectContaining({
+      originLat: 26.1445,
+      originLng: 91.7362,
+      destLat: 26.1758,
+      destLng: 91.7898,
+    });
+    expect(quoteSolo).toHaveBeenCalledWith(expectedRoute);
+    expect(getRouteGeometry).toHaveBeenCalledWith(expectedRoute);
+  });
+
+  it('rejects a non-client caller before quoting', async () => {
+    const quoteSolo = vi.fn();
+    const getRouteGeometry = vi.fn();
+    const { ctrl } = makeController({ quoteSolo, getRouteGeometry });
+    await expect(ctrl.quote({ user: jwtDriver() } as never, soloDto)).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+    expect(quoteSolo).not.toHaveBeenCalled();
+    expect(getRouteGeometry).not.toHaveBeenCalled();
   });
 });

@@ -2,7 +2,8 @@
 
 import { create } from 'zustand';
 import {
-  PRESET_TRIPS,
+  type Place,
+  type PointField,
   type PresetTrip,
   type QuoteResponse,
   type RideType,
@@ -21,7 +22,9 @@ export type BookingStage =
 
 export interface BookingState {
   rideType: RideType;
-  trip: PresetTrip;
+  pickup: Place | null;
+  dropoff: Place | null;
+  activeField: PointField;
   stage: BookingStage;
   quote: QuoteResponse | null;
   quoteError: string | null;
@@ -31,7 +34,10 @@ export interface BookingState {
   requestError: string | null;
 
   setRideType: (next: RideType) => void;
-  setTrip: (trip: PresetTrip) => void;
+  setActiveField: (field: PointField) => void;
+  setPoint: (field: PointField, place: Place) => void;
+  applyPreset: (trip: PresetTrip) => void;
+  swapPoints: () => void;
   startQuoting: () => void;
   setQuote: (quote: QuoteResponse) => void;
   setQuoteError: (message: string) => void;
@@ -45,26 +51,47 @@ export interface BookingState {
 
 const INITIAL_STATE = {
   rideType: 'shared' as RideType,
-  trip: PRESET_TRIPS[0],
+  pickup: null as Place | null,
+  dropoff: null as Place | null,
+  activeField: 'pickup' as PointField,
   stage: 'idle' as BookingStage,
-  quote: null,
-  quoteError: null,
-  sharedRideId: null,
+  quote: null as QuoteResponse | null,
+  quoteError: null as string | null,
+  sharedRideId: null as string | null,
   seatCount: 0,
-  poolStatus: null,
-  requestError: null,
+  poolStatus: null as PoolStatus | null,
+  requestError: null as string | null,
 };
+
+// Any change to the chosen points invalidates the current quote.
+const CLEAR_QUOTE = { quote: null, quoteError: null, stage: 'idle' as BookingStage };
 
 export const useBookingStore = create<BookingState>((set, get) => ({
   ...INITIAL_STATE,
 
   setRideType(next) {
     if (next === get().rideType) return;
-    set({ rideType: next, quote: null, stage: 'idle', quoteError: null });
+    set({ rideType: next, ...CLEAR_QUOTE });
   },
 
-  setTrip(trip) {
-    set({ trip, quote: null, stage: 'idle', quoteError: null });
+  setActiveField(field) {
+    set({ activeField: field });
+  },
+
+  setPoint(field, place) {
+    const other: PointField = field === 'pickup' ? 'dropoff' : 'pickup';
+    // After setting a point, move focus to the other endpoint if it's still empty.
+    const nextActive = get()[other] === null ? other : field;
+    set({ [field]: place, activeField: nextActive, ...CLEAR_QUOTE } as Partial<BookingState>);
+  },
+
+  applyPreset(trip) {
+    set({ pickup: trip.pickup, dropoff: trip.dropoff, activeField: 'pickup', ...CLEAR_QUOTE });
+  },
+
+  swapPoints() {
+    const { pickup, dropoff } = get();
+    set({ pickup: dropoff, dropoff: pickup, ...CLEAR_QUOTE });
   },
 
   startQuoting() {

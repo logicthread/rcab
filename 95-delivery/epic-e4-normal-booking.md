@@ -24,7 +24,7 @@ Completing every story in this epic ⇒ Demo 3 passes.
 
 | ID | Title | Status |
 |---|---|---|
-| RCAB-E4.S1 | Web booking screen (Leaflet pick/drop, Nominatim, OSRM quote) | · |
+| RCAB-E4.S1 | [[story-rcab-e4-s1-web-booking-screen]] — Web booking screen (Leaflet pick/drop, Nominatim, OSRM quote) | ■ |
 | RCAB-E4.S2 | Quote + request endpoints with idempotency | · |
 | RCAB-E4.S3 | Dispatch — geo candidate selection + offer fan-out | · |
 | RCAB-E4.S4 | Dispatch — Lua claim, revoke, wave-2, hard-fail | · |

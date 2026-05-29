@@ -1,31 +1,45 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { useBookingStore } from './store';
-import { PRESET_TRIPS } from './types';
+import { PRESET_TRIPS, type Place, type QuoteResponse } from './types';
 
 function reset() {
   useBookingStore.getState().reset();
 }
 
+const PICKUP: Place = { lat: 26.175, lng: 91.751, label: 'Paltan Bazaar' };
+const DROPOFF: Place = { lat: 26.167, lng: 91.7898, label: 'Zoo Road' };
+
+function quoteFixture(): QuoteResponse {
+  return {
+    type: 'shared',
+    distanceM: 1000,
+    durationS: 600,
+    soloFare: { amount: 5000, currency: 'INR' },
+    geometry: {
+      type: 'LineString',
+      coordinates: [
+        [91.751, 26.175],
+        [91.77, 26.171],
+        [91.7898, 26.167],
+      ],
+    },
+  };
+}
+
 describe('useBookingStore', () => {
   beforeEach(reset);
 
-  it('defaults to rideType=shared and first preset trip', () => {
+  it('defaults to rideType=shared, no points, active=pickup', () => {
     const s = useBookingStore.getState();
     expect(s.rideType).toBe('shared');
-    expect(s.trip).toEqual(PRESET_TRIPS[0]);
+    expect(s.pickup).toBeNull();
+    expect(s.dropoff).toBeNull();
+    expect(s.activeField).toBe('pickup');
     expect(s.stage).toBe('idle');
   });
 
   it('setRideType clears stale quote and resets stage', () => {
-    useBookingStore.setState({
-      quote: {
-        type: 'shared',
-        distanceM: 1000,
-        durationS: 600,
-        soloFare: { amount: 5000, currency: 'INR' },
-      },
-      stage: 'quoted',
-    });
+    useBookingStore.setState({ quote: quoteFixture(), stage: 'quoted' });
     useBookingStore.getState().setRideType('private');
     const s = useBookingStore.getState();
     expect(s.rideType).toBe('private');
@@ -38,6 +52,45 @@ describe('useBookingStore', () => {
     useBookingStore.setState({ stage: 'quoted' });
     useBookingStore.getState().setRideType(before.rideType);
     expect(useBookingStore.getState().stage).toBe('quoted');
+  });
+
+  it('setPoint sets the point and advances focus to the empty endpoint', () => {
+    useBookingStore.getState().setPoint('pickup', PICKUP);
+    const s = useBookingStore.getState();
+    expect(s.pickup).toEqual(PICKUP);
+    expect(s.activeField).toBe('dropoff'); // dropoff still empty → focus moves there
+  });
+
+  it('setPoint keeps focus when the other endpoint is already set', () => {
+    useBookingStore.getState().setPoint('pickup', PICKUP);
+    useBookingStore.getState().setPoint('dropoff', DROPOFF);
+    expect(useBookingStore.getState().activeField).toBe('dropoff');
+  });
+
+  it('setPoint clears any stale quote', () => {
+    useBookingStore.setState({ quote: quoteFixture(), stage: 'quoted' });
+    useBookingStore.getState().setPoint('pickup', PICKUP);
+    expect(useBookingStore.getState().quote).toBeNull();
+    expect(useBookingStore.getState().stage).toBe('idle');
+  });
+
+  it('applyPreset sets both endpoints and clears the quote', () => {
+    useBookingStore.setState({ quote: quoteFixture(), stage: 'quoted' });
+    useBookingStore.getState().applyPreset(PRESET_TRIPS[0]);
+    const s = useBookingStore.getState();
+    expect(s.pickup).toEqual(PRESET_TRIPS[0].pickup);
+    expect(s.dropoff).toEqual(PRESET_TRIPS[0].dropoff);
+    expect(s.activeField).toBe('pickup');
+    expect(s.quote).toBeNull();
+    expect(s.stage).toBe('idle');
+  });
+
+  it('swapPoints exchanges pickup and dropoff', () => {
+    useBookingStore.getState().applyPreset(PRESET_TRIPS[0]);
+    useBookingStore.getState().swapPoints();
+    const s = useBookingStore.getState();
+    expect(s.pickup).toEqual(PRESET_TRIPS[0].dropoff);
+    expect(s.dropoff).toEqual(PRESET_TRIPS[0].pickup);
   });
 
   it('setOpened/setSlotted transition stage and store sharedRideId', () => {
@@ -81,28 +134,15 @@ describe('useBookingStore', () => {
     expect(useBookingStore.getState().poolStatus).toBe('closed_full');
   });
 
-  it('setTrip clears quote so a refetch happens', () => {
-    useBookingStore.setState({
-      quote: {
-        type: 'shared',
-        distanceM: 1000,
-        durationS: 600,
-        soloFare: { amount: 5000, currency: 'INR' },
-      },
-      stage: 'quoted',
-    });
-    useBookingStore.getState().setTrip(PRESET_TRIPS[1]);
-    expect(useBookingStore.getState().quote).toBeNull();
-    expect(useBookingStore.getState().stage).toBe('idle');
-    expect(useBookingStore.getState().trip).toEqual(PRESET_TRIPS[1]);
-  });
-
   it('reset returns the store to initial values', () => {
     useBookingStore.getState().setOpened('ride-1', 1, 'open');
     useBookingStore.getState().setRideType('private');
+    useBookingStore.getState().applyPreset(PRESET_TRIPS[0]);
     useBookingStore.getState().reset();
     const s = useBookingStore.getState();
     expect(s.rideType).toBe('shared');
+    expect(s.pickup).toBeNull();
+    expect(s.dropoff).toBeNull();
     expect(s.sharedRideId).toBeNull();
     expect(s.stage).toBe('idle');
   });

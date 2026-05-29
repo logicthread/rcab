@@ -16,6 +16,7 @@ import { AuthGuard, type JwtPayload } from '../../common/guards/auth.guard';
 import { MatchingService, type MatchResult } from '../matching/matching.service';
 import { SharedRideRepository } from '../matching/shared-ride.repository';
 import { RideStopRepository } from '../matching/ride-stop.repository';
+import { RouteSimilarityService, type RouteGeometry } from '../matching/route-similarity.service';
 import { PricingService } from '../pricing/pricing.service';
 import type { Money } from '../pricing/money';
 import type { SeatQuote } from '../pricing/pricing.types';
@@ -37,6 +38,7 @@ export interface QuoteResponse {
   distanceM: number;
   durationS: number;
   soloFare: Money;
+  geometry: RouteGeometry;
   sharedEstimate?: {
     perSeatPrice: Money;
     seatMultiplier: number;
@@ -71,6 +73,7 @@ export class RidesController {
     private readonly pricing: PricingService,
     private readonly repo: SharedRideRepository,
     private readonly stops: RideStopRepository,
+    private readonly routeSim: RouteSimilarityService,
   ) {}
 
   @Post('quote')
@@ -86,18 +89,23 @@ export class RidesController {
       });
     }
 
-    const solo = await this.pricing.quoteSolo({
+    const route = {
       originLat: dto.originLat,
       originLng: dto.originLng,
       destLat: dto.destLat,
       destLng: dto.destLng,
-    });
+    };
+    const [solo, geometry] = await Promise.all([
+      this.pricing.quoteSolo(route),
+      this.routeSim.getRouteGeometry(route),
+    ]);
 
     const response: QuoteResponse = {
       type: dto.type,
       distanceM: solo.distanceM,
       durationS: solo.durationS,
       soloFare: solo.fare,
+      geometry,
     };
 
     if (dto.type === RideType.Shared) {
