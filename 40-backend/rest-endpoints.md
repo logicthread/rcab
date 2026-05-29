@@ -48,8 +48,8 @@ audience: both
 ## rides
 | Method | Path | Description |
 |---|---|---|
-| POST | `/v1/rides/quote` 🔒🧍 | Body: `{ origin, dest, type }` → `{ fare_estimate, est_eta, polyline }` |
-| POST | `/v1/rides/requests` 🔒🧍 | Body: `{ ...quote_inputs, idempotency }` → request created, dispatch begins |
+| POST | `/v1/rides/quote` 🔒🧍 | Body: `{ type, originLat, originLng, destLat, destLng }` → `{ type, distanceM, durationS, soloFare: Money, sharedEstimate?: { perSeatPrice: Money, seatMultiplier, detourFactor, seatCount } }`. Side-effect-free. (RCAB-E5.S5) |
+| POST | `/v1/rides` 🔒🧍 | Body: `{ type, originLat, originLng, destLat, destLng, passengerId? }` → `{ sharedRideId, passengerId, mode, poolStatus, perSeatPrice?: Money, seatMultiplier?, detourFactor? }`. Triggers matching + dispatch for `type=shared`. (RCAB-E5.S2–S5) |
 | POST | `/v1/rides/requests/:id/cancel` 🔒🧍 | cancel |
 | GET | `/v1/rides/:id` 🔒 | (client or driver of this ride) |
 | POST | `/v1/rides/offers/:id/accept` 🔒🚗 | driver wins the offer |
@@ -57,6 +57,8 @@ audience: both
 | POST | `/v1/rides/:id/state` 🔒🚗 | Body: `{ event }` — advance the [[sm-ride-lifecycle]] |
 | POST | `/v1/rides/:id/cancel` 🔒 | role-aware cancel |
 | GET | `/v1/rides` 🔒 | list mine (paginated) |
+
+`Money = { amount: integer minor units, currency: 'INR' }`. See [[features-shared-rides]] § Pricing for the per-seat formula.
 
 ## rating
 | Method | Path | Description |

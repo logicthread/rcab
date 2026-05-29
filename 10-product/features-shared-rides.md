@@ -34,7 +34,20 @@ See [[algo-shared-ride-matching]] for the precise algorithm and the role of [[en
 
 ## Pricing (Phase-0)
 
-A shared ride's fare per seat is the solo fare for that origin-destination, multiplied by `0.7` per occupant up to 2 seats; `0.55` per occupant at 3 seats. Driver receives the *sum* of seat fares minus platform commission. (Final numbers are placeholder — a config in [[secrets-management]].)
+Implemented by `PricingService` (RCAB-E5.S5).
+
+```
+per_seat_price = solo_price × seat_multiplier × clamp(detour_factor, 1.0, 1.0 / seat_multiplier)
+```
+
+- `seat_multiplier`: `2 seats → 0.70`, `3 seats → 0.55` (config `SEAT_MULTIPLIER_2` / `SEAT_MULTIPLIER_3`).
+- `detour_factor = pool_osrm_distance_m / passenger_direct_osrm_distance_m`. Phase-0 uses pool `origin_centroid → dest_centroid` for the pool distance; multi-stop OSRM tour over `members[]` is deferred (TODO RCAB-E7).
+- Lower clamp `1.0` means a shorter pool route never makes the seat cheaper than `solo × seat_multiplier`. Upper clamp `1 / seat_multiplier` guarantees a seat never costs more than the solo fare.
+- Driver payout = `sum(seat_prices) × (1 − PLATFORM_COMMISSION_RATE)` (default 0.20).
+
+All amounts are integer minor units (paise) wrapped in a `Money = { amount, currency: 'INR' }` envelope. Defaults (also `ConfigService` keys): `FARE_BASE_CENTS=4000`, `FARE_PER_KM_CENTS=1500`, `FARE_PER_MIN_CENTS=200`. Final numbers tunable in `.env.dev`; see [[secrets-management]].
+
+A side-effect-free `POST /v1/rides/quote` returns `soloFare` + (for `type=shared`) an indicative `sharedEstimate` priced against a hypothetical 2-seat pool (detour 1.0). `POST /v1/rides` for `type=shared` returns `perSeatPrice`, `seatMultiplier`, `detourFactor` computed against the actual matched pool.
 
 ## See also
 - [[features-normal-booking]] · [[features-scheduled-booking]]
