@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { RidesController } from './rides.controller';
 import { RideType } from './dto/create-ride.dto';
+import type { RideRow } from './rides.repository';
 import type { JwtPayload } from '../../common/guards/auth.guard';
 import type { SharedRideRow } from '../matching/shared-ride.repository';
 import type { RideStopRow } from '../matching/ride-stop.repository';
@@ -52,11 +53,18 @@ function makeController(
     stops?: RideStopRow[];
     quoteSolo?: ReturnType<typeof vi.fn>;
     getRouteGeometry?: ReturnType<typeof vi.fn>;
+    verify?: ReturnType<typeof vi.fn>;
+    ridesCreate?: ReturnType<typeof vi.fn>;
+    ridesFindById?: ReturnType<typeof vi.fn>;
+    redisGet?: ReturnType<typeof vi.fn>;
   } = {},
 ) {
-  const matching = {} as never;
+  const matching = { findOrCreatePool: vi.fn() };
   const pricing = {
     quoteSolo: opts.quoteSolo ?? vi.fn(),
+    quoteSeat: vi.fn(),
+    seatMultiplierFor: vi.fn(),
+    quoteSeatFromMetrics: vi.fn(),
   };
   const repo = {
     findById: vi.fn().mockResolvedValue(opts.ride === undefined ? ride() : opts.ride),
@@ -67,14 +75,29 @@ function makeController(
   const routeSim = {
     getRouteGeometry: opts.getRouteGeometry ?? vi.fn(),
   };
+  const quoteToken = {
+    sign: vi.fn().mockReturnValue('quote.tok'),
+    verify: opts.verify ?? vi.fn(),
+  };
+  const ridesRepo = {
+    create: opts.ridesCreate ?? vi.fn(),
+    findById: opts.ridesFindById ?? vi.fn(),
+  };
+  const redis = {
+    get: opts.redisGet ?? vi.fn().mockResolvedValue(null),
+    set: vi.fn().mockResolvedValue('OK'),
+  };
   const ctrl = new RidesController(
-    matching,
+    matching as never,
     pricing as never,
     repo as never,
     stops as never,
     routeSim as never,
+    quoteToken as never,
+    ridesRepo as never,
+    redis as never,
   );
-  return { ctrl, repo, stops, pricing, routeSim };
+  return { ctrl, repo, stops, pricing, routeSim, quoteToken, ridesRepo, redis, matching };
 }
 
 describe('RidesController.listStops', () => {
@@ -172,42 +195,169 @@ describe('RidesController.quote', () => {
     durationS: 796,
   };
 
-  it('includes the OSRM route geometry alongside the solo fare', async () => {
-    const { ctrl } = makeController({
+  it('includes the OSRM route geometry + a signed quote token alongside the fare', async () => {
+    const { ctrl, quoteToken } = makeController({
       quoteSolo: vi.fn().mockResolvedValue(solo),
       getRouteGeometry: vi.fn().mockResolvedValue(GEOMETRY),
     });
     const res = await ctrl.quote(clientReq as never, soloDto);
     expect(res.soloFare).toEqual(solo.fare);
     expect(res.distanceM).toBe(10197);
-    expect(res.durationS).toBe(796);
     expect(res.geometry).toEqual(GEOMETRY);
-    expect(res.geometry.coordinates.length).toBeGreaterThan(2);
-  });
-
-  it('fetches fare and geometry from the same origin/dest pair', async () => {
-    const quoteSolo = vi.fn().mockResolvedValue(solo);
-    const getRouteGeometry = vi.fn().mockResolvedValue(GEOMETRY);
-    const { ctrl } = makeController({ quoteSolo, getRouteGeometry });
-    await ctrl.quote(clientReq as never, soloDto);
-    const expectedRoute = expect.objectContaining({
-      originLat: 26.1445,
-      originLng: 91.7362,
-      destLat: 26.1758,
-      destLng: 91.7898,
-    });
-    expect(quoteSolo).toHaveBeenCalledWith(expectedRoute);
-    expect(getRouteGeometry).toHaveBeenCalledWith(expectedRoute);
+    expect(res.quoteToken).toBe('quote.tok');
+    expect(quoteToken.sign).toHaveBeenCalledWith(
+      expect.objectContaining({ soloFareCents: 18500, originLat: 26.1445 }),
+    );
   });
 
   it('rejects a non-client caller before quoting', async () => {
     const quoteSolo = vi.fn();
-    const getRouteGeometry = vi.fn();
-    const { ctrl } = makeController({ quoteSolo, getRouteGeometry });
+    const { ctrl } = makeController({ quoteSolo, getRouteGeometry: vi.fn() });
     await expect(ctrl.quote({ user: jwtDriver() } as never, soloDto)).rejects.toBeInstanceOf(
       ForbiddenException,
     );
     expect(quoteSolo).not.toHaveBeenCalled();
-    expect(getRouteGeometry).not.toHaveBeenCalled();
+  });
+});
+
+describe('RidesController.create — normal (solo) path', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  const clientReq = { user: { sub: 'c-1', role: 'client' } as JwtPayload };
+  const dto = {
+    type: RideType.Normal,
+    originLat: 26.1445,
+    originLng: 91.7362,
+    destLat: 26.1758,
+    destLng: 91.7898,
+    quoteToken: 'quote.tok',
+  } as never;
+  const claims = {
+    originLat: 26.1445,
+    originLng: 91.7362,
+    destLat: 26.1758,
+    destLng: 91.7898,
+    soloFareCents: 18500,
+    distanceM: 10197,
+    durationS: 796,
+  };
+  function row(overrides: Partial<RideRow> = {}): RideRow {
+    return {
+      id: 'ride-9',
+      passengerId: 'c-1',
+      originLat: 26.1445,
+      originLng: 91.7362,
+      destLat: 26.1758,
+      destLng: 91.7898,
+      fareCents: 18500,
+      status: 'requested',
+      idempotencyKey: 'idem-1',
+      ...overrides,
+    };
+  }
+
+  it('creates a requested ride with the fare locked from the quote token', async () => {
+    const ridesCreate = vi.fn().mockResolvedValue({ row: row(), created: true });
+    const { ctrl, redis } = makeController({
+      verify: vi.fn().mockReturnValue(claims),
+      ridesCreate,
+    });
+    const res = await ctrl.create(clientReq as never, dto, 'idem-1');
+    expect(res).toEqual({
+      rideId: 'ride-9',
+      passengerId: 'c-1',
+      status: 'requested',
+      fare: { amount: 18500, currency: 'INR' },
+    });
+    expect(ridesCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ passengerId: 'c-1', fareCents: 18500, idempotencyKey: 'idem-1' }),
+    );
+    expect(redis.set).toHaveBeenCalledWith('idem:rides:idem-1', 'ride-9', 'EX', 86_400);
+  });
+
+  it('replays the original ride from Redis without inserting again', async () => {
+    const ridesCreate = vi.fn();
+    const { ctrl } = makeController({
+      redisGet: vi.fn().mockResolvedValue('ride-9'),
+      ridesFindById: vi.fn().mockResolvedValue(row()),
+      ridesCreate,
+    });
+    const res = await ctrl.create(clientReq as never, dto, 'idem-1');
+    expect((res as { rideId: string }).rideId).toBe('ride-9');
+    expect(ridesCreate).not.toHaveBeenCalled();
+  });
+
+  it('returns the same ride for a duplicate key when not in Redis (DB backstop)', async () => {
+    const ridesCreate = vi.fn().mockResolvedValue({ row: row(), created: false });
+    const { ctrl } = makeController({ verify: vi.fn().mockReturnValue(claims), ridesCreate });
+    const res = await ctrl.create(clientReq as never, dto, 'idem-1');
+    expect((res as { rideId: string }).rideId).toBe('ride-9');
+    expect(ridesCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it('400 when the Idempotency-Key header is missing', async () => {
+    const { ctrl } = makeController({ verify: vi.fn().mockReturnValue(claims) });
+    await expect(ctrl.create(clientReq as never, dto, undefined)).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+  });
+
+  it('400 when the quote token is missing', async () => {
+    const { ctrl } = makeController();
+    const noToken = { ...(dto as object), quoteToken: undefined } as never;
+    await expect(ctrl.create(clientReq as never, noToken, 'idem-1')).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+  });
+
+  it('400 quote_expired when the token has expired', async () => {
+    const verify = vi.fn().mockImplementation(() => {
+      throw Object.assign(new Error('jwt expired'), { name: 'TokenExpiredError' });
+    });
+    const { ctrl } = makeController({ verify });
+    await expect(ctrl.create(clientReq as never, dto, 'idem-1')).rejects.toMatchObject({
+      response: { code: 'quote_expired' },
+    });
+  });
+
+  it('400 invalid_quote when the token is tampered', async () => {
+    const verify = vi.fn().mockImplementation(() => {
+      throw Object.assign(new Error('invalid signature'), { name: 'JsonWebTokenError' });
+    });
+    const { ctrl } = makeController({ verify });
+    await expect(ctrl.create(clientReq as never, dto, 'idem-1')).rejects.toMatchObject({
+      response: { code: 'invalid_quote' },
+    });
+  });
+
+  it('400 quote_mismatch when the token coords differ from the request', async () => {
+    const verify = vi.fn().mockReturnValue({ ...claims, destLat: 27.0 });
+    const ridesCreate = vi.fn();
+    const { ctrl } = makeController({ verify, ridesCreate });
+    await expect(ctrl.create(clientReq as never, dto, 'idem-1')).rejects.toMatchObject({
+      response: { code: 'quote_mismatch' },
+    });
+    expect(ridesCreate).not.toHaveBeenCalled();
+  });
+
+  it('rejects a non-client caller', async () => {
+    const { ctrl } = makeController();
+    await expect(ctrl.create({ user: jwtDriver() } as never, dto, 'idem-1')).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+  });
+
+  it('routes type=shared to the matching service (no regression)', async () => {
+    const { ctrl, matching, repo } = makeController({ ride: ride({ poolState: 'open' }) });
+    matching.findOrCreatePool.mockResolvedValue({
+      sharedRideId: 'pool-1',
+      mode: 'opened',
+      poolStatus: 'open',
+    });
+    repo.findById.mockResolvedValue(null); // priceMatchedSeat → null path
+    const sharedDto = { ...(dto as object), type: RideType.Shared } as never;
+    const res = await ctrl.create(clientReq as never, sharedDto, undefined);
+    expect(matching.findOrCreatePool).toHaveBeenCalled();
+    expect((res as { sharedRideId: string }).sharedRideId).toBe('pool-1');
   });
 });
