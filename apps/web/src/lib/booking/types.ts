@@ -19,6 +19,8 @@ export interface QuoteResponse {
   durationS: number;
   soloFare: Money;
   geometry: RouteGeometry;
+  /** Signed 5-min token locking fare + route; replayed into POST /v1/rides (solo). */
+  quoteToken: string;
   sharedEstimate?: {
     perSeatPrice: Money;
     seatMultiplier: number;
@@ -43,6 +45,51 @@ export interface PoolUpdateEvent {
   sharedRideId: string;
   seatCount: number;
   poolStatus: PoolStatus;
+}
+
+/** Response of POST /v1/rides with type=normal (solo). */
+export interface SoloRideResponse {
+  rideId: string;
+  passengerId: string;
+  status: string;
+  fare: Money;
+}
+
+/** Forward solo lifecycle states the rider's tracking view reacts to (RCAB-E4.S7). */
+export type RideStatus =
+  | 'requested'
+  | 'accepted'
+  | 'en_route'
+  | 'arrived'
+  | 'in_progress'
+  | 'completed'
+  | 'no_driver'
+  | 'cancelled';
+
+/** Live driver position fanned out to the ride room (≤ 1 Hz). */
+export interface DriverLocationEvent {
+  rideId: string;
+  lat: number;
+  lng: number;
+  heading: number;
+}
+
+/** Ride lifecycle transition echoed to the ride room. */
+export interface RideStateChangedEvent {
+  rideId: string;
+  state: string;
+  by: string;
+}
+
+/** Subset of GET /v1/rides/:id used to rehydrate the tracking view on reload. */
+export interface RideDetailResponse {
+  rideId: string;
+  passengerId: string;
+  driverId: string | null;
+  status: string;
+  fare: Money;
+  origin: { lat: number; lng: number };
+  dropoff: { lat: number; lng: number };
 }
 
 /** A point chosen on the map / via search, with a human-readable label. */

@@ -83,4 +83,20 @@ describe('MapPicker', () => {
     // Leaflet order is [lat, lng].
     expect(markers[0]).toHaveAttribute('data-pos', JSON.stringify([PICKUP.lat, PICKUP.lng]));
   });
+
+  it('renders a third marker at the live driver position (RCAB-E4.S7)', () => {
+    render(
+      <MapPicker
+        pickup={PICKUP}
+        dropoff={DROPOFF}
+        routeCoords={null}
+        center={CENTER}
+        onMapClick={() => undefined}
+        driver={{ lat: 26.16, lng: 91.76 }}
+      />,
+    );
+    const markers = screen.getAllByTestId('marker');
+    expect(markers).toHaveLength(3);
+    expect(markers[2]).toHaveAttribute('data-pos', JSON.stringify([26.16, 91.76]));
+  });
 });

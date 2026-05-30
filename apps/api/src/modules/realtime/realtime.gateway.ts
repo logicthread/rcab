@@ -20,6 +20,14 @@ import type { JwtPayload } from '../../common/guards/auth.guard';
 
 export const RIDE_OFFER_RESPONSE_EVENT = 'dispatch.ride_offer_response';
 export const STOP_CONFIRM_REQUEST_EVENT = 'ride-lifecycle.stop_confirm_request';
+/** Emitted once per ride on the driver's first location packet after accept;
+ * `module-rides` reacts by applying the implicit `start_en_route` (RCAB-E4.S7). */
+export const DRIVER_FIRST_LOCATION_EVENT = 'ride-lifecycle.driver_first_location';
+/** Client asks to (re)join its ride room; `module-rides` validates ownership
+ * then `joinRide`s the socket. Used by the web rider on create + reconnect. */
+export const RIDE_SUBSCRIBE_REQUEST_EVENT = 'realtime.ride_subscribe_request';
+/** Server → client live driver position while a ride is active. */
+export const DRIVER_LOCATION_EVENT = 'driver_location';
 
 interface RideOfferResponsePayload {
   offerId: string;
@@ -50,14 +58,32 @@ export interface StopConfirmRequestEvent {
   type: 'pickup' | 'dropoff';
 }
 
+export interface DriverFirstLocationEvent {
+  rideId: string;
+  driverId: string;
+}
+
+export interface RideSubscribeRequestEvent {
+  userId: string;
+  rideId: string;
+}
+
 @WebSocketGateway({ cors: { origin: '*' }, transports: ['websocket'] })
 export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
   server!: Server;
 
   private readonly log = new Logger(RealtimeGateway.name);
-  private readonly _locationThrottle = new Map<string, number>();
-  private static readonly THROTTLE_MS = 3000;
+  // Geo-index freshness gate (per-driver). Independent of the fan-out gate.
+  private readonly _geoThrottle = new Map<string, number>();
+  // Client fan-out gate (per-ride) — the smooth-dot 1 Hz debouncer.
+  private readonly _fanThrottle = new Map<string, number>();
+  // Rides whose first post-accept location packet already kicked the implicit
+  // `start_en_route`. Bounded by distinct rides served by this node; Phase-0
+  // volume makes pruning unnecessary.
+  private readonly _enRouteFired = new Set<string>();
+  private static readonly GEO_THROTTLE_MS = 3000;
+  private static readonly FAN_THROTTLE_MS = 1000;
 
   constructor(
     @Inject(JwtService) private jwt: JwtService,
@@ -105,14 +131,55 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     if (!driverId || client.data.role !== 'driver') return;
 
     const now = Date.now();
-    const last = this._locationThrottle.get(driverId) ?? 0;
-    if (now - last < RealtimeGateway.THROTTLE_MS) return;
 
-    this._locationThrottle.set(driverId, now);
+    // Live-ride fan-out — independent of the geo-index gate below. While the
+    // driver is bound to a ride, mirror their position to the ride's client
+    // room at ≤ 1 Hz, and kick the implicit `start_en_route` on the first packet.
+    const currentRideId = await this.redis.hget(`driver:state:${driverId}`, 'current_ride_id');
+    if (currentRideId) {
+      if (!this._enRouteFired.has(currentRideId)) {
+        this._enRouteFired.add(currentRideId);
+        this.events.emit(DRIVER_FIRST_LOCATION_EVENT, {
+          rideId: currentRideId,
+          driverId,
+        } satisfies DriverFirstLocationEvent);
+      }
+      const lastFan = this._fanThrottle.get(currentRideId) ?? 0;
+      if (now - lastFan >= RealtimeGateway.FAN_THROTTLE_MS) {
+        this._fanThrottle.set(currentRideId, now);
+        this.bus.toRide(currentRideId, DRIVER_LOCATION_EVENT, {
+          rideId: currentRideId,
+          lat: data.lat,
+          lng: data.lng,
+          heading: data.heading,
+        });
+      }
+    }
+
+    // Geo-index freshness (per-driver, 3 s).
+    const lastGeo = this._geoThrottle.get(driverId) ?? 0;
+    if (now - lastGeo < RealtimeGateway.GEO_THROTTLE_MS) return;
+    this._geoThrottle.set(driverId, now);
     await Promise.all([
       this.redis.geoadd('active_drivers', data.lng, data.lat, driverId),
       this.redis.hset(`driver:state:${driverId}`, 'last_seen', String(now)),
     ]);
+  }
+
+  @SubscribeMessage('ride:subscribe')
+  handleRideSubscribe(
+    @MessageBody() data: { rideId?: string },
+    @ConnectedSocket() client: Socket,
+  ): void {
+    const userId = client.data.userId as string | undefined;
+    if (!userId) return;
+    if (!data || typeof data.rideId !== 'string') return;
+
+    // Ownership is validated by the rides listener before the socket is joined.
+    this.events.emit(RIDE_SUBSCRIBE_REQUEST_EVENT, {
+      userId,
+      rideId: data.rideId,
+    } satisfies RideSubscribeRequestEvent);
   }
 
   @SubscribeMessage('ride_offer_response')

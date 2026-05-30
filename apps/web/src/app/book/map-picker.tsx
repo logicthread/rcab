@@ -20,6 +20,15 @@ function pin(color: string): L.DivIcon {
 const PICKUP_ICON = pin('#16a34a');
 const DROPOFF_ICON = pin('#b91c1c');
 
+// Live driver position — a filled circle, visually distinct from the teardrop
+// endpoint pins (RCAB-E4.S7).
+const DRIVER_ICON: L.DivIcon = L.divIcon({
+  className: 'rcab-car',
+  html: `<svg width="22" height="22" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="8" fill="#2563eb" stroke="#fff" stroke-width="3"/></svg>`,
+  iconSize: [22, 22],
+  iconAnchor: [11, 11],
+});
+
 export interface MapPickerProps {
   pickup: Place | null;
   dropoff: Place | null;
@@ -27,6 +36,8 @@ export interface MapPickerProps {
   routeCoords: [number, number][] | null;
   center: { lat: number; lng: number };
   onMapClick: (lat: number, lng: number) => void;
+  /** Live driver position while a ride is being tracked (RCAB-E4.S7). */
+  driver?: { lat: number; lng: number } | null;
 }
 
 function ClickCapture({ onMapClick }: { onMapClick: (lat: number, lng: number) => void }) {
@@ -54,7 +65,14 @@ function FitBounds({ pickup, dropoff }: { pickup: Place | null; dropoff: Place |
   return null;
 }
 
-export function MapPicker({ pickup, dropoff, routeCoords, center, onMapClick }: MapPickerProps) {
+export function MapPicker({
+  pickup,
+  dropoff,
+  routeCoords,
+  center,
+  onMapClick,
+  driver,
+}: MapPickerProps) {
   // GeoJSON is [lng, lat]; Leaflet wants [lat, lng].
   const line = routeCoords?.map(([lng, lat]) => [lat, lng] as [number, number]);
 
@@ -73,6 +91,7 @@ export function MapPicker({ pickup, dropoff, routeCoords, center, onMapClick }: 
       <FitBounds pickup={pickup} dropoff={dropoff} />
       {pickup && <Marker position={[pickup.lat, pickup.lng]} icon={PICKUP_ICON} />}
       {dropoff && <Marker position={[dropoff.lat, dropoff.lng]} icon={DROPOFF_ICON} />}
+      {driver && <Marker position={[driver.lat, driver.lng]} icon={DRIVER_ICON} />}
       {line && line.length > 1 && (
         <Polyline positions={line} pathOptions={{ color: '#111', weight: 5, opacity: 0.85 }} />
       )}

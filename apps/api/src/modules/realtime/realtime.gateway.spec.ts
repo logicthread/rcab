@@ -3,6 +3,8 @@ import {
   RealtimeGateway,
   RIDE_OFFER_RESPONSE_EVENT,
   STOP_CONFIRM_REQUEST_EVENT,
+  DRIVER_FIRST_LOCATION_EVENT,
+  RIDE_SUBSCRIBE_REQUEST_EVENT,
 } from './realtime.gateway';
 import { JwtService } from '@nestjs/jwt';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -27,7 +29,12 @@ function buildJwt() {
 }
 
 function buildBus() {
-  return { setServer: vi.fn(), toDriver: vi.fn() } as unknown as RealtimeBus;
+  return {
+    setServer: vi.fn(),
+    toDriver: vi.fn(),
+    toRide: vi.fn(),
+    joinRide: vi.fn().mockResolvedValue(undefined),
+  } as unknown as RealtimeBus;
 }
 
 function buildEvents() {
@@ -288,5 +295,127 @@ describe('RealtimeGateway — handleConnection reconnect state replay', () => {
     await Promise.resolve();
 
     expect(client.emit).not.toHaveBeenCalled();
+  });
+});
+
+const RIDE_ID = 'ride-uuid-1';
+
+describe('RealtimeGateway — driver_location fan-out', () => {
+  let gateway: RealtimeGateway;
+  let redis: ReturnType<typeof buildRedis>;
+  let bus: RealtimeBus;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    redis = buildRedis();
+    redis.hget.mockResolvedValue(RIDE_ID); // driver is on an active ride
+    bus = buildBus();
+    gateway = new RealtimeGateway(buildJwt(), bus, buildEvents(), redis as never);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('fans the location out to the ride room with a camelCase payload', async () => {
+    await gateway.handleDriverLocation(LOCATION, makeSocket());
+    expect(bus.toRide).toHaveBeenCalledWith(RIDE_ID, 'driver_location', {
+      rideId: RIDE_ID,
+      lat: LOCATION.lat,
+      lng: LOCATION.lng,
+      heading: LOCATION.heading,
+    });
+  });
+
+  it('rate-limits fan-out to 1 Hz per ride', async () => {
+    const client = makeSocket();
+    await gateway.handleDriverLocation(LOCATION, client);
+    vi.advanceTimersByTime(500);
+    await gateway.handleDriverLocation({ ...LOCATION, lat: 1.31 }, client);
+    expect(bus.toRide).toHaveBeenCalledOnce();
+  });
+
+  it('fans out again once a second has elapsed', async () => {
+    const client = makeSocket();
+    await gateway.handleDriverLocation(LOCATION, client);
+    vi.advanceTimersByTime(1001);
+    await gateway.handleDriverLocation({ ...LOCATION, lat: 1.31 }, client);
+    expect(bus.toRide).toHaveBeenCalledTimes(2);
+  });
+
+  it('does NOT fan out when the driver is not on a ride', async () => {
+    redis.hget.mockResolvedValue(null);
+    await gateway.handleDriverLocation(LOCATION, makeSocket());
+    expect(bus.toRide).not.toHaveBeenCalled();
+  });
+
+  it('still updates the geo-index while on a ride', async () => {
+    await gateway.handleDriverLocation(LOCATION, makeSocket());
+    expect(redis.geoadd).toHaveBeenCalledWith(
+      'active_drivers',
+      LOCATION.lng,
+      LOCATION.lat,
+      DRIVER_ID,
+    );
+  });
+});
+
+describe('RealtimeGateway — implicit start_en_route on first location', () => {
+  let gateway: RealtimeGateway;
+  let events: EventEmitter2;
+  let redis: ReturnType<typeof buildRedis>;
+
+  beforeEach(() => {
+    events = new EventEmitter2();
+    redis = buildRedis();
+    redis.hget.mockResolvedValue(RIDE_ID);
+    gateway = new RealtimeGateway(buildJwt(), buildBus(), events, redis as never);
+  });
+
+  it('emits DRIVER_FIRST_LOCATION_EVENT once for the ride', async () => {
+    const seen = vi.fn();
+    events.on(DRIVER_FIRST_LOCATION_EVENT, seen);
+    const client = makeSocket();
+
+    await gateway.handleDriverLocation(LOCATION, client);
+    await gateway.handleDriverLocation({ ...LOCATION, lat: 1.31 }, client);
+
+    expect(seen).toHaveBeenCalledTimes(1);
+    expect(seen).toHaveBeenCalledWith({ rideId: RIDE_ID, driverId: DRIVER_ID });
+  });
+
+  it('does not emit when the driver is not on a ride', async () => {
+    redis.hget.mockResolvedValue(null);
+    const seen = vi.fn();
+    events.on(DRIVER_FIRST_LOCATION_EVENT, seen);
+    await gateway.handleDriverLocation(LOCATION, makeSocket());
+    expect(seen).not.toHaveBeenCalled();
+  });
+});
+
+describe('RealtimeGateway — ride:subscribe handler', () => {
+  let gateway: RealtimeGateway;
+  let events: EventEmitter2;
+
+  beforeEach(() => {
+    events = new EventEmitter2();
+    gateway = new RealtimeGateway(buildJwt(), buildBus(), events, buildRedis() as never);
+  });
+
+  it('emits RIDE_SUBSCRIBE_REQUEST_EVENT with userId from socket data', () => {
+    const seen = vi.fn();
+    events.on(RIDE_SUBSCRIBE_REQUEST_EVENT, seen);
+    gateway.handleRideSubscribe(
+      { rideId: RIDE_ID },
+      makeSocket({ userId: 'client-1', role: 'client' }),
+    );
+    expect(seen).toHaveBeenCalledWith({ userId: 'client-1', rideId: RIDE_ID });
+  });
+
+  it('ignores a malformed payload', () => {
+    const seen = vi.fn();
+    events.on(RIDE_SUBSCRIBE_REQUEST_EVENT, seen);
+    gateway.handleRideSubscribe({} as { rideId?: string }, makeSocket());
+    expect(seen).not.toHaveBeenCalled();
   });
 });

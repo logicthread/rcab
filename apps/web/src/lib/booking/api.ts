@@ -1,4 +1,11 @@
-import type { ApiRideType, CreateRideResponse, Place, QuoteResponse } from './types';
+import type {
+  ApiRideType,
+  CreateRideResponse,
+  Place,
+  QuoteResponse,
+  RideDetailResponse,
+  SoloRideResponse,
+} from './types';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000';
 
@@ -25,15 +32,7 @@ interface ApiErrorBody {
   error?: { code?: string; message?: string };
 }
 
-async function postJson<T>(path: string, body: unknown, jwt: string): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${jwt}`,
-    },
-    body: JSON.stringify(body),
-  });
+async function parseOrThrow<T>(res: Response): Promise<T> {
   if (!res.ok) {
     let code = 'http_error';
     let message = `${res.status} ${res.statusText}`;
@@ -47,6 +46,31 @@ async function postJson<T>(path: string, body: unknown, jwt: string): Promise<T>
     throw new BookingApiError(res.status, code, message);
   }
   return (await res.json()) as T;
+}
+
+async function postJson<T>(
+  path: string,
+  body: unknown,
+  jwt: string,
+  extraHeaders: Record<string, string> = {},
+): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${jwt}`,
+      ...extraHeaders,
+    },
+    body: JSON.stringify(body),
+  });
+  return parseOrThrow<T>(res);
+}
+
+async function getJson<T>(path: string, jwt: string): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    headers: { Authorization: `Bearer ${jwt}` },
+  });
+  return parseOrThrow<T>(res);
 }
 
 function routeBody(pickup: Place, dropoff: Place, type: ApiRideType) {
@@ -74,4 +98,29 @@ export function createSharedRide(
   jwt: string,
 ): Promise<CreateRideResponse> {
   return postJson<CreateRideResponse>('/v1/rides', routeBody(pickup, dropoff, 'shared'), jwt);
+}
+
+/**
+ * Create a solo (normal) ride. The signed `quoteToken` from /quote locks the
+ * fare + route; the `Idempotency-Key` makes a retried submit return the same
+ * ride instead of double-booking (RCAB-E4.S2 contract).
+ */
+export function createNormalRide(
+  pickup: Place,
+  dropoff: Place,
+  quoteToken: string,
+  jwt: string,
+  idempotencyKey: string,
+): Promise<SoloRideResponse> {
+  return postJson<SoloRideResponse>(
+    '/v1/rides',
+    { ...routeBody(pickup, dropoff, 'normal'), quoteToken },
+    jwt,
+    { 'Idempotency-Key': idempotencyKey },
+  );
+}
+
+/** Fetch a ride's current state — used to rehydrate the tracking view on reload. */
+export function fetchRide(rideId: string, jwt: string): Promise<RideDetailResponse> {
+  return getJson<RideDetailResponse>(`/v1/rides/${rideId}`, jwt);
 }

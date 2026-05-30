@@ -7,6 +7,7 @@ import {
   type PresetTrip,
   type QuoteResponse,
   type RideType,
+  type RideStatus,
   type PoolStatus,
 } from './types';
 
@@ -18,7 +19,14 @@ export type BookingStage =
   | 'opened'
   | 'slotted'
   | 'solo_fallback'
+  | 'tracking'
   | 'error';
+
+export interface DriverPosition {
+  lat: number;
+  lng: number;
+  heading: number;
+}
 
 export interface BookingState {
   rideType: RideType;
@@ -33,6 +41,11 @@ export interface BookingState {
   poolStatus: PoolStatus | null;
   requestError: string | null;
 
+  // Solo (normal) live-tracking — RCAB-E4.S7.
+  rideId: string | null;
+  rideStatus: RideStatus | null;
+  driver: DriverPosition | null;
+
   setRideType: (next: RideType) => void;
   setActiveField: (field: PointField) => void;
   setPoint: (field: PointField, place: Place) => void;
@@ -46,6 +59,9 @@ export interface BookingState {
   setSlotted: (sharedRideId: string, seatCount: number, poolStatus: PoolStatus) => void;
   applyPoolUpdate: (sharedRideId: string, seatCount: number, poolStatus: PoolStatus) => void;
   setRequestError: (message: string) => void;
+  setSoloRequested: (rideId: string, status: string) => void;
+  applyRideState: (state: string) => void;
+  applyDriverLocation: (rideId: string, lat: number, lng: number, heading: number) => void;
   reset: () => void;
 }
 
@@ -61,7 +77,29 @@ const INITIAL_STATE = {
   seatCount: 0,
   poolStatus: null as PoolStatus | null,
   requestError: null as string | null,
+  rideId: null as string | null,
+  rideStatus: null as RideStatus | null,
+  driver: null as DriverPosition | null,
 };
+
+// The API emits a fixed lifecycle vocabulary; anything unexpected falls back to
+// `requested` so the banner stays sane rather than rendering a raw string.
+const KNOWN_STATUSES: readonly RideStatus[] = [
+  'requested',
+  'accepted',
+  'en_route',
+  'arrived',
+  'in_progress',
+  'completed',
+  'no_driver',
+  'cancelled',
+];
+
+function normalizeStatus(state: string): RideStatus {
+  return (KNOWN_STATUSES as readonly string[]).includes(state)
+    ? (state as RideStatus)
+    : 'requested';
+}
 
 // Any change to the chosen points invalidates the current quote.
 const CLEAR_QUOTE = { quote: null, quoteError: null, stage: 'idle' as BookingStage };
@@ -130,6 +168,22 @@ export const useBookingStore = create<BookingState>((set, get) => ({
 
   setRequestError(message) {
     set({ stage: 'error', requestError: message });
+  },
+
+  setSoloRequested(rideId, status) {
+    set({ rideId, rideStatus: normalizeStatus(status), driver: null, stage: 'tracking' });
+  },
+
+  applyRideState(state) {
+    // Only the active ride's transitions matter; the socket is per-ride so this
+    // is the live ride, but guard against a late event after reset.
+    if (get().rideId === null) return;
+    set({ rideStatus: normalizeStatus(state) });
+  },
+
+  applyDriverLocation(rideId, lat, lng, heading) {
+    if (get().rideId !== rideId) return;
+    set({ driver: { lat, lng, heading } });
   },
 
   reset() {

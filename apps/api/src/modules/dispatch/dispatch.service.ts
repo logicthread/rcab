@@ -138,6 +138,15 @@ export class DispatchService {
           offerId: event.offerId,
           rideId,
         });
+        // The booking client joined `ride:<id>` at request time (E4.S6); tell it
+        // a driver was assigned so its live-tracking view lights up before the
+        // first location packet (E4.S7). The richer driver/vehicle payload is
+        // deferred — this thin signal is enough to flip the rider's UI.
+        this.bus.toRide(rideId, 'ride_state_changed', {
+          rideId,
+          state: 'accepted',
+          by: 'driver',
+        });
       } else {
         this.bus.toDriver(event.driverId, 'ride_offer_revoked', {
           offerId: event.offerId,
