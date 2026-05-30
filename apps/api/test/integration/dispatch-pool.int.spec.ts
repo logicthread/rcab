@@ -312,4 +312,85 @@ describe.skipIf(skip)('DispatchService — integration (Postgres + Redis + BullM
 
     await redis.zrem('active_drivers', driverId);
   });
+
+  it('claimSolo (solo): concurrent accepts → exactly one wins; rides row bound to the winner', async () => {
+    const passengerId = randomUUID();
+    await pgClient.query(
+      `INSERT INTO app_user (id, firebase_uid, phone_e164, role) VALUES ($1, $2, $3, 'client')`,
+      [
+        passengerId,
+        `fb-solo-${passengerId}`,
+        `+9199${Math.floor(Math.random() * 1e8)
+          .toString()
+          .padStart(8, '0')}`,
+      ],
+    );
+    const { row } = await ridesRepo.create({
+      passengerId,
+      originLat: 26.1445,
+      originLng: 91.7362,
+      destLat: 26.1758,
+      destLng: 91.7898,
+      fareCents: 20000,
+      idempotencyKey: `idem-${randomUUID()}`,
+    });
+
+    const driverA = randomUUID();
+    const driverB = randomUUID();
+    const [a, b] = await Promise.all([
+      dispatch.claimSolo(row.id, driverA),
+      dispatch.claimSolo(row.id, driverB),
+    ]);
+
+    // Atomic claim: exactly one driver wins.
+    expect([a.ok, b.ok].filter(Boolean)).toHaveLength(1);
+    const winner = a.ok ? driverA : driverB;
+
+    const { rows } = await pgClient.query<{ status: string; driver_id: string; accepted_at: Date }>(
+      'SELECT status, driver_id, accepted_at FROM rides WHERE id = $1',
+      [row.id],
+    );
+    expect(rows[0].status).toBe('accepted');
+    expect(rows[0].driver_id).toBe(winner);
+    expect(rows[0].accepted_at).toBeInstanceOf(Date);
+    expect(await redis.get(`claim:ride:${row.id}`)).toBe(winner);
+
+    await redis.del(`claim:ride:${row.id}`);
+  });
+
+  it('handleHardFail (solo): unclaimed ride → status no_driver + passenger notified', async () => {
+    bus.toUser.mockClear();
+
+    const passengerId = randomUUID();
+    await pgClient.query(
+      `INSERT INTO app_user (id, firebase_uid, phone_e164, role) VALUES ($1, $2, $3, 'client')`,
+      [
+        passengerId,
+        `fb-solo-${passengerId}`,
+        `+9199${Math.floor(Math.random() * 1e8)
+          .toString()
+          .padStart(8, '0')}`,
+      ],
+    );
+    const { row } = await ridesRepo.create({
+      passengerId,
+      originLat: 26.2,
+      originLng: 91.7,
+      destLat: 26.25,
+      destLng: 91.75,
+      fareCents: 15000,
+      idempotencyKey: `idem-${randomUUID()}`,
+    });
+
+    await dispatch.handleHardFail({
+      data: { rideId: row.id, kind: 'solo' },
+    } as Job<{ rideId: string; kind: 'solo' | 'pool' }>);
+
+    const { rows } = await pgClient.query<{ status: string }>(
+      'SELECT status FROM rides WHERE id = $1',
+      [row.id],
+    );
+    expect(rows[0].status).toBe('no_driver');
+    expect(bus.toUser).toHaveBeenCalledWith(passengerId, 'ride_no_driver', { rideId: row.id });
+  });
 });

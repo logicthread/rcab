@@ -1,5 +1,5 @@
 import { Injectable, Inject } from '@nestjs/common';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { DRIZZLE_DB, type DrizzleDb } from '../../infra/db/drizzle.module';
 import { rides } from '../../db/schema';
 
@@ -13,6 +13,8 @@ export interface RideRow {
   fareCents: number;
   status: string;
   idempotencyKey: string;
+  driverId: string | null;
+  acceptedAt: Date | null;
 }
 
 function toRow(r: typeof rides.$inferSelect): RideRow {
@@ -26,6 +28,8 @@ function toRow(r: typeof rides.$inferSelect): RideRow {
     fareCents: Number(r.fareCents),
     status: r.status,
     idempotencyKey: r.idempotencyKey,
+    driverId: r.driverId,
+    acceptedAt: r.acceptedAt,
   };
 }
 
@@ -78,5 +82,34 @@ export class RidesRepository {
   async findByIdempotencyKey(key: string): Promise<RideRow | null> {
     const rows = await this.db.select().from(rides).where(eq(rides.idempotencyKey, key)).limit(1);
     return rows[0] ? toRow(rows[0]) : null;
+  }
+
+  /**
+   * First-accept-wins solo claim. Conditional on `status='requested'`, so it is
+   * atomic against a concurrent claim (only one UPDATE can match the row while
+   * it is requested). Returns the bound row, or null if the ride was already
+   * claimed / cancelled / gone (0 rows affected). RCAB-E4.S4.
+   */
+  async claimSolo(rideId: string, driverId: string, acceptedAt: Date): Promise<RideRow | null> {
+    const updated = await this.db
+      .update(rides)
+      .set({ status: 'accepted', driverId, acceptedAt, updatedAt: new Date() })
+      .where(and(eq(rides.id, rideId), eq(rides.status, 'requested')))
+      .returning();
+    return updated[0] ? toRow(updated[0]) : null;
+  }
+
+  /**
+   * Terminal transition when dispatch exhausts all waves with no acceptance.
+   * Guarded by `status='requested'` so it never clobbers a ride that got
+   * claimed in the same instant the hard-fail timer fired. RCAB-E4.S4.
+   */
+  async markNoDriver(rideId: string): Promise<RideRow | null> {
+    const updated = await this.db
+      .update(rides)
+      .set({ status: 'no_driver', updatedAt: new Date() })
+      .where(and(eq(rides.id, rideId), eq(rides.status, 'requested')))
+      .returning();
+    return updated[0] ? toRow(updated[0]) : null;
   }
 }

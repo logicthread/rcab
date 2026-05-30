@@ -1,5 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { DispatchService, computeStops, HARD_FAIL_JOB, WAVE_TIMEOUT_JOB } from './dispatch.service';
+import {
+  DispatchService,
+  computeStops,
+  HARD_FAIL_JOB,
+  WAVE_TIMEOUT_JOB,
+  type HardFailJob,
+  type WaveTimeoutJob,
+} from './dispatch.service';
 import type { Job } from 'bullmq';
 import type { SharedRideMember, SharedRideRow } from '../matching/shared-ride.repository';
 import type { RideRow } from '../rides/rides.repository';
@@ -58,15 +65,35 @@ function soloRide(overrides: Partial<RideRow> = {}): RideRow {
     fareCents: 18500,
     status: 'requested',
     idempotencyKey: 'idem-1',
+    driverId: null,
+    acceptedAt: null,
     ...overrides,
   };
 }
 
-function buildRidesRepo(opts: { byId?: RideRow | null } = {}) {
+function buildRidesRepo(
+  opts: {
+    byId?: RideRow | null;
+    claimResult?: RideRow | null;
+    noDriverResult?: RideRow | null;
+  } = {},
+) {
   return {
     create: vi.fn(),
     findById: vi.fn().mockResolvedValue(opts.byId === undefined ? soloRide() : opts.byId),
     findByIdempotencyKey: vi.fn(),
+    claimSolo: vi
+      .fn()
+      .mockResolvedValue(
+        opts.claimResult === undefined
+          ? soloRide({ status: 'accepted', driverId: 'd-1', acceptedAt: new Date() })
+          : opts.claimResult,
+      ),
+    markNoDriver: vi
+      .fn()
+      .mockResolvedValue(
+        opts.noDriverResult === undefined ? soloRide({ status: 'no_driver' }) : opts.noDriverResult,
+      ),
   };
 }
 
@@ -146,6 +173,8 @@ function buildConfig(overrides: Record<string, unknown> = {}) {
 interface ServiceOpts {
   byId?: SharedRideRow | null;
   soloRide?: RideRow | null;
+  soloClaimResult?: RideRow | null;
+  soloNoDriverResult?: RideRow | null;
   geo?: string[];
   alreadyOffered?: string[];
   setNx?: string | null;
@@ -160,7 +189,11 @@ interface ServiceOpts {
 
 function makeService(opts: ServiceOpts = {}) {
   const repo = buildRepo({ byId: opts.byId });
-  const ridesRepo = buildRidesRepo({ byId: opts.soloRide });
+  const ridesRepo = buildRidesRepo({
+    byId: opts.soloRide,
+    claimResult: opts.soloClaimResult,
+    noDriverResult: opts.soloNoDriverResult,
+  });
   const stops = buildStops();
   const lifecycle = buildLifecycle();
   const bus = buildBus();
@@ -475,14 +508,35 @@ describe('DispatchService.onRideOfferResponse', () => {
     expect(repo.setClaimed).not.toHaveBeenCalled();
   });
 
-  it('accept on a solo-typed offer: does NOT call claimPool (deferred to E4.S4)', async () => {
-    const { svc, repo } = makeService({
-      evalResult: 1,
+  it('accept on a solo offer (winner): claims the rides row, never claimPool, confirms the driver', async () => {
+    const { svc, repo, ridesRepo, bus } = makeService({
       metaResult: 'ride-1',
       offerType: 'solo',
     });
     await svc.onRideOfferResponse({ driverId: 'd-1', offerId: 'o-1', accept: true });
-    expect(repo.setClaimed).not.toHaveBeenCalled();
+
+    expect(ridesRepo.claimSolo).toHaveBeenCalledWith('ride-1', 'd-1', expect.any(Date));
+    expect(repo.setClaimed).not.toHaveBeenCalled(); // pool Lua untouched
+    expect(bus.toDriver).toHaveBeenCalledWith('d-1', 'ride_offer_accepted', {
+      offerId: 'o-1',
+      rideId: 'ride-1',
+    });
+  });
+
+  it('accept on a solo offer (lost the race): tells the driver the ride is taken', async () => {
+    const { svc, ridesRepo, bus } = makeService({
+      metaResult: 'ride-1',
+      offerType: 'solo',
+      setNx: null, // claim:ride SET NX fails → already claimed by someone
+    });
+    await svc.onRideOfferResponse({ driverId: 'd-2', offerId: 'o-2', accept: true });
+
+    expect(ridesRepo.claimSolo).not.toHaveBeenCalled();
+    expect(bus.toDriver).toHaveBeenCalledWith('d-2', 'ride_offer_revoked', {
+      offerId: 'o-2',
+      rideId: 'ride-1',
+      reason: 'taken',
+    });
   });
 });
 
@@ -557,5 +611,109 @@ describe('DispatchService.onRideRequested', () => {
     const { svc, bus } = makeService({ soloRide: soloRide(), geo: ['d-1'] });
     await svc.onRideRequested({ rideId: 'ride-1' });
     expect(bus.toDriver).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ── claimSolo (RCAB-E4.S4) ───────────────────────────────────────────────────
+
+describe('DispatchService.claimSolo', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('winner: binds the rides row, sets driver:state, removes wave-2 + hard-fail timers', async () => {
+    const { svc, ridesRepo, redis, queue } = makeService();
+    const result = await svc.claimSolo('ride-1', 'd-1');
+
+    expect(result).toEqual({ ok: true, reason: 'claimed' });
+    expect(redis.set).toHaveBeenCalledWith(
+      'claim:ride:ride-1',
+      'd-1',
+      'EX',
+      expect.any(Number),
+      'NX',
+    );
+    expect(ridesRepo.claimSolo).toHaveBeenCalledWith('ride-1', 'd-1', expect.any(Date));
+    expect(redis.hset).toHaveBeenCalledWith('driver:state:d-1', 'current_ride_id', 'ride-1');
+    expect(queue.remove).toHaveBeenCalledWith('dispatch:wave2-timeout:ride-1');
+    expect(queue.remove).toHaveBeenCalledWith('dispatch:hard-fail:ride-1');
+  });
+
+  it('lost the claim race (SET NX fails, held by another driver): already_taken, no DB write', async () => {
+    const { svc, ridesRepo } = makeService({ setNx: null });
+    const result = await svc.claimSolo('ride-1', 'd-2');
+    expect(result).toEqual({ ok: false, reason: 'already_taken' });
+    expect(ridesRepo.claimSolo).not.toHaveBeenCalled();
+  });
+
+  it('ride moved on after the Redis claim (DB guard matches 0 rows): not_claimable, releases claim', async () => {
+    const { svc, redis } = makeService({ soloClaimResult: null });
+    const result = await svc.claimSolo('ride-1', 'd-1');
+    expect(result).toEqual({ ok: false, reason: 'not_claimable' });
+    expect(redis.del).toHaveBeenCalledWith('claim:ride:ride-1');
+  });
+
+  it('revokes losing offers but NOT the winner', async () => {
+    const { svc, bus } = makeService({
+      offerListIds: ['o-win', 'o-lose'],
+      offerOwners: { 'o-win': 'd-1', 'o-lose': 'd-2' },
+    });
+    await svc.claimSolo('ride-1', 'd-1');
+
+    expect(bus.toDriver).toHaveBeenCalledWith('d-2', 'ride_offer_revoked', expect.any(Object));
+    expect(bus.toDriver).not.toHaveBeenCalledWith('d-1', 'ride_offer_revoked', expect.any(Object));
+  });
+});
+
+// ── solo wave-2 / hard-fail handlers (RCAB-E4.S4) ─────────────────────────────
+
+describe('DispatchService.handleWaveTimeout (solo)', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('kind=solo + still requested: runs wave 2 and re-offers', async () => {
+    const { svc, bus, queue } = makeService({ soloRide: soloRide(), geo: ['d-9'] });
+    await svc.handleWaveTimeout({
+      data: { rideId: 'ride-1', waveNumber: 2, kind: 'solo' },
+    } as Job<WaveTimeoutJob>);
+
+    expect(bus.toDriver).toHaveBeenCalledTimes(1);
+    const [driverId, event, payload] = bus.toDriver.mock.calls[0] as [
+      string,
+      string,
+      { waveNumber: number },
+    ];
+    expect(driverId).toBe('d-9');
+    expect(event).toBe('ride_offer');
+    expect(payload.waveNumber).toBe(2);
+    // wave 2 does not schedule further timers
+    expect(queue.add).not.toHaveBeenCalled();
+  });
+
+  it('kind=solo but ride no longer requested: stale no-op', async () => {
+    const { svc, bus } = makeService({ soloRide: soloRide({ status: 'accepted' }) });
+    await svc.handleWaveTimeout({
+      data: { rideId: 'ride-1', waveNumber: 2, kind: 'solo' },
+    } as Job<WaveTimeoutJob>);
+    expect(bus.toDriver).not.toHaveBeenCalled();
+  });
+});
+
+describe('DispatchService.handleHardFail (solo)', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('kind=solo: marks no_driver, revokes offers, notifies the passenger', async () => {
+    const { svc, ridesRepo, bus } = makeService({
+      offerListIds: ['o-1'],
+      offerOwners: { 'o-1': 'd-1' },
+    });
+    await svc.handleHardFail({ data: { rideId: 'ride-1', kind: 'solo' } } as Job<HardFailJob>);
+
+    expect(ridesRepo.markNoDriver).toHaveBeenCalledWith('ride-1');
+    expect(bus.toDriver).toHaveBeenCalledWith('d-1', 'ride_offer_revoked', expect.any(Object));
+    expect(bus.toUser).toHaveBeenCalledWith('c-1', 'ride_no_driver', { rideId: 'ride-1' });
+  });
+
+  it('kind=solo but the ride was just claimed (guard matches 0 rows): no-op', async () => {
+    const { svc, bus } = makeService({ soloNoDriverResult: null });
+    await svc.handleHardFail({ data: { rideId: 'ride-1', kind: 'solo' } } as Job<HardFailJob>);
+    expect(bus.toUser).not.toHaveBeenCalled();
   });
 });
