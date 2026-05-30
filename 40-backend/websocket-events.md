@@ -32,8 +32,9 @@ On connect, server places the socket in personal + role rooms:
 | Event | Payload | When |
 |---|---|---|
 | `driver_state` | `{ availability, current_ride_id }` | Replayed to driver on WS reconnect (from `driver:state:<id>` Redis hash) |
-| `ride_offer` | `{ offer_id, request?, ttl_ms, pickup, fare_est, est_pickup_eta_s }` (solo) or `{ offerId, sharedRideId, ttlMs, stops[], passengerCount, waveNumber }` (shared, E5.S4) | Top-K dispatch reaches this driver. `stops[].type` ∈ `pickup`/`dropoff`; `stops[]` is ordered: pickups first (by proximity to pool origin centroid), then drops (by proximity to dest centroid). Each entry carries `passengerId` + `sequenceIndex`. |
-| `ride_offer_revoked` | `{ offer_id, reason }` | Someone else accepted / client canceled |
+| `ride_offer` | `{ offerId, rideId, ttlMs, pickup:{lat,lng}, dropoff:{lat,lng}, fareCents, waveNumber }` (solo, E4.S3) or `{ offerId, sharedRideId, ttlMs, stops[], passengerCount, waveNumber }` (shared, E5.S4) | Top-K dispatch reaches this driver. The two are distinguished by the presence of `stops[]`. `stops[].type` ∈ `pickup`/`dropoff`; `stops[]` is ordered: pickups first (by proximity to pool origin centroid), then drops (by proximity to dest centroid). Each entry carries `passengerId` + `sequenceIndex`. |
+| `ride_offer_accepted` | `{ offerId, rideId }` | Solo (E4.S4): the winning driver's first-accept-wins claim (`claim:ride:<id>`) succeeded — the driver app routes to the active ride. |
+| `ride_offer_revoked` | `{ offerId, rideId?, reason }` | Someone else accepted / client canceled. Solo (E4.S4) `reason` ∈ `taken` / `unavailable`. |
 | `ride_state_changed` | `{ ride_id, state, by }` | Any state transition |
 | `passenger_added` | `{ ride_id, request, new_route_polyline }` | Shared-ride: new joiner slotted |
 | `force_offline` | `{ reason }` | Ops or server-side eviction |
@@ -52,7 +53,7 @@ On connect, server places the socket in personal + role rooms:
 | Event | Payload | Notes |
 |---|---|---|
 | `driver:location` | `{ lat, lng, heading, speed }` | sent every ~5s while online |
-| `ride_offer_response` | `{ offerId, sharedRideId?, accept }` | E5.S4. `accept=true` w/ `sharedRideId` triggers `DispatchService.claimPool` (atomic Lua); decline just releases the offer lock. If `sharedRideId` is omitted the server resolves it via `offer:meta:<offerId>`. |
+| `ride_offer_response` | `{ offerId, sharedRideId?, accept }` | E5.S4. `accept=true` w/ `sharedRideId` triggers `DispatchService.claimPool` (atomic Lua); decline just releases the offer lock. If `sharedRideId` is omitted the server resolves it via `offer:meta:<offerId>`. **Solo (E4.S4):** no `sharedRideId` — `accept=true` → `claimSolo` (`claim:ride:<id>` SET NX, then bind the `rides` row); `accept=false` → `DEL offer:<offerId>` (releases the lock, no claim). |
 | `stop:pickup_confirmed` | `{ rideId, sequenceIndex }` | RCAB-E5.S7. Driver-only. Validated against `shared_rides.claimed_by_driver_id`. Must target the next pending stop with `type='pickup'`. Server updates `ride_stops.confirmed_at`, transitions `shared_rides.pool_state` to `closed_started` on the first pickup, and echoes the same event name back to the driver socket with `{ rideId, sequenceIndex, passengerId, type, confirmedAt, rideCompleted }`. |
 | `stop:drop_confirmed` | `{ rideId, sequenceIndex }` | RCAB-E5.S7. Same validation as `stop:pickup_confirmed` but for `type='dropoff'`. When the last pending stop is confirmed: `shared_rides.pool_state='completed'` + `completed_at` set, `driver:state:<driverId>.current_ride_id` cleared, and `ride:completed { rideId, completedAt }` broadcast to room `ride:<rideId>`. |
 | `ping` | `{}` | for liveness; server replies `pong` |

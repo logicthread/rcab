@@ -12,6 +12,8 @@ import 'package:driver_app/features/shared_ride/shared_ride_provider.dart';
 
 class _FakeSocket implements IRealtimeSocket {
   final _rideOffer = StreamController<Map<String, dynamic>>.broadcast(sync: true);
+  final _rideOfferAccepted = StreamController<Map<String, dynamic>>.broadcast(sync: true);
+  final _rideOfferRevoked = StreamController<Map<String, dynamic>>.broadcast(sync: true);
   final _stopPickup = StreamController<Map<String, dynamic>>.broadcast(sync: true);
   final _stopDrop = StreamController<Map<String, dynamic>>.broadcast(sync: true);
   final _rideCompleted = StreamController<Map<String, dynamic>>.broadcast(sync: true);
@@ -20,6 +22,10 @@ class _FakeSocket implements IRealtimeSocket {
 
   @override
   Stream<Map<String, dynamic>> get rideOffer => _rideOffer.stream;
+  @override
+  Stream<Map<String, dynamic>> get rideOfferAccepted => _rideOfferAccepted.stream;
+  @override
+  Stream<Map<String, dynamic>> get rideOfferRevoked => _rideOfferRevoked.stream;
   @override
   Stream<Map<String, dynamic>> get stopPickupConfirmed => _stopPickup.stream;
   @override
@@ -35,6 +41,11 @@ class _FakeSocket implements IRealtimeSocket {
   void disconnect() {}
 
   @override
+  void sendOfferResponse({required String offerId, required bool accept}) {
+    sent.add((event: 'ride_offer_response', data: {'offerId': offerId, 'accept': accept}));
+  }
+
+  @override
   void sendPickupConfirmed({required String rideId, required int sequenceIndex}) {
     sent.add((event: 'stop:pickup_confirmed', data: {'rideId': rideId, 'sequenceIndex': sequenceIndex}));
   }
@@ -47,7 +58,8 @@ class _FakeSocket implements IRealtimeSocket {
   @override
   Future<void> dispose() async {
     await Future.wait([
-      _rideOffer.close(), _stopPickup.close(), _stopDrop.close(),
+      _rideOffer.close(), _rideOfferAccepted.close(), _rideOfferRevoked.close(),
+      _stopPickup.close(), _stopDrop.close(),
       _rideCompleted.close(), _driverState.close(),
     ]);
   }

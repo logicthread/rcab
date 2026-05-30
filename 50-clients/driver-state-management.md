@@ -20,7 +20,7 @@ audience: both
 | `socketProvider` | `Provider<SocketClient>` | lazy WS connection, auto-reconnect |
 | `locationStreamProvider` | `StreamProvider<Position>` | from the foreground location service |
 | `driverStateProvider` | `StateNotifier<DriverState>` | offline / online / on_ride |
-| `incomingOfferProvider` | `StreamProvider<RideOffer?>` | derived from socket events |
+| `offerProvider` | `StateNotifierProvider<OfferNotifier, OfferState>` | RCAB-E4.S5 — the at-most-one live solo offer (phase: ringing/claiming/accepted/revoked/expired + countdown). Fed by `OfferController` (consumes solo `ride_offer` / `ride_offer_accepted` / `ride_offer_revoked` on `realtimeSocketProvider`, alongside `SharedRideController`); emits `ride_offer_response` back through the socket |
 | `activeRideProvider` | `StreamProvider<RideState>` | server-truth ride state |
 | `sharedRideProvider` | `StateNotifierProvider<SharedRideNotifier, SharedRideState>` | RCAB-E5.S7 — ordered stops + currentStopIndex; consumes `ride_offer`/`stop:*_confirmed` echoes via `SharedRideController`; hydrates from `GET /v1/rides/:id/stops` on WS reconnect |
 | `realtimeSocketProvider` | `Provider<IRealtimeSocket>` | RCAB-E5.S7 — standalone Socket.IO connection used by shared-ride features. Phase-0 carve-out: coexists with `DriverStateNotifier._socket`; consolidation deferred |

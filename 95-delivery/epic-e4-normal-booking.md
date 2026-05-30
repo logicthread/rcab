@@ -28,7 +28,7 @@ Completing every story in this epic ⇒ Demo 3 passes.
 | RCAB-E4.S2 | [[story-rcab-e4-s2-quote-request-endpoints]] — Quote + request endpoints with idempotency | ■ |
 | RCAB-E4.S3 | [[story-rcab-e4-s3-dispatch-geo-candidates]] — Dispatch — geo candidate selection + offer fan-out | ■ |
 | RCAB-E4.S4 | [[story-rcab-e4-s4-solo-dispatch-claim]] — Dispatch — claim, revoke, wave-2, hard-fail | ■ |
-| RCAB-E4.S5 | Driver offer screen + accept/decline | · |
+| RCAB-E4.S5 | [[story-rcab-e4-s5-driver-offer-screen]] — Driver offer screen + accept/decline | ■ |
 | RCAB-E4.S6 | Ride state machine — accept → en_route → arrived → in_progress → completed | · |
 | RCAB-E4.S7 | Driver location stream → client WS (1 Hz throttle) | · |
 | RCAB-E4.S8 | Cancellation paths (client & driver, fee tiers) | · |

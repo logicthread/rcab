@@ -31,6 +31,8 @@ sequenceDiagram
     end
 ```
 
+> **As-built (RCAB-E4.S5):** the driver accepts/declines over the WebSocket — `ride_offer_response { offerId, accept }` (per [[ADR-0008-socketio-realtime]]) — not the REST `POST` drawn above. A win echoes `ride_offer_accepted`; a loss/expiry echoes `ride_offer_revoked`. The diagram predates the socket decision; the FCM wake-up leg is Phase-1.
+
 ## Why both FCM and WebSocket
 
 WebSocket is the happy path when the app is in foreground / recently active. FCM data messages cover the case where the WS has gone stale (background, doze, weak network). The two are idempotent on the driver app — whichever arrives first opens the offer screen.

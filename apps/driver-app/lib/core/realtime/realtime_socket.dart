@@ -3,12 +3,15 @@ import 'dart:async';
 import 'package:socket_io_client/socket_io_client.dart' as io;
 
 import '../auth/token_store.dart';
+import '../../features/offer/offer_models.dart';
 import '../../features/shared_ride/shared_ride_provider.dart';
 
 /// Test-friendly seam for the realtime socket. Production code uses
 /// [RealtimeSocket]; widget/unit tests use a fake implementing this interface.
-abstract class IRealtimeSocket implements StopConfirmSender {
+abstract class IRealtimeSocket implements StopConfirmSender, OfferResponseSender {
   Stream<Map<String, dynamic>> get rideOffer;
+  Stream<Map<String, dynamic>> get rideOfferAccepted;
+  Stream<Map<String, dynamic>> get rideOfferRevoked;
   Stream<Map<String, dynamic>> get stopPickupConfirmed;
   Stream<Map<String, dynamic>> get stopDropConfirmed;
   Stream<Map<String, dynamic>> get rideCompleted;
@@ -32,6 +35,8 @@ class RealtimeSocket implements IRealtimeSocket {
   io.Socket? _socket;
 
   final _rideOfferCtrl = StreamController<Map<String, dynamic>>.broadcast();
+  final _rideOfferAcceptedCtrl = StreamController<Map<String, dynamic>>.broadcast();
+  final _rideOfferRevokedCtrl = StreamController<Map<String, dynamic>>.broadcast();
   final _stopPickupCtrl = StreamController<Map<String, dynamic>>.broadcast();
   final _stopDropCtrl = StreamController<Map<String, dynamic>>.broadcast();
   final _rideCompletedCtrl = StreamController<Map<String, dynamic>>.broadcast();
@@ -39,6 +44,10 @@ class RealtimeSocket implements IRealtimeSocket {
 
   @override
   Stream<Map<String, dynamic>> get rideOffer => _rideOfferCtrl.stream;
+  @override
+  Stream<Map<String, dynamic>> get rideOfferAccepted => _rideOfferAcceptedCtrl.stream;
+  @override
+  Stream<Map<String, dynamic>> get rideOfferRevoked => _rideOfferRevokedCtrl.stream;
   @override
   Stream<Map<String, dynamic>> get stopPickupConfirmed => _stopPickupCtrl.stream;
   @override
@@ -65,6 +74,14 @@ class RealtimeSocket implements IRealtimeSocket {
       ..on('ride_offer', (raw) {
         final map = _asMap(raw);
         if (map != null) _rideOfferCtrl.add(map);
+      })
+      ..on('ride_offer_accepted', (raw) {
+        final map = _asMap(raw);
+        if (map != null) _rideOfferAcceptedCtrl.add(map);
+      })
+      ..on('ride_offer_revoked', (raw) {
+        final map = _asMap(raw);
+        if (map != null) _rideOfferRevokedCtrl.add(map);
       })
       ..on('stop:pickup_confirmed', (raw) {
         final map = _asMap(raw);
@@ -93,6 +110,11 @@ class RealtimeSocket implements IRealtimeSocket {
   }
 
   @override
+  void sendOfferResponse({required String offerId, required bool accept}) {
+    _socket?.emit('ride_offer_response', {'offerId': offerId, 'accept': accept});
+  }
+
+  @override
   void sendPickupConfirmed({required String rideId, required int sequenceIndex}) {
     _socket?.emit('stop:pickup_confirmed', {
       'rideId': rideId,
@@ -113,6 +135,8 @@ class RealtimeSocket implements IRealtimeSocket {
     disconnect();
     await Future.wait([
       _rideOfferCtrl.close(),
+      _rideOfferAcceptedCtrl.close(),
+      _rideOfferRevokedCtrl.close(),
       _stopPickupCtrl.close(),
       _stopDropCtrl.close(),
       _rideCompletedCtrl.close(),
