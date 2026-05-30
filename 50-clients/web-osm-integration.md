@@ -39,6 +39,7 @@ flowchart LR
 
 - Pick first, then drop. The map recenters to the union bounds.
 - Polyline drawn from OSRM response.
+- **Live tracking (RCAB-E4.S7):** while a solo ride is active the driver's position renders as a distinct filled-circle marker (vs the teardrop endpoint pins), moved in place on each `driver_location` (≤ 1 Hz). The same `MapPicker` is reused via an optional `driver` prop — no separate map component.
 
 ## Performance
 

@@ -38,5 +38,9 @@ This keeps a single source of truth and survives reconnect (queries refetch on f
 
 The draft is a Zustand store hydrated from `localStorage`. If the user closes the tab mid-booking, they can resume.
 
+## Solo live-tracking (RCAB-E4.S7)
+
+The booking store (`lib/booking/store.ts`) gained a `tracking` stage plus `{ rideId, rideStatus, driver }`. Rather than the React-Query bridge above, the booking surface consumes `ride_state_changed` (→ `applyRideState`) and `driver_location` (→ `applyDriverLocation`) **directly into the Zustand store** — the booking flow is Zustand-first, not query-backed. The active solo `rideId` is persisted to `localStorage` (`rcab_active_ride`); on a full reload the page rehydrates via `GET /v1/rides/:id` and re-`ride:subscribe`s the socket. Terminal states (`completed`/`no_driver`/`cancelled`) clear the key.
+
 ## See also
 - [[web-nextjs-structure]] · [[web-osm-integration]] · [[websocket-events]]

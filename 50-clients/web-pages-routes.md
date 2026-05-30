@@ -16,8 +16,8 @@ audience: both
 |---|---|---|
 | `/` (public) | Marketing landing | SSR; PWA install prompt for return visits |
 | `/sign-in` (public) | Phone + OTP, Google | [[journey-client-otp-signup]] |
-| `/book` | Booking screen | default landing post-auth. Leaflet map pick/drop with Nominatim search + reverse-geocode and a live OSRM quote (distance / ETA / fare + drawn route line) — RCAB-E4.S1. Ride-type toggle (`Share` default); `Book share` submit + WS `pool:update` badge / solo-fallback banner (RCAB-E5.S6). Private booking *submit* ships with RCAB-E4.S2. |
-| `/ride/:id` | Live ride tracking | redirects from /book once matched |
+| `/book` | Booking screen + live tracking | default landing post-auth. Leaflet map pick/drop with Nominatim search + reverse-geocode and a live OSRM quote (distance / ETA / fare + drawn route line) — RCAB-E4.S1. Ride-type toggle (`Share` default); `Book share` submit + WS `pool:update` badge / solo-fallback banner (RCAB-E5.S6). **RCAB-E4.S7:** the `Book` (private/solo `normal`) submit is wired (`POST /v1/rides` + idempotency key), and once a solo ride is created the screen flips **in-place** to a live-tracking view — driver marker on the same map (`driver_location`) + a status banner (`ride_state_changed`), rehydrated on reload from `GET /v1/rides/:id`. |
+| `/ride/:id` | *(not a web route)* | Solo rider tracking is rendered **in-place on `/book`** (RCAB-E4.S7), not a separate page. `/ride/:id` is the **driver app** screen ([[driver-screens]]); the web client follows via the `ride:<id>` WS room. |
 | `/history` | Past rides + dispute | [[features-history-dashboard]] |
 | `/history/:id` | Single past ride detail | |
 | `/settings` | Profile, saved places, link Google | [[journey-client-google-link]] |

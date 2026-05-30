@@ -33,6 +33,10 @@ sequenceDiagram
     API-->>C: { status=matched, ride_id, driver=B }
 ```
 
+## After match — live tracking (RCAB-E4.S7)
+
+Once `status=matched`, the client is already in the `ride:<id>` room (joined at request time, re-asserted via `ride:subscribe` on reconnect). It then follows the ride live: `ride_state_changed` drives the status banner (driver assigned → en route → arrived → on trip → complete) and `driver_location` moves the driver marker on the booking map (≤ 1 Hz). The driver's first location implicitly advances `accepted → en_route`. See [[websocket-events]] · [[sm-ride-lifecycle]].
+
 ## Failure paths
 
 - No driver in K=5 accepts within 30s → wave 2 fires K=10.
