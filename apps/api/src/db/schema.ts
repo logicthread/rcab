@@ -176,11 +176,14 @@ export const rides = pgTable(
     fareCents: integer('fare_cents').notNull(),
     status: text('status').notNull().default('requested'),
     idempotencyKey: text('idempotency_key').notNull().unique(),
+    driverId: uuid('driver_id'),
+    acceptedAt: timestamp('accepted_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     index('rides_passenger_idx').on(t.passengerId),
+    index('rides_driver_idx').on(t.driverId),
     check(
       'rides_status_check',
       sql`${t.status} IN ('requested','dispatching','accepted','en_route','arrived','in_progress','completed','cancelled','no_driver')`,

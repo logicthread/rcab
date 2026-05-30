@@ -254,6 +254,8 @@ describe('RidesController.create — normal (solo) path', () => {
       fareCents: 18500,
       status: 'requested',
       idempotencyKey: 'idem-1',
+      driverId: null,
+      acceptedAt: null,
       ...overrides,
     };
   }

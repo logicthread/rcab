@@ -6,6 +6,8 @@ import {
   DISPATCH_QUEUE,
   HARD_FAIL_JOB,
   WAVE_TIMEOUT_JOB,
+  type HardFailJob,
+  type WaveTimeoutJob,
 } from './dispatch.service';
 
 @Processor(DISPATCH_QUEUE)
@@ -19,10 +21,10 @@ export class DispatchProcessor extends WorkerHost {
   async process(job: Job): Promise<void> {
     switch (job.name) {
       case WAVE_TIMEOUT_JOB:
-        await this.dispatch.handleWaveTimeout(job as Job<{ rideId: string; waveNumber: number }>);
+        await this.dispatch.handleWaveTimeout(job as Job<WaveTimeoutJob>);
         return;
       case HARD_FAIL_JOB:
-        await this.dispatch.handleHardFail(job as Job<{ rideId: string }>);
+        await this.dispatch.handleHardFail(job as Job<HardFailJob>);
         return;
       default:
         this.log.warn({ name: job.name }, 'unknown dispatch job; skipping');

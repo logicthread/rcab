@@ -27,5 +27,5 @@ export interface SoloRideOfferPayload {
 
 export interface ClaimResult {
   ok: boolean;
-  reason: 'claimed' | 'already_taken' | 'not_closed' | 'not_found';
+  reason: 'claimed' | 'already_taken' | 'not_closed' | 'not_found' | 'not_claimable';
 }

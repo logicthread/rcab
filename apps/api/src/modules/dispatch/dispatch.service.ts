@@ -45,14 +45,19 @@ export interface RideRequestedEventPayload {
 
 const STOPS_CACHE_TTL_S = 600;
 const OFFER_TTL_MS = 12_000;
+/** TTL on claim:ride:<id>; only needs to outlive the dispatch contention window. */
+const SOLO_CLAIM_TTL_S = 3_600;
 
-interface WaveTimeoutJob {
+export interface WaveTimeoutJob {
   rideId: string;
   waveNumber: number;
+  // Absent on pre-RCAB-E4.S4 in-flight jobs → treated as 'pool' by the handler.
+  kind?: 'solo' | 'pool';
 }
 
-interface HardFailJob {
+export interface HardFailJob {
   rideId: string;
+  kind?: 'solo' | 'pool';
 }
 
 interface DispatchParams {
@@ -123,14 +128,23 @@ export class DispatchService {
       return;
     }
 
-    // Solo offers carry a type tag; their atomic claim on the rides row lands in
-    // RCAB-E4.S4. Routing them through claimPool (the pool Lua) would fail.
+    // Solo offers carry a type tag and claim the rides row directly (not the
+    // pool Lua). First-accept-wins; the loser is told the ride is taken.
     const offerType = await this.redis.get(`offer:type:${event.offerId}`);
     if (offerType === 'solo') {
-      this.log.log(
-        { offerId: event.offerId, rideId, driverId: event.driverId },
-        'solo ride_offer accepted — claim handled in RCAB-E4.S4',
-      );
+      const result = await this.claimSolo(rideId, event.driverId);
+      if (result.ok) {
+        this.bus.toDriver(event.driverId, 'ride_offer_accepted', {
+          offerId: event.offerId,
+          rideId,
+        });
+      } else {
+        this.bus.toDriver(event.driverId, 'ride_offer_revoked', {
+          offerId: event.offerId,
+          rideId,
+          reason: result.reason === 'already_taken' ? 'taken' : 'unavailable',
+        });
+      }
       return;
     }
 
@@ -222,11 +236,11 @@ export class DispatchService {
     }
 
     if (waveNumber === 1) {
-      // Wave-2 + hard-fail timers fire here; their handlers gain solo awareness
-      // in RCAB-E4.S4 (today handleWaveTimeout/handleHardFail no-op on a non-pool id).
+      // Schedule the wave-2 escalation + 60 s hard-fail; the handlers branch on
+      // job.kind='solo' to re-offer (wave 2) or mark the ride no_driver.
       await this.queue.add(
         WAVE_TIMEOUT_JOB,
-        { rideId: ride.id, waveNumber: 2 } satisfies WaveTimeoutJob,
+        { rideId: ride.id, waveNumber: 2, kind: 'solo' } satisfies WaveTimeoutJob,
         {
           jobId: waveTimeoutJobId(ride.id, 2),
           delay: this.params.waveOneTimeoutMs,
@@ -234,7 +248,7 @@ export class DispatchService {
           removeOnFail: 100,
         },
       );
-      await this.queue.add(HARD_FAIL_JOB, { rideId: ride.id } satisfies HardFailJob, {
+      await this.queue.add(HARD_FAIL_JOB, { rideId: ride.id, kind: 'solo' } satisfies HardFailJob, {
         jobId: hardFailJobId(ride.id),
         delay: this.params.hardFailMs,
         removeOnComplete: true,
@@ -285,7 +299,7 @@ export class DispatchService {
     if (waveNumber === 1) {
       await this.queue.add(
         WAVE_TIMEOUT_JOB,
-        { rideId: pool.rideId, waveNumber: 2 } satisfies WaveTimeoutJob,
+        { rideId: pool.rideId, waveNumber: 2, kind: 'pool' } satisfies WaveTimeoutJob,
         {
           jobId: waveTimeoutJobId(pool.rideId, 2),
           delay: this.params.waveOneTimeoutMs,
@@ -293,31 +307,55 @@ export class DispatchService {
           removeOnFail: 100,
         },
       );
-      await this.queue.add(HARD_FAIL_JOB, { rideId: pool.rideId } satisfies HardFailJob, {
-        jobId: hardFailJobId(pool.rideId),
-        delay: this.params.hardFailMs,
-        removeOnComplete: true,
-        removeOnFail: 100,
-      });
+      await this.queue.add(
+        HARD_FAIL_JOB,
+        { rideId: pool.rideId, kind: 'pool' } satisfies HardFailJob,
+        {
+          jobId: hardFailJobId(pool.rideId),
+          delay: this.params.hardFailMs,
+          removeOnComplete: true,
+          removeOnFail: 100,
+        },
+      );
     }
   }
 
   async handleWaveTimeout(job: Job<WaveTimeoutJob>): Promise<void> {
-    const { rideId, waveNumber } = job.data;
+    const { rideId, waveNumber, kind } = job.data;
+
+    if (kind === 'solo') {
+      const ride = await this.ridesRepo.findById(rideId);
+      // Already claimed / cancelled / no_driver → the timer is a stale no-op.
+      if (!ride || ride.status !== 'requested') return;
+      await this.runSoloWave(ride, waveNumber);
+      return;
+    }
+
     const pool = await this.repo.findById(rideId);
     if (!pool || pool.claimedByDriverId) return;
     await this.runWave(pool, waveNumber);
   }
 
   async handleHardFail(job: Job<HardFailJob>): Promise<void> {
-    const { rideId } = job.data;
+    const { rideId, kind } = job.data;
+
+    if (kind === 'solo') {
+      // Guarded UPDATE: returns null if the ride was claimed in the same instant.
+      const failed = await this.ridesRepo.markNoDriver(rideId);
+      if (!failed) return;
+      this.log.warn({ rideId }, 'dispatch hard-fail → no_driver (solo)');
+      await this.revokeAllOffers(rideId);
+      this.bus.toUser(failed.passengerId, 'ride_no_driver', { rideId });
+      return;
+    }
+
     const pool = await this.repo.findById(rideId);
     if (!pool || pool.claimedByDriverId) return;
     this.log.warn({ rideId }, 'dispatch hard-fail → aborting pool');
     await this.lifecycle.closePool(rideId, 'aborted');
     await this.revokeAllOffers(rideId);
-    // TODO(RCAB-E4.S3): re-queue each member as a solo RideRequest once the
-    // solo dispatch path exists. For Phase-0 we only flip the pool to aborted.
+    // Phase-0: an aborted pool is terminal. Re-queueing each member as an
+    // individual solo ride (the solo path now exists) is a future enhancement.
   }
 
   async claimPool(rideId: string, driverId: string): Promise<ClaimResult> {
@@ -342,6 +380,42 @@ export class DispatchService {
       this.log.warn({ rideId, driverId }, 'failed to set driver:state.current_ride_id');
     });
     await this.revokeAllOffers(rideId);
+    await this.queue.remove(waveTimeoutJobId(rideId, 2)).catch(() => {});
+    await this.queue.remove(hardFailJobId(rideId)).catch(() => {});
+
+    return { ok: true, reason: 'claimed' };
+  }
+
+  /**
+   * Atomic first-accept-wins claim for a solo ride. The Redis `claim:ride:<id>`
+   * SET NX is the single point of decision (per the accepted top-K algo — keeps
+   * Postgres out of the contention hot path); the winning driver is then bound
+   * to the rides row. Losers (incl. the same driver re-tapping) get already_taken.
+   */
+  async claimSolo(rideId: string, driverId: string): Promise<ClaimResult> {
+    const claimKey = `claim:ride:${rideId}`;
+    const won = await this.redis.set(claimKey, driverId, 'EX', SOLO_CLAIM_TTL_S, 'NX');
+    if (won !== 'OK') {
+      const holder = await this.redis.get(claimKey);
+      // Idempotent: the same driver's at-least-once redelivery re-confirms.
+      if (holder === driverId) return { ok: true, reason: 'claimed' };
+      return { ok: false, reason: 'already_taken' };
+    }
+
+    const accepted = await this.ridesRepo.claimSolo(rideId, driverId, new Date());
+    if (!accepted) {
+      // Ride moved on (cancelled / no_driver) between the Redis claim and the
+      // DB write — release the claim so nothing is stuck holding it.
+      await this.redis.del(claimKey).catch(() => {});
+      return { ok: false, reason: 'not_claimable' };
+    }
+
+    await this.redis.hset(`driver:state:${driverId}`, 'current_ride_id', rideId).catch(() => {
+      this.log.warn({ rideId, driverId }, 'failed to set driver:state.current_ride_id');
+    });
+    // Revoke every other outstanding offer; exclude the winner so they do not
+    // get a spurious ride_offer_revoked alongside their acceptance.
+    await this.revokeAllOffers(rideId, driverId);
     await this.queue.remove(waveTimeoutJobId(rideId, 2)).catch(() => {});
     await this.queue.remove(hardFailJobId(rideId)).catch(() => {});
 
@@ -377,7 +451,7 @@ export class DispatchService {
     }
   }
 
-  private async revokeAllOffers(rideId: string): Promise<void> {
+  private async revokeAllOffers(rideId: string, exceptDriverId?: string): Promise<void> {
     const offerIds = await this.redis.smembers(`offer:list:${rideId}`);
     if (offerIds.length === 0) return;
 
@@ -386,8 +460,9 @@ export class DispatchService {
       await Promise.all([
         this.redis.del(`offer:${offerId}`),
         this.redis.del(`offer:meta:${offerId}`),
+        this.redis.del(`offer:type:${offerId}`),
       ]);
-      if (driverId) {
+      if (driverId && driverId !== exceptDriverId) {
         this.bus.toDriver(driverId, 'ride_offer_revoked', {
           offerId,
           sharedRideId: rideId,
