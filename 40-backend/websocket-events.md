@@ -35,7 +35,7 @@ On connect, server places the socket in personal + role rooms:
 | `ride_offer` | `{ offerId, rideId, ttlMs, pickup:{lat,lng}, dropoff:{lat,lng}, fareCents, waveNumber }` (solo, E4.S3) or `{ offerId, sharedRideId, ttlMs, stops[], passengerCount, waveNumber }` (shared, E5.S4) | Top-K dispatch reaches this driver. The two are distinguished by the presence of `stops[]`. `stops[].type` ∈ `pickup`/`dropoff`; `stops[]` is ordered: pickups first (by proximity to pool origin centroid), then drops (by proximity to dest centroid). Each entry carries `passengerId` + `sequenceIndex`. |
 | `ride_offer_accepted` | `{ offerId, rideId }` | Solo (E4.S4): the winning driver's first-accept-wins claim (`claim:ride:<id>`) succeeded — the driver app routes to the active ride. |
 | `ride_offer_revoked` | `{ offerId, rideId?, reason }` | Someone else accepted / client canceled. Solo (E4.S4) `reason` ∈ `taken` / `unavailable`. |
-| `ride_state_changed` | `{ ride_id, state, by }` | Any state transition |
+| `ride_state_changed` | `{ rideId, state, by }` | Solo ride lifecycle transition (RCAB-E4.S6). Emitted to room `ride:<id>` by `RideStateMachine` after each `POST /v1/rides/:id/state` commit. `state` ∈ `accepted`/`en_route`/`arrived`/`in_progress`/`completed`; `by` = `driver`. |
 | `passenger_added` | `{ ride_id, request, new_route_polyline }` | Shared-ride: new joiner slotted |
 | `force_offline` | `{ reason }` | Ops or server-side eviction |
 
@@ -45,7 +45,7 @@ On connect, server places the socket in personal + role rooms:
 | `request_status` | `{ request_id, status, ... }` | Booking-flow state changes |
 | `driver_assigned` | `{ ride_id, driver: {...}, vehicle: {...}, eta_s }` | Match made |
 | `driver_location` | `{ ride_id, lat, lng, heading }` | Throttled 1Hz while ride is live |
-| `ride_state_changed` | `{ ride_id, state }` | Ride lifecycle |
+| `ride_state_changed` | `{ rideId, state, by }` | Ride lifecycle (RCAB-E4.S6). The same event + room (`ride:<id>`) as the driver side; the booking client joins `ride:<id>` at request time so it follows the ride live. |
 | `pool:update` | `{ sharedRideId, seatCount, poolStatus }` | Shared-ride pool transitions (RCAB-E5.S6). `poolStatus` ∈ `open` / `closed_full` / `closed_timeout`. Targeted at room `pool:<shared_ride_id>`. Emitted by `PoolLifecycleService` after `openPool`, `slotRequest`, and `closePool('closed_timeout' \| 'closed_full')`. |
 
 ## Client → Server events

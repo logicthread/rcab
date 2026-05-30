@@ -16,6 +16,8 @@ audience: both
 2. Driver hits "Start ride" once client is on board → `in_progress`.
 3. Driver hits "End ride" at drop → `completed`. App collects optional client signature for cash payment, then prompts driver to rate the client.
 
+> **As-built (RCAB-E4.S6):** the solo column values are `en_route` / `arrived` (no `_pickup` suffix). Each tap is a REST `POST /v1/rides/:id/state` (per [[ADR-0008-socketio-realtime]] the solo lifecycle transitions are REST; the server then broadcasts `ride_state_changed` over WS). E4.S6 also adds an explicit **"Start trip"** button (`accepted → en_route`) ahead of step 1, since the "implicit on first location update" trigger needs the driver location stream from RCAB-E4.S7. Signature capture is not built in Phase-0.
+
 ## Shared-ride flow
 
 1. Each passenger is picked up in pool order. App shows a stop list.
