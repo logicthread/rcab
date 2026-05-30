@@ -9,6 +9,7 @@ import type { Job } from 'bullmq';
 import * as schema from '../../src/db/schema';
 import { SharedRideRepository } from '../../src/modules/matching/shared-ride.repository';
 import { RideStopRepository } from '../../src/modules/matching/ride-stop.repository';
+import { RidesRepository } from '../../src/modules/rides/rides.repository';
 import {
   PoolLifecycleService,
   MATCHING_QUEUE,
@@ -16,7 +17,10 @@ import {
   type PoolClosedEventPayload,
 } from '../../src/modules/matching/pool-lifecycle.service';
 import { DispatchService, DISPATCH_QUEUE } from '../../src/modules/dispatch/dispatch.service';
-import type { SharedRideOfferPayload } from '../../src/modules/dispatch/dispatch.types';
+import type {
+  SharedRideOfferPayload,
+  SoloRideOfferPayload,
+} from '../../src/modules/dispatch/dispatch.types';
 
 const skip = process.env.RCAB_INT_SKIPPED === '1';
 
@@ -37,6 +41,7 @@ describe.skipIf(skip)('DispatchService — integration (Postgres + Redis + BullM
   let dispatchQueue: Queue;
   let lifecycle: PoolLifecycleService;
   let dispatch: DispatchService;
+  let ridesRepo: RidesRepository;
   let bus: {
     toDriver: ReturnType<typeof vi.fn>;
     toUser: ReturnType<typeof vi.fn>;
@@ -57,6 +62,7 @@ describe.skipIf(skip)('DispatchService — integration (Postgres + Redis + BullM
     const db = drizzle(pgPool as never, { schema });
     const repo = new SharedRideRepository(db as never);
     const stopsRepo = new RideStopRepository(db as never);
+    ridesRepo = new RidesRepository(db as never);
 
     const conn = parseRedis(process.env.TEST_REDIS_URL!);
     matchingQueue = new Queue(MATCHING_QUEUE, { connection: conn });
@@ -85,6 +91,7 @@ describe.skipIf(skip)('DispatchService — integration (Postgres + Redis + BullM
 
     dispatch = new DispatchService(
       repo,
+      ridesRepo,
       stopsRepo,
       lifecycle,
       bus as never,
@@ -98,6 +105,10 @@ describe.skipIf(skip)('DispatchService — integration (Postgres + Redis + BullM
   afterAll(async () => {
     await pgClient.query('DELETE FROM ride_stops').catch(() => {});
     await pgClient.query('DELETE FROM shared_rides').catch(() => {});
+    await pgClient.query('DELETE FROM rides').catch(() => {});
+    await pgClient
+      .query("DELETE FROM app_user WHERE firebase_uid LIKE 'fb-solo-%'")
+      .catch(() => {});
     await matchingQueue?.obliterate({ force: true }).catch(() => {});
     await dispatchQueue?.obliterate({ force: true }).catch(() => {});
     await matchingQueue?.close().catch(() => {});
@@ -247,6 +258,57 @@ describe.skipIf(skip)('DispatchService — integration (Postgres + Redis + BullM
       'ride_offer',
       expect.objectContaining({ sharedRideId: pool.rideId }),
     );
+
+    await redis.zrem('active_drivers', driverId);
+  });
+
+  it('dispatchSolo fans out a solo ride_offer (offer:type=solo) + schedules timers', async () => {
+    bus.toDriver.mockClear();
+
+    const driverId = randomUUID();
+    await redis.geoadd('active_drivers', 91.7363, 26.1446, driverId);
+
+    const passengerId = randomUUID();
+    await pgClient.query(
+      `INSERT INTO app_user (id, firebase_uid, phone_e164, role) VALUES ($1, $2, $3, 'client')`,
+      [
+        passengerId,
+        `fb-solo-${passengerId}`,
+        `+9199${Math.floor(Math.random() * 1e8)
+          .toString()
+          .padStart(8, '0')}`,
+      ],
+    );
+    const { row } = await ridesRepo.create({
+      passengerId,
+      originLat: 26.1445,
+      originLng: 91.7362,
+      destLat: 26.1758,
+      destLng: 91.7898,
+      fareCents: 18500,
+      idempotencyKey: `idem-${randomUUID()}`,
+    });
+
+    await dispatch.dispatchSolo(row.id);
+
+    expect(bus.toDriver).toHaveBeenCalledTimes(1);
+    const [actualDriver, eventName, payload] = bus.toDriver.mock.calls[0] as [
+      string,
+      string,
+      SoloRideOfferPayload,
+    ];
+    expect(actualDriver).toBe(driverId);
+    expect(eventName).toBe('ride_offer');
+    expect(payload.rideId).toBe(row.id);
+    expect(payload.fareCents).toBe(18500);
+    expect(payload.waveNumber).toBe(1);
+
+    const offerIds = await redis.smembers(`offer:list:${row.id}`);
+    expect(offerIds).toHaveLength(1);
+    expect(await redis.get(`offer:type:${offerIds[0]}`)).toBe('solo');
+
+    expect(await dispatchQueue.getJob(`dispatch:wave2-timeout:${row.id}`)).toBeDefined();
+    expect(await dispatchQueue.getJob(`dispatch:hard-fail:${row.id}`)).toBeDefined();
 
     await redis.zrem('active_drivers', driverId);
   });

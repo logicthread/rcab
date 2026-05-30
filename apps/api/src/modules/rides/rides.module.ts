@@ -10,5 +10,6 @@ import { RidesRepository } from './rides.repository';
   imports: [AuthModule, MatchingModule, PricingModule],
   controllers: [RidesController],
   providers: [QuoteTokenService, RidesRepository],
+  exports: [RidesRepository],
 })
 export class RidesModule {}
