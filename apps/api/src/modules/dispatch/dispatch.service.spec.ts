@@ -525,6 +525,13 @@ describe('DispatchService.onRideOfferResponse', () => {
       offerId: 'o-1',
       rideId: 'ride-1',
     });
+    // Booking client (already in ride:<id>) is told a driver was assigned so its
+    // live-tracking view activates immediately (RCAB-E4.S7).
+    expect(bus.toRide).toHaveBeenCalledWith('ride-1', 'ride_state_changed', {
+      rideId: 'ride-1',
+      state: 'accepted',
+      by: 'driver',
+    });
   });
 
   it('accept on a solo offer (lost the race): tells the driver the ride is taken', async () => {

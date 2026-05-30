@@ -7,11 +7,12 @@ import { RidesController } from './rides.controller';
 import { QuoteTokenService } from './quote-token.service';
 import { RidesRepository } from './rides.repository';
 import { RideStateMachine } from './ride-state-machine.service';
+import { RidesRealtimeListener } from './rides-realtime.listener';
 
 @Module({
   imports: [AuthModule, MatchingModule, PricingModule, RealtimeModule],
   controllers: [RidesController],
-  providers: [QuoteTokenService, RidesRepository, RideStateMachine],
+  providers: [QuoteTokenService, RidesRepository, RideStateMachine, RidesRealtimeListener],
   exports: [RidesRepository],
 })
 export class RidesModule {}

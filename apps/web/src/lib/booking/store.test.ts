@@ -15,6 +15,7 @@ function quoteFixture(): QuoteResponse {
     distanceM: 1000,
     durationS: 600,
     soloFare: { amount: 5000, currency: 'INR' },
+    quoteToken: 'quote-token-test',
     geometry: {
       type: 'LineString',
       coordinates: [
@@ -145,5 +146,55 @@ describe('useBookingStore', () => {
     expect(s.dropoff).toBeNull();
     expect(s.sharedRideId).toBeNull();
     expect(s.stage).toBe('idle');
+  });
+
+  // ── Solo live-tracking (RCAB-E4.S7) ──────────────────────────────────────────
+
+  it('setSoloRequested enters the tracking stage with the ride id + status', () => {
+    useBookingStore.getState().setSoloRequested('ride-solo-1', 'requested');
+    const s = useBookingStore.getState();
+    expect(s.stage).toBe('tracking');
+    expect(s.rideId).toBe('ride-solo-1');
+    expect(s.rideStatus).toBe('requested');
+    expect(s.driver).toBeNull();
+  });
+
+  it('applyRideState advances the tracked status', () => {
+    useBookingStore.getState().setSoloRequested('ride-solo-1', 'requested');
+    useBookingStore.getState().applyRideState('en_route');
+    expect(useBookingStore.getState().rideStatus).toBe('en_route');
+  });
+
+  it('applyRideState falls back to requested for an unknown wire state', () => {
+    useBookingStore.getState().setSoloRequested('ride-solo-1', 'accepted');
+    useBookingStore.getState().applyRideState('garbage');
+    expect(useBookingStore.getState().rideStatus).toBe('requested');
+  });
+
+  it('applyRideState is ignored once there is no active ride', () => {
+    useBookingStore.getState().applyRideState('en_route');
+    expect(useBookingStore.getState().rideStatus).toBeNull();
+  });
+
+  it('applyDriverLocation updates the marker for the active ride', () => {
+    useBookingStore.getState().setSoloRequested('ride-solo-1', 'accepted');
+    useBookingStore.getState().applyDriverLocation('ride-solo-1', 26.14, 91.73, 90);
+    expect(useBookingStore.getState().driver).toEqual({ lat: 26.14, lng: 91.73, heading: 90 });
+  });
+
+  it('applyDriverLocation ignores a location for a different ride', () => {
+    useBookingStore.getState().setSoloRequested('ride-solo-1', 'accepted');
+    useBookingStore.getState().applyDriverLocation('ride-OTHER', 1, 2, 3);
+    expect(useBookingStore.getState().driver).toBeNull();
+  });
+
+  it('reset clears the solo tracking slice', () => {
+    useBookingStore.getState().setSoloRequested('ride-solo-1', 'accepted');
+    useBookingStore.getState().applyDriverLocation('ride-solo-1', 26.14, 91.73, 90);
+    useBookingStore.getState().reset();
+    const s = useBookingStore.getState();
+    expect(s.rideId).toBeNull();
+    expect(s.rideStatus).toBeNull();
+    expect(s.driver).toBeNull();
   });
 });
