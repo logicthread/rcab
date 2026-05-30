@@ -1,4 +1,4 @@
-import { IsEnum, IsLatitude, IsLongitude, IsNumber } from 'class-validator';
+import { IsEnum, IsLatitude, IsLongitude, IsNumber, IsOptional, IsString } from 'class-validator';
 
 export enum RideType {
   Normal = 'normal',
@@ -25,4 +25,10 @@ export class CreateRideDto {
   @IsNumber()
   @IsLongitude()
   destLng!: number;
+
+  // Required for type=normal (RCAB-E4.S2): the signed quote token that locks
+  // the fare + route. Not used by the shared path.
+  @IsOptional()
+  @IsString()
+  quoteToken?: string;
 }

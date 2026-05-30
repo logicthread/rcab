@@ -159,3 +159,31 @@ export const vehicle = pgTable(
   },
   (t) => [check('vehicle_type_check', sql`${t.type} IN ('auto','bike','cab_hatch','cab_sedan')`)],
 );
+
+// Solo (normal) rides — RCAB-E4.S2. Created 'requested'; RCAB-E4.S6 owns the
+// full state machine. Distinct from shared_rides (pooled).
+export const rides = pgTable(
+  'rides',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    passengerId: uuid('passenger_id')
+      .notNull()
+      .references(() => appUser.id, { onDelete: 'cascade' }),
+    originLat: doublePrecision('origin_lat').notNull(),
+    originLng: doublePrecision('origin_lng').notNull(),
+    destLat: doublePrecision('dest_lat').notNull(),
+    destLng: doublePrecision('dest_lng').notNull(),
+    fareCents: integer('fare_cents').notNull(),
+    status: text('status').notNull().default('requested'),
+    idempotencyKey: text('idempotency_key').notNull().unique(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('rides_passenger_idx').on(t.passengerId),
+    check(
+      'rides_status_check',
+      sql`${t.status} IN ('requested','dispatching','accepted','en_route','arrived','in_progress','completed','cancelled','no_driver')`,
+    ),
+  ],
+);
