@@ -31,8 +31,11 @@ See [[algo-top-k-dispatch]] for the full algorithm and parameters.
   - `cancel(requestId): void`
   - `dispatchPool(rideId): Promise<void>` — shared-ride entry point (E5.S4); fans out a multi-stop `ride_offer` to top-K drivers and schedules wave-2 + hard-fail timers.
   - `claimPool(rideId, driverId): Promise<ClaimResult>` — atomic Lua claim of a closed pool by a single driver; revokes outstanding offers and clears wave-2/hard-fail jobs on success.
+  - `dispatchSolo(rideId): Promise<void>` — solo (normal) entry point (E4.S3); fans out a `ride_offer` to top-K drivers and schedules wave-2 + hard-fail timers.
+  - `claimSolo(rideId, driverId): Promise<ClaimResult>` — atomic first-accept-wins claim of a solo ride (E4.S4): `claim:ride:<id>` SET NX decides the winner, then the `rides` row is bound (`accepted` + `driver_id` + `accepted_at`); revokes the other offers (excluding the winner) and clears the timers.
   - `@OnEvent('pool.closed')` listener — auto-dispatches when `PoolLifecycleService` closes a pool with reason `closed_full` or `closed_timeout`.
-  - `@OnEvent('dispatch.ride_offer_response')` listener — driven by `RealtimeGateway`; routes `accept` payloads carrying `sharedRideId` (or resolvable via `offer:meta:<offerId>`) into `claimPool`. Decline → just deletes the offer lock.
+  - `@OnEvent('ride.requested')` listener — auto-dispatches a freshly persisted solo ride (E4.S3).
+  - `@OnEvent('dispatch.ride_offer_response')` listener — driven by `RealtimeGateway`; a pool offer → `claimPool`, a solo offer (`offer:type='solo'`) → `claimSolo` (winner gets `ride_offer_accepted`, race-loser gets `ride_offer_revoked` reason `taken`). Decline → just deletes the offer lock.
 
 ## State
 
@@ -48,7 +51,8 @@ See [[algo-top-k-dispatch]] for the full algorithm and parameters.
 
 - Redis down → `dispatch_unavailable` 503 to client.
 - All offers timeout → request transitions to `failed` (see [[sm-booking-flow]]) and clients get a `request_status` event.
-- Shared-ride pool exhausts all waves → `DispatchService.handleHardFail` calls `PoolLifecycleService.closePool(rideId, 'aborted')` and revokes outstanding offers. Solo re-queue per member is a `TODO(RCAB-E4.S3)` carve-out until the solo dispatch path lands.
+- Shared-ride pool exhausts all waves → `DispatchService.handleHardFail` (`kind='pool'`) calls `PoolLifecycleService.closePool(rideId, 'aborted')` and revokes outstanding offers. Re-queueing each member as an individual solo ride is a Phase-0 future enhancement (the solo path now exists, E4.S3–S4).
+- Solo ride exhausts all waves → `handleHardFail` (`kind='solo'`) marks the `rides` row `no_driver`, revokes outstanding offers, and emits `ride_no_driver` to the passenger (E4.S4).
 
 ## See also
 - [[algo-top-k-dispatch]] · [[redis-usage]]
