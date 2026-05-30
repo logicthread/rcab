@@ -27,8 +27,10 @@ import type { Money } from '../pricing/money';
 import type { SeatQuote } from '../pricing/pricing.types';
 import { CreateRideDto, RideType } from './dto/create-ride.dto';
 import { QuoteRideDto } from './dto/quote-ride.dto';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { QuoteTokenService, type QuoteClaims } from './quote-token.service';
 import { RidesRepository, type RideRow } from './rides.repository';
+import { RIDE_REQUESTED_EVENT, type RideRequestedEventPayload } from '../dispatch/dispatch.service';
 
 export interface CreateRideResponse {
   sharedRideId: string;
@@ -91,6 +93,7 @@ export class RidesController {
     private readonly routeSim: RouteSimilarityService,
     private readonly quoteToken: QuoteTokenService,
     private readonly ridesRepo: RidesRepository,
+    private readonly events: EventEmitter2,
     @Inject(REDIS) private readonly redis: Redis,
   ) {}
 
@@ -241,7 +244,7 @@ export class RidesController {
       });
     }
 
-    const { row } = await this.ridesRepo.create({
+    const { row, created } = await this.ridesRepo.create({
       passengerId,
       originLat: dto.originLat,
       originLng: dto.originLng,
@@ -252,6 +255,13 @@ export class RidesController {
     });
     // 24 h replay window (≫ the 5-min quote TTL).
     await this.redis.set(idemKey(idempotencyKey), row.id, 'EX', 86_400);
+
+    // Only a freshly-created ride triggers dispatch — a replay must not re-dispatch.
+    if (created) {
+      this.events.emit(RIDE_REQUESTED_EVENT, {
+        rideId: row.id,
+      } satisfies RideRequestedEventPayload);
+    }
 
     return soloResponse(row);
   }

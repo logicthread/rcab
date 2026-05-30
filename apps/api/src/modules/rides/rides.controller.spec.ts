@@ -87,6 +87,7 @@ function makeController(
     get: opts.redisGet ?? vi.fn().mockResolvedValue(null),
     set: vi.fn().mockResolvedValue('OK'),
   };
+  const events = { emit: vi.fn() };
   const ctrl = new RidesController(
     matching as never,
     pricing as never,
@@ -95,9 +96,10 @@ function makeController(
     routeSim as never,
     quoteToken as never,
     ridesRepo as never,
+    events as never,
     redis as never,
   );
-  return { ctrl, repo, stops, pricing, routeSim, quoteToken, ridesRepo, redis, matching };
+  return { ctrl, repo, stops, pricing, routeSim, quoteToken, ridesRepo, redis, events, matching };
 }
 
 describe('RidesController.listStops', () => {
@@ -258,7 +260,7 @@ describe('RidesController.create — normal (solo) path', () => {
 
   it('creates a requested ride with the fare locked from the quote token', async () => {
     const ridesCreate = vi.fn().mockResolvedValue({ row: row(), created: true });
-    const { ctrl, redis } = makeController({
+    const { ctrl, redis, events } = makeController({
       verify: vi.fn().mockReturnValue(claims),
       ridesCreate,
     });
@@ -273,11 +275,13 @@ describe('RidesController.create — normal (solo) path', () => {
       expect.objectContaining({ passengerId: 'c-1', fareCents: 18500, idempotencyKey: 'idem-1' }),
     );
     expect(redis.set).toHaveBeenCalledWith('idem:rides:idem-1', 'ride-9', 'EX', 86_400);
+    // A freshly-created ride triggers dispatch.
+    expect(events.emit).toHaveBeenCalledWith('ride.requested', { rideId: 'ride-9' });
   });
 
   it('replays the original ride from Redis without inserting again', async () => {
     const ridesCreate = vi.fn();
-    const { ctrl } = makeController({
+    const { ctrl, events } = makeController({
       redisGet: vi.fn().mockResolvedValue('ride-9'),
       ridesFindById: vi.fn().mockResolvedValue(row()),
       ridesCreate,
@@ -285,14 +289,21 @@ describe('RidesController.create — normal (solo) path', () => {
     const res = await ctrl.create(clientReq as never, dto, 'idem-1');
     expect((res as { rideId: string }).rideId).toBe('ride-9');
     expect(ridesCreate).not.toHaveBeenCalled();
+    // A replay must not re-dispatch.
+    expect(events.emit).not.toHaveBeenCalled();
   });
 
   it('returns the same ride for a duplicate key when not in Redis (DB backstop)', async () => {
     const ridesCreate = vi.fn().mockResolvedValue({ row: row(), created: false });
-    const { ctrl } = makeController({ verify: vi.fn().mockReturnValue(claims), ridesCreate });
+    const { ctrl, events } = makeController({
+      verify: vi.fn().mockReturnValue(claims),
+      ridesCreate,
+    });
     const res = await ctrl.create(clientReq as never, dto, 'idem-1');
     expect((res as { rideId: string }).rideId).toBe('ride-9');
     expect(ridesCreate).toHaveBeenCalledTimes(1);
+    // Duplicate key (already existed) → no re-dispatch.
+    expect(events.emit).not.toHaveBeenCalled();
   });
 
   it('400 when the Idempotency-Key header is missing', async () => {

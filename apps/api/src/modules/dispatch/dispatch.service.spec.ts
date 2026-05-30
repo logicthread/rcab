@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { DispatchService, computeStops, HARD_FAIL_JOB, WAVE_TIMEOUT_JOB } from './dispatch.service';
 import type { Job } from 'bullmq';
 import type { SharedRideMember, SharedRideRow } from '../matching/shared-ride.repository';
+import type { RideRow } from '../rides/rides.repository';
 
 function member(overrides: Partial<SharedRideMember> = {}): SharedRideMember {
   return {
@@ -46,6 +47,29 @@ function buildRepo(opts: { byId?: SharedRideRow | null } = {}) {
   };
 }
 
+function soloRide(overrides: Partial<RideRow> = {}): RideRow {
+  return {
+    id: 'ride-1',
+    passengerId: 'c-1',
+    originLat: 26.1445,
+    originLng: 91.7362,
+    destLat: 26.1758,
+    destLng: 91.7898,
+    fareCents: 18500,
+    status: 'requested',
+    idempotencyKey: 'idem-1',
+    ...overrides,
+  };
+}
+
+function buildRidesRepo(opts: { byId?: RideRow | null } = {}) {
+  return {
+    create: vi.fn(),
+    findById: vi.fn().mockResolvedValue(opts.byId === undefined ? soloRide() : opts.byId),
+    findByIdempotencyKey: vi.fn(),
+  };
+}
+
 function buildStops() {
   return {
     seed: vi.fn().mockResolvedValue(undefined),
@@ -82,6 +106,7 @@ function buildRedis(
     offerOwners?: Record<string, string>;
     stopsCache?: string | null;
     metaResult?: string | null;
+    offerType?: string | null;
   } = {},
 ) {
   const setNxResult = opts.setNxResult === undefined ? 'OK' : opts.setNxResult;
@@ -101,6 +126,7 @@ function buildRedis(
     hset: vi.fn().mockResolvedValue(1),
     get: vi.fn().mockImplementation(async (key: string) => {
       if (key === 'pool:pool-1:stops') return opts.stopsCache ?? null;
+      if (key.startsWith('offer:type:')) return opts.offerType ?? null;
       if (key.startsWith('offer:meta:')) return opts.metaResult ?? null;
       if (key.startsWith('offer:')) return opts.offerOwners?.[key.replace('offer:', '')] ?? null;
       return null;
@@ -119,6 +145,7 @@ function buildConfig(overrides: Record<string, unknown> = {}) {
 
 interface ServiceOpts {
   byId?: SharedRideRow | null;
+  soloRide?: RideRow | null;
   geo?: string[];
   alreadyOffered?: string[];
   setNx?: string | null;
@@ -127,11 +154,13 @@ interface ServiceOpts {
   offerOwners?: Record<string, string>;
   stopsCache?: string | null;
   metaResult?: string | null;
+  offerType?: string | null;
   config?: Record<string, unknown>;
 }
 
 function makeService(opts: ServiceOpts = {}) {
   const repo = buildRepo({ byId: opts.byId });
+  const ridesRepo = buildRidesRepo({ byId: opts.soloRide });
   const stops = buildStops();
   const lifecycle = buildLifecycle();
   const bus = buildBus();
@@ -145,12 +174,14 @@ function makeService(opts: ServiceOpts = {}) {
     offerOwners: opts.offerOwners,
     stopsCache: opts.stopsCache,
     metaResult: opts.metaResult,
+    offerType: opts.offerType,
   });
   const events = buildEvents();
   const config = buildConfig(opts.config ?? {});
 
   const svc = new DispatchService(
     repo as never,
+    ridesRepo as never,
     stops as never,
     lifecycle as never,
     bus as never,
@@ -159,7 +190,7 @@ function makeService(opts: ServiceOpts = {}) {
     events as never,
     config as never,
   );
-  return { svc, repo, stops, lifecycle, bus, queue, redis, events };
+  return { svc, repo, ridesRepo, stops, lifecycle, bus, queue, redis, events };
 }
 
 // ── computeStops ─────────────────────────────────────────────────────────────
@@ -431,7 +462,7 @@ describe('DispatchService.onRideOfferResponse', () => {
     expect(repo.setClaimed).toHaveBeenCalledWith('pool-from-meta', 'd-1', expect.any(Date));
   });
 
-  it('accept w/o resolvable rideId: ignores (logs TODO solo path)', async () => {
+  it('accept w/o resolvable rideId: ignores', async () => {
     const { svc, repo } = makeService({
       evalResult: 1,
       metaResult: null,
@@ -442,5 +473,89 @@ describe('DispatchService.onRideOfferResponse', () => {
       accept: true,
     });
     expect(repo.setClaimed).not.toHaveBeenCalled();
+  });
+
+  it('accept on a solo-typed offer: does NOT call claimPool (deferred to E4.S4)', async () => {
+    const { svc, repo } = makeService({
+      evalResult: 1,
+      metaResult: 'ride-1',
+      offerType: 'solo',
+    });
+    await svc.onRideOfferResponse({ driverId: 'd-1', offerId: 'o-1', accept: true });
+    expect(repo.setClaimed).not.toHaveBeenCalled();
+  });
+});
+
+// ── dispatchSolo / runSoloWave (RCAB-E4.S3) ──────────────────────────────────
+
+describe('DispatchService.dispatchSolo', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('skips when the ride is not found', async () => {
+    const { svc, bus } = makeService({ soloRide: null });
+    await svc.dispatchSolo('missing');
+    expect(bus.toDriver).not.toHaveBeenCalled();
+  });
+
+  it('skips when the ride is not in requested state', async () => {
+    const { svc, bus, queue } = makeService({ soloRide: soloRide({ status: 'accepted' }) });
+    await svc.dispatchSolo('ride-1');
+    expect(bus.toDriver).not.toHaveBeenCalled();
+    expect(queue.add).not.toHaveBeenCalled();
+  });
+
+  it('wave 1: fans out a solo ride_offer to candidates + schedules wave-2 + hard-fail', async () => {
+    const { svc, bus, queue } = makeService({ soloRide: soloRide(), geo: ['d-1', 'd-2'] });
+    await svc.dispatchSolo('ride-1');
+
+    expect(bus.toDriver).toHaveBeenCalledTimes(2);
+    for (const call of bus.toDriver.mock.calls) {
+      const [driverId, event, payload] = call as [
+        string,
+        string,
+        { rideId: string; pickup: unknown; fareCents: number; waveNumber: number },
+      ];
+      expect(['d-1', 'd-2']).toContain(driverId);
+      expect(event).toBe('ride_offer');
+      expect(payload.rideId).toBe('ride-1');
+      expect(payload.fareCents).toBe(18500);
+      expect(payload.waveNumber).toBe(1);
+      expect(payload.pickup).toEqual({ lat: 26.1445, lng: 91.7362 });
+    }
+
+    const jobNames = queue.add.mock.calls.map((c) => c[0]);
+    expect(jobNames).toContain(WAVE_TIMEOUT_JOB);
+    expect(jobNames).toContain(HARD_FAIL_JOB);
+  });
+
+  it('tags each solo offer with offer:type=solo', async () => {
+    const { svc, redis } = makeService({ soloRide: soloRide(), geo: ['d-1'] });
+    await svc.dispatchSolo('ride-1');
+    const typeSet = redis.set.mock.calls.find(
+      (c) => typeof c[0] === 'string' && (c[0] as string).startsWith('offer:type:'),
+    );
+    expect(typeSet).toBeDefined();
+    expect(typeSet?.[1]).toBe('solo');
+  });
+
+  it('excludes drivers already in ride:<id>:offered', async () => {
+    const { svc, bus } = makeService({
+      soloRide: soloRide(),
+      geo: ['d-1', 'd-2'],
+      alreadyOffered: ['d-1'],
+    });
+    await svc.dispatchSolo('ride-1');
+    expect(bus.toDriver).toHaveBeenCalledTimes(1);
+    expect(bus.toDriver.mock.calls[0][0]).toBe('d-2');
+  });
+});
+
+describe('DispatchService.onRideRequested', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('dispatches the solo ride named in the event payload', async () => {
+    const { svc, bus } = makeService({ soloRide: soloRide(), geo: ['d-1'] });
+    await svc.onRideRequested({ rideId: 'ride-1' });
+    expect(bus.toDriver).toHaveBeenCalledTimes(1);
   });
 });

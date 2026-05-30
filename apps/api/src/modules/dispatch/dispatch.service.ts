@@ -24,11 +24,24 @@ import {
   type SharedRideRow,
 } from '../matching/shared-ride.repository';
 import { RideStopRepository } from '../matching/ride-stop.repository';
-import type { ClaimResult, OfferStop, SharedRideOfferPayload } from './dispatch.types';
+import { RidesRepository, type RideRow } from '../rides/rides.repository';
+import type {
+  ClaimResult,
+  OfferStop,
+  SharedRideOfferPayload,
+  SoloRideOfferPayload,
+} from './dispatch.types';
 
 export const DISPATCH_QUEUE = 'dispatch';
 export const WAVE_TIMEOUT_JOB = 'dispatch:wave-timeout';
 export const HARD_FAIL_JOB = 'dispatch:hard-fail';
+
+/** Emitted by the rides controller when a solo ride is persisted `requested`. */
+export const RIDE_REQUESTED_EVENT = 'ride.requested';
+
+export interface RideRequestedEventPayload {
+  rideId: string;
+}
 
 const STOPS_CACHE_TTL_S = 600;
 const OFFER_TTL_MS = 12_000;
@@ -59,6 +72,7 @@ export class DispatchService {
 
   constructor(
     private readonly repo: SharedRideRepository,
+    private readonly ridesRepo: RidesRepository,
     private readonly stops: RideStopRepository,
     private readonly lifecycle: PoolLifecycleService,
     private readonly bus: RealtimeBus,
@@ -104,7 +118,18 @@ export class DispatchService {
     if (!rideId) {
       this.log.warn(
         { offerId: event.offerId, driverId: event.driverId },
-        'ride_offer_response: no rideId resolvable; ignoring (solo path TODO RCAB-E4.S5)',
+        'ride_offer_response: no rideId resolvable; ignoring',
+      );
+      return;
+    }
+
+    // Solo offers carry a type tag; their atomic claim on the rides row lands in
+    // RCAB-E4.S4. Routing them through claimPool (the pool Lua) would fail.
+    const offerType = await this.redis.get(`offer:type:${event.offerId}`);
+    if (offerType === 'solo') {
+      this.log.log(
+        { offerId: event.offerId, rideId, driverId: event.driverId },
+        'solo ride_offer accepted — claim handled in RCAB-E4.S4',
       );
       return;
     }
@@ -131,6 +156,93 @@ export class DispatchService {
     await this.runWave(pool, 1);
   }
 
+  @OnEvent(RIDE_REQUESTED_EVENT, { async: true })
+  async onRideRequested(payload: RideRequestedEventPayload): Promise<void> {
+    this.log.log({ rideId: payload.rideId }, 'ride.requested → dispatchSolo');
+    try {
+      await this.dispatchSolo(payload.rideId);
+    } catch (err) {
+      this.log.error({ err, rideId: payload.rideId }, 'dispatchSolo failed');
+    }
+  }
+
+  async dispatchSolo(rideId: string): Promise<void> {
+    const ride = await this.ridesRepo.findById(rideId);
+    if (!ride) {
+      this.log.warn({ rideId }, 'dispatchSolo: ride not found');
+      return;
+    }
+    if (ride.status !== 'requested') {
+      this.log.warn(
+        { rideId, status: ride.status },
+        'dispatchSolo: ride not in requested state; skipping',
+      );
+      return;
+    }
+    await this.runSoloWave(ride, 1);
+  }
+
+  async runSoloWave(ride: RideRow, waveNumber: number): Promise<void> {
+    const { k, radiusMeters } =
+      waveNumber === 1
+        ? { k: this.params.k1, radiusMeters: this.params.r1Meters }
+        : { k: this.params.k2, radiusMeters: this.params.r2Meters };
+
+    const offeredSetKey = `ride:${ride.id}:offered`;
+    const fresh = await this.selectCandidates(
+      ride.originLat,
+      ride.originLng,
+      k,
+      radiusMeters,
+      offeredSetKey,
+    );
+
+    if (fresh.length === 0) {
+      this.log.warn(
+        { rideId: ride.id, waveNumber, radiusMeters },
+        'no fresh candidates this wave (solo)',
+      );
+    }
+
+    for (const driverId of fresh) {
+      const offerId = await this.reserveOffer(ride.id, driverId, offeredSetKey, { solo: true });
+      if (!offerId) continue;
+
+      const payload: SoloRideOfferPayload = {
+        offerId,
+        rideId: ride.id,
+        ttlMs: OFFER_TTL_MS,
+        pickup: { lat: ride.originLat, lng: ride.originLng },
+        dropoff: { lat: ride.destLat, lng: ride.destLng },
+        fareCents: ride.fareCents,
+        waveNumber,
+      };
+
+      this.bus.toDriver(driverId, 'ride_offer', payload);
+    }
+
+    if (waveNumber === 1) {
+      // Wave-2 + hard-fail timers fire here; their handlers gain solo awareness
+      // in RCAB-E4.S4 (today handleWaveTimeout/handleHardFail no-op on a non-pool id).
+      await this.queue.add(
+        WAVE_TIMEOUT_JOB,
+        { rideId: ride.id, waveNumber: 2 } satisfies WaveTimeoutJob,
+        {
+          jobId: waveTimeoutJobId(ride.id, 2),
+          delay: this.params.waveOneTimeoutMs,
+          removeOnComplete: true,
+          removeOnFail: 100,
+        },
+      );
+      await this.queue.add(HARD_FAIL_JOB, { rideId: ride.id } satisfies HardFailJob, {
+        jobId: hardFailJobId(ride.id),
+        delay: this.params.hardFailMs,
+        removeOnComplete: true,
+        removeOnFail: 100,
+      });
+    }
+  }
+
   async runWave(pool: SharedRideRow, waveNumber: number): Promise<void> {
     const stops = await this.getOrComputeStops(pool);
     const { k, radiusMeters } =
@@ -138,22 +250,14 @@ export class DispatchService {
         ? { k: this.params.k1, radiusMeters: this.params.r1Meters }
         : { k: this.params.k2, radiusMeters: this.params.r2Meters };
 
-    const excluded = await this.redis.smembers(`pool:${pool.rideId}:offered`);
-    const seen = new Set(excluded);
-
-    const candidatesRaw = (await this.redis.georadius(
-      'active_drivers',
-      pool.originLng,
+    const offeredSetKey = `pool:${pool.rideId}:offered`;
+    const fresh = await this.selectCandidates(
       pool.originLat,
+      pool.originLng,
+      k,
       radiusMeters,
-      'm',
-      'ASC',
-      'COUNT',
-      // request K + already-seen so we have headroom after filtering.
-      k + seen.size,
-    )) as string[];
-
-    const fresh = candidatesRaw.filter((id) => !seen.has(id)).slice(0, k);
+      offeredSetKey,
+    );
 
     if (fresh.length === 0) {
       this.log.warn(
@@ -163,23 +267,8 @@ export class DispatchService {
     }
 
     for (const driverId of fresh) {
-      const offerId = randomUUID();
-      const reserved = await this.redis.set(
-        `offer:${offerId}`,
-        driverId,
-        'EX',
-        Math.ceil(OFFER_TTL_MS / 1000),
-        'NX',
-      );
-      if (reserved !== 'OK') continue;
-
-      await Promise.all([
-        this.redis.sadd(`offer:list:${pool.rideId}`, offerId),
-        this.redis.expire(`offer:list:${pool.rideId}`, STOPS_CACHE_TTL_S),
-        this.redis.sadd(`pool:${pool.rideId}:offered`, driverId),
-        this.redis.expire(`pool:${pool.rideId}:offered`, STOPS_CACHE_TTL_S),
-        this.redis.set(`offer:meta:${offerId}`, pool.rideId, 'EX', STOPS_CACHE_TTL_S),
-      ]);
+      const offerId = await this.reserveOffer(pool.rideId, driverId, offeredSetKey);
+      if (!offerId) continue;
 
       const payload: SharedRideOfferPayload = {
         offerId,
@@ -307,6 +396,65 @@ export class DispatchService {
       }
     }
     await this.redis.del(`offer:list:${rideId}`);
+  }
+
+  /** Nearest available drivers within radius, excluding any already offered. Shared by pool + solo. */
+  private async selectCandidates(
+    originLat: number,
+    originLng: number,
+    k: number,
+    radiusMeters: number,
+    offeredSetKey: string,
+  ): Promise<string[]> {
+    const seen = new Set(await this.redis.smembers(offeredSetKey));
+    const raw = (await this.redis.georadius(
+      'active_drivers',
+      originLng,
+      originLat,
+      radiusMeters,
+      'm',
+      'ASC',
+      'COUNT',
+      // request K + already-seen so we have headroom after filtering.
+      k + seen.size,
+    )) as string[];
+    return raw.filter((id) => !seen.has(id)).slice(0, k);
+  }
+
+  /**
+   * Atomically reserve an offer slot for one driver and record the offer keys.
+   * Returns the offerId, or null if the driver already holds an unexpired offer.
+   * Shared by pool + solo; `opts.solo` tags the offer so the response handler
+   * routes its claim to the solo path (RCAB-E4.S4).
+   */
+  private async reserveOffer(
+    rideId: string,
+    driverId: string,
+    offeredSetKey: string,
+    opts: { solo?: boolean } = {},
+  ): Promise<string | null> {
+    const offerId = randomUUID();
+    const reserved = await this.redis.set(
+      `offer:${offerId}`,
+      driverId,
+      'EX',
+      Math.ceil(OFFER_TTL_MS / 1000),
+      'NX',
+    );
+    if (reserved !== 'OK') return null;
+
+    const ops: Promise<unknown>[] = [
+      this.redis.sadd(`offer:list:${rideId}`, offerId),
+      this.redis.expire(`offer:list:${rideId}`, STOPS_CACHE_TTL_S),
+      this.redis.sadd(offeredSetKey, driverId),
+      this.redis.expire(offeredSetKey, STOPS_CACHE_TTL_S),
+      this.redis.set(`offer:meta:${offerId}`, rideId, 'EX', STOPS_CACHE_TTL_S),
+    ];
+    if (opts.solo) {
+      ops.push(this.redis.set(`offer:type:${offerId}`, 'solo', 'EX', STOPS_CACHE_TTL_S));
+    }
+    await Promise.all(ops);
+    return offerId;
   }
 
   private async getOrComputeStops(pool: SharedRideRow): Promise<OfferStop[]> {
