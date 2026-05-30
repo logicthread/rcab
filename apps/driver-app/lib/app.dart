@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'core/auth/auth_state.dart';
 import 'di/providers.dart';
+import 'features/offer/offer_controller.dart';
 import 'features/shared_ride/shared_ride_controller.dart';
 import 'routing/app_router.dart';
 
@@ -15,6 +16,7 @@ class DriverApp extends ConsumerStatefulWidget {
 
 class _DriverAppState extends ConsumerState<DriverApp> {
   SharedRideController? _sharedRideCtrl;
+  OfferController? _offerCtrl;
   bool _wiredAuthListener = false;
 
   @override
@@ -30,9 +32,15 @@ class _DriverAppState extends ConsumerState<DriverApp> {
           container: container,
           router: router,
         )..start();
+        _offerCtrl = OfferController(
+          container: container,
+          router: router,
+        )..start();
       } else if (next is! AuthStateAuthenticated && _sharedRideCtrl != null) {
         _sharedRideCtrl?.stop();
         _sharedRideCtrl = null;
+        _offerCtrl?.stop();
+        _offerCtrl = null;
       }
     }, fireImmediately: true);
   }
@@ -40,6 +48,7 @@ class _DriverAppState extends ConsumerState<DriverApp> {
   @override
   void dispose() {
     _sharedRideCtrl?.stop();
+    _offerCtrl?.stop();
     super.dispose();
   }
 
