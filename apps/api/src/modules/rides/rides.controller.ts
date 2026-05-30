@@ -5,8 +5,10 @@ import {
   Param,
   Body,
   Headers,
+  HttpCode,
   Inject,
   BadRequestException,
+  ConflictException,
   NotImplementedException,
   NotFoundException,
   Logger,
@@ -27,9 +29,12 @@ import type { Money } from '../pricing/money';
 import type { SeatQuote } from '../pricing/pricing.types';
 import { CreateRideDto, RideType } from './dto/create-ride.dto';
 import { QuoteRideDto } from './dto/quote-ride.dto';
+import { TransitionRideDto } from './dto/transition-ride.dto';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { QuoteTokenService, type QuoteClaims } from './quote-token.service';
 import { RidesRepository, type RideRow } from './rides.repository';
+import { RideStateMachine } from './ride-state-machine.service';
+import { RealtimeBus } from '../realtime/realtime.bus';
 import { RIDE_REQUESTED_EVENT, type RideRequestedEventPayload } from '../dispatch/dispatch.service';
 
 export interface CreateRideResponse {
@@ -64,6 +69,23 @@ export interface QuoteResponse {
   };
 }
 
+export interface RideDetailResponse {
+  rideId: string;
+  passengerId: string;
+  driverId: string | null;
+  status: string;
+  fare: Money;
+  origin: { lat: number; lng: number };
+  dropoff: { lat: number; lng: number };
+  timestamps: {
+    acceptedAt: string | null;
+    enRouteAt: string | null;
+    arrivedAt: string | null;
+    startedAt: string | null;
+    completedAt: string | null;
+  };
+}
+
 export interface RideStopsResponse {
   rideId: string;
   poolStatus: string;
@@ -93,6 +115,8 @@ export class RidesController {
     private readonly routeSim: RouteSimilarityService,
     private readonly quoteToken: QuoteTokenService,
     private readonly ridesRepo: RidesRepository,
+    private readonly stateMachine: RideStateMachine,
+    private readonly bus: RealtimeBus,
     private readonly events: EventEmitter2,
     @Inject(REDIS) private readonly redis: Redis,
   ) {}
@@ -258,6 +282,9 @@ export class RidesController {
 
     // Only a freshly-created ride triggers dispatch — a replay must not re-dispatch.
     if (created) {
+      // Join the booking client to the ride room so it receives
+      // `ride_state_changed` once a driver starts advancing the ride (E4.S6).
+      await this.bus.joinRide(passengerId, row.id);
       this.events.emit(RIDE_REQUESTED_EVENT, {
         rideId: row.id,
       } satisfies RideRequestedEventPayload);
@@ -297,11 +324,77 @@ export class RidesController {
     };
   }
 
+  @Get(':id')
+  async getRide(
+    @Req() req: Request & { user: JwtPayload },
+    @Param('id') rideId: string,
+  ): Promise<RideDetailResponse> {
+    const ride = await this.ridesRepo.findById(rideId);
+    if (!ride) {
+      throw new NotFoundException({ code: 'ride_not_found', message: 'ride not found' });
+    }
+    const isPassenger = req.user.role === 'client' && ride.passengerId === req.user.sub;
+    const isDriver = req.user.role === 'driver' && ride.driverId === req.user.sub;
+    if (!isPassenger && !isDriver) {
+      throw new ForbiddenException({ code: 'forbidden', message: 'not your ride' });
+    }
+    return rideDetail(ride);
+  }
+
+  /**
+   * Advance a solo ride through the [[sm-ride-lifecycle]] forward state machine.
+   * Driver-only; only the bound driver may transition. Maps the state-machine
+   * result to HTTP: 200 (advanced), 400 (unknown event — guarded by the DTO),
+   * 403 (not the bound driver), 404 (unknown ride), 409 (out-of-order). E4.S6.
+   */
+  @Post(':id/state')
+  @HttpCode(200)
+  async transition(
+    @Req() req: Request & { user: JwtPayload },
+    @Param('id') rideId: string,
+    @Body() dto: TransitionRideDto,
+  ): Promise<{ rideId: string; status: string }> {
+    this.assertDriver(req.user);
+    const result = await this.stateMachine.apply(rideId, req.user.sub, dto.event);
+    if (!result.ok) {
+      switch (result.reason) {
+        case 'not_found':
+          throw new NotFoundException({ code: 'ride_not_found', message: 'ride not found' });
+        case 'not_owner':
+          throw new ForbiddenException({
+            code: 'forbidden',
+            message: 'only the assigned driver can advance this ride',
+          });
+        case 'unknown_event':
+          throw new BadRequestException({
+            code: 'invalid_event',
+            message: `unknown lifecycle event '${dto.event}'`,
+          });
+        case 'invalid_transition':
+        default:
+          throw new ConflictException({
+            code: 'invalid_transition',
+            message: `cannot apply '${dto.event}' from the ride's current state`,
+          });
+      }
+    }
+    return { rideId: result.row.id, status: result.row.status };
+  }
+
   private assertClient(user: JwtPayload): void {
     if (user.role !== 'client') {
       throw new ForbiddenException({
         code: 'forbidden',
         message: 'Client role required',
+      });
+    }
+  }
+
+  private assertDriver(user: JwtPayload): void {
+    if (user.role !== 'driver') {
+      throw new ForbiddenException({
+        code: 'forbidden',
+        message: 'Driver role required',
       });
     }
   }
@@ -338,6 +431,25 @@ function soloResponse(row: RideRow): SoloRideResponse {
     passengerId: row.passengerId,
     status: row.status,
     fare: { amount: row.fareCents, currency: 'INR' },
+  };
+}
+
+function rideDetail(row: RideRow): RideDetailResponse {
+  return {
+    rideId: row.id,
+    passengerId: row.passengerId,
+    driverId: row.driverId,
+    status: row.status,
+    fare: { amount: row.fareCents, currency: 'INR' },
+    origin: { lat: row.originLat, lng: row.originLng },
+    dropoff: { lat: row.destLat, lng: row.destLng },
+    timestamps: {
+      acceptedAt: row.acceptedAt?.toISOString() ?? null,
+      enRouteAt: row.enRouteAt?.toISOString() ?? null,
+      arrivedAt: row.arrivedAt?.toISOString() ?? null,
+      startedAt: row.startedAt?.toISOString() ?? null,
+      completedAt: row.completedAt?.toISOString() ?? null,
+    },
   };
 }
 

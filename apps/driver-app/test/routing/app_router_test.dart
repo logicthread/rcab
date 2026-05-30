@@ -15,6 +15,8 @@ import 'package:driver_app/features/auth/sign_in_screen.dart';
 import 'package:driver_app/features/home/home_screen.dart';
 import 'package:driver_app/features/offer/offer_screen.dart';
 import 'package:driver_app/features/ride/ride_screen.dart';
+import 'package:driver_app/features/ride/ride_provider.dart';
+import 'package:driver_app/features/ride/ride_models.dart';
 import 'package:driver_app/features/earnings/earnings_screen.dart';
 import 'package:driver_app/features/profile/profile_screen.dart';
 
@@ -48,6 +50,23 @@ class _FakeTokenStore extends TokenStore {
   Future<void> clear() async => _data.clear();
 }
 
+/// Returns a fixed ride so [RideScreen]'s mount-time `load()` resolves without
+/// a real Dio (otherwise the loading spinner never lets `pumpAndSettle` finish).
+class _FakeRideService implements RideService {
+  @override
+  Future<RideDetail> getRide(String rideId) async => RideDetail(
+        rideId: rideId,
+        status: 'accepted',
+        originLat: 26.14,
+        originLng: 91.73,
+        destLat: 26.18,
+        destLng: 91.75,
+      );
+
+  @override
+  Future<String> advance(String rideId, String event) async => 'accepted';
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -79,8 +98,9 @@ Future<void> _pumpApp(
 Future<void> _pumpRoute(
   WidgetTester tester,
   String route,
-  Widget screen,
-) async {
+  Widget screen, {
+  List<Override> extraOverrides = const [],
+}) async {
   final store = _FakeTokenStore();
   final mockFb = MockFirebaseAuth();
   final router = GoRouter(
@@ -95,6 +115,7 @@ Future<void> _pumpRoute(
         authProvider.overrideWith(
           (ref) => AuthNotifier(store, mockFb, Dio()),
         ),
+        ...extraOverrides,
       ],
       child: MaterialApp.router(routerConfig: router),
     ),
@@ -176,6 +197,7 @@ void main() {
         tester,
         '/ride/test-id',
         const RideScreen(rideId: 'test-id'),
+        extraOverrides: [rideServiceProvider.overrideWithValue(_FakeRideService())],
       );
       expect(find.byKey(const Key('ride_screen')), findsOneWidget);
     });

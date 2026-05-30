@@ -39,6 +39,16 @@ export class RealtimeBus {
     }
   }
 
+  /** Place a user's sockets in `ride:<id>` so they receive `ride_state_changed`
+   * for that ride. The booking client joins at request time (RCAB-E4.S6). */
+  async joinRide(userId: string, rideId: string): Promise<void> {
+    try {
+      await this.io.in(`user:${userId}`).socketsJoin(`ride:${rideId}`);
+    } catch (err) {
+      this.log.warn({ err, userId, rideId }, 'joinRide: socketsJoin failed');
+    }
+  }
+
   broadcast(event: string, payload: unknown): void {
     this.io.emit(event, payload);
   }
