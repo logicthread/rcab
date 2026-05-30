@@ -1,5 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { RidesController } from './rides.controller';
 import { RideType } from './dto/create-ride.dto';
 import type { RideRow } from './rides.repository';
@@ -47,6 +52,27 @@ function stop(overrides: Partial<RideStopRow> = {}): RideStopRow {
   };
 }
 
+function soloRideRow(overrides: Partial<RideRow> = {}): RideRow {
+  return {
+    id: 'ride-9',
+    passengerId: 'c-1',
+    originLat: 26.1445,
+    originLng: 91.7362,
+    destLat: 26.1758,
+    destLng: 91.7898,
+    fareCents: 18500,
+    status: 'requested',
+    idempotencyKey: 'idem-1',
+    driverId: null,
+    acceptedAt: null,
+    enRouteAt: null,
+    arrivedAt: null,
+    startedAt: null,
+    completedAt: null,
+    ...overrides,
+  };
+}
+
 function makeController(
   opts: {
     ride?: SharedRideRow | null;
@@ -57,6 +83,7 @@ function makeController(
     ridesCreate?: ReturnType<typeof vi.fn>;
     ridesFindById?: ReturnType<typeof vi.fn>;
     redisGet?: ReturnType<typeof vi.fn>;
+    apply?: ReturnType<typeof vi.fn>;
   } = {},
 ) {
   const matching = { findOrCreatePool: vi.fn() };
@@ -83,6 +110,8 @@ function makeController(
     create: opts.ridesCreate ?? vi.fn(),
     findById: opts.ridesFindById ?? vi.fn(),
   };
+  const stateMachine = { apply: opts.apply ?? vi.fn() };
+  const bus = { joinRide: vi.fn().mockResolvedValue(undefined) };
   const redis = {
     get: opts.redisGet ?? vi.fn().mockResolvedValue(null),
     set: vi.fn().mockResolvedValue('OK'),
@@ -96,10 +125,25 @@ function makeController(
     routeSim as never,
     quoteToken as never,
     ridesRepo as never,
+    stateMachine as never,
+    bus as never,
     events as never,
     redis as never,
   );
-  return { ctrl, repo, stops, pricing, routeSim, quoteToken, ridesRepo, redis, events, matching };
+  return {
+    ctrl,
+    repo,
+    stops,
+    pricing,
+    routeSim,
+    quoteToken,
+    ridesRepo,
+    stateMachine,
+    bus,
+    redis,
+    events,
+    matching,
+  };
 }
 
 describe('RidesController.listStops', () => {
@@ -243,26 +287,11 @@ describe('RidesController.create — normal (solo) path', () => {
     distanceM: 10197,
     durationS: 796,
   };
-  function row(overrides: Partial<RideRow> = {}): RideRow {
-    return {
-      id: 'ride-9',
-      passengerId: 'c-1',
-      originLat: 26.1445,
-      originLng: 91.7362,
-      destLat: 26.1758,
-      destLng: 91.7898,
-      fareCents: 18500,
-      status: 'requested',
-      idempotencyKey: 'idem-1',
-      driverId: null,
-      acceptedAt: null,
-      ...overrides,
-    };
-  }
+  const row = soloRideRow;
 
   it('creates a requested ride with the fare locked from the quote token', async () => {
     const ridesCreate = vi.fn().mockResolvedValue({ row: row(), created: true });
-    const { ctrl, redis, events } = makeController({
+    const { ctrl, redis, events, bus } = makeController({
       verify: vi.fn().mockReturnValue(claims),
       ridesCreate,
     });
@@ -277,6 +306,8 @@ describe('RidesController.create — normal (solo) path', () => {
       expect.objectContaining({ passengerId: 'c-1', fareCents: 18500, idempotencyKey: 'idem-1' }),
     );
     expect(redis.set).toHaveBeenCalledWith('idem:rides:idem-1', 'ride-9', 'EX', 86_400);
+    // The booking client joins the ride room so it receives ride_state_changed.
+    expect(bus.joinRide).toHaveBeenCalledWith('c-1', 'ride-9');
     // A freshly-created ride triggers dispatch.
     expect(events.emit).toHaveBeenCalledWith('ride.requested', { rideId: 'ride-9' });
   });
@@ -372,5 +403,101 @@ describe('RidesController.create — normal (solo) path', () => {
     const res = await ctrl.create(clientReq as never, sharedDto, undefined);
     expect(matching.findOrCreatePool).toHaveBeenCalled();
     expect((res as { sharedRideId: string }).sharedRideId).toBe('pool-1');
+  });
+});
+
+describe('RidesController.transition', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  const driverReq = { user: jwtDriver() };
+  const body = (event: string) => ({ event }) as never;
+
+  it('200 + new status on a legal transition, delegating to the state machine', async () => {
+    const apply = vi
+      .fn()
+      .mockResolvedValue({ ok: true, row: soloRideRow({ id: RIDE_ID, status: 'en_route', driverId: DRIVER_ID }) });
+    const { ctrl } = makeController({ apply });
+    const res = await ctrl.transition(driverReq as never, RIDE_ID, body('start_en_route'));
+    expect(res).toEqual({ rideId: RIDE_ID, status: 'en_route' });
+    expect(apply).toHaveBeenCalledWith(RIDE_ID, DRIVER_ID, 'start_en_route');
+  });
+
+  it('409 ConflictException on invalid_transition (out-of-order)', async () => {
+    const { ctrl } = makeController({
+      apply: vi.fn().mockResolvedValue({ ok: false, reason: 'invalid_transition' }),
+    });
+    await expect(ctrl.transition(driverReq as never, RIDE_ID, body('start_ride'))).rejects.toBeInstanceOf(
+      ConflictException,
+    );
+  });
+
+  it('403 ForbiddenException on not_owner', async () => {
+    const { ctrl } = makeController({
+      apply: vi.fn().mockResolvedValue({ ok: false, reason: 'not_owner' }),
+    });
+    await expect(ctrl.transition(driverReq as never, RIDE_ID, body('start_en_route'))).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+  });
+
+  it('404 NotFoundException on not_found', async () => {
+    const { ctrl } = makeController({
+      apply: vi.fn().mockResolvedValue({ ok: false, reason: 'not_found' }),
+    });
+    await expect(ctrl.transition(driverReq as never, RIDE_ID, body('start_en_route'))).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+  });
+
+  it('400 BadRequestException on unknown_event', async () => {
+    const { ctrl } = makeController({
+      apply: vi.fn().mockResolvedValue({ ok: false, reason: 'unknown_event' }),
+    });
+    await expect(ctrl.transition(driverReq as never, RIDE_ID, body('teleport'))).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+  });
+
+  it('403 and never calls the state machine when the caller is not a driver', async () => {
+    const { ctrl, stateMachine } = makeController();
+    const clientReq = { user: { sub: 'c-1', role: 'client' } as JwtPayload };
+    await expect(ctrl.transition(clientReq as never, RIDE_ID, body('start_en_route'))).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+    expect(stateMachine.apply).not.toHaveBeenCalled();
+  });
+});
+
+describe('RidesController.getRide', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('returns ride detail for the passenger', async () => {
+    const r = soloRideRow({ status: 'en_route', passengerId: 'c-1', driverId: DRIVER_ID });
+    const { ctrl } = makeController({ ridesFindById: vi.fn().mockResolvedValue(r) });
+    const clientReq = { user: { sub: 'c-1', role: 'client' } as JwtPayload };
+    const res = await ctrl.getRide(clientReq as never, 'ride-9');
+    expect(res.status).toBe('en_route');
+    expect(res.origin).toEqual({ lat: r.originLat, lng: r.originLng });
+    expect(res.dropoff).toEqual({ lat: r.destLat, lng: r.destLng });
+  });
+
+  it('returns ride detail for the bound driver', async () => {
+    const r = soloRideRow({ status: 'in_progress', passengerId: 'c-1', driverId: DRIVER_ID });
+    const { ctrl } = makeController({ ridesFindById: vi.fn().mockResolvedValue(r) });
+    const res = await ctrl.getRide({ user: jwtDriver() } as never, 'ride-9');
+    expect(res.status).toBe('in_progress');
+  });
+
+  it('404 when the ride does not exist', async () => {
+    const { ctrl } = makeController({ ridesFindById: vi.fn().mockResolvedValue(null) });
+    const clientReq = { user: { sub: 'c-1', role: 'client' } as JwtPayload };
+    await expect(ctrl.getRide(clientReq as never, 'ghost')).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('403 when the caller is neither passenger nor bound driver', async () => {
+    const r = soloRideRow({ passengerId: 'c-1', driverId: DRIVER_ID });
+    const { ctrl } = makeController({ ridesFindById: vi.fn().mockResolvedValue(r) });
+    const strangerReq = { user: { sub: 'c-2', role: 'client' } as JwtPayload };
+    await expect(ctrl.getRide(strangerReq as never, 'ride-9')).rejects.toBeInstanceOf(ForbiddenException);
   });
 });

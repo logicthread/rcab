@@ -15,7 +15,31 @@ export interface RideRow {
   idempotencyKey: string;
   driverId: string | null;
   acceptedAt: Date | null;
+  enRouteAt: Date | null;
+  arrivedAt: Date | null;
+  startedAt: Date | null;
+  completedAt: Date | null;
 }
+
+/**
+ * Result of a guarded lifecycle transition. The three failure reasons map to
+ * HTTP 404 / 403 / 409 at the controller. RCAB-E4.S6.
+ */
+export type RideTransitionResult =
+  | { ok: true; row: RideRow }
+  | { ok: false; reason: 'not_found' | 'not_owner' | 'invalid_transition' };
+
+// Each forward target state stamps exactly one timestamp column. `accepted` is
+// stamped by claimSolo (0007); the rest land here on transition.
+const TIMESTAMP_FOR_STATUS: Record<
+  string,
+  'enRouteAt' | 'arrivedAt' | 'startedAt' | 'completedAt' | undefined
+> = {
+  en_route: 'enRouteAt',
+  arrived: 'arrivedAt',
+  in_progress: 'startedAt',
+  completed: 'completedAt',
+};
 
 function toRow(r: typeof rides.$inferSelect): RideRow {
   return {
@@ -30,6 +54,10 @@ function toRow(r: typeof rides.$inferSelect): RideRow {
     idempotencyKey: r.idempotencyKey,
     driverId: r.driverId,
     acceptedAt: r.acceptedAt,
+    enRouteAt: r.enRouteAt,
+    arrivedAt: r.arrivedAt,
+    startedAt: r.startedAt,
+    completedAt: r.completedAt,
   };
 }
 
@@ -111,5 +139,43 @@ export class RidesRepository {
       .where(and(eq(rides.id, rideId), eq(rides.status, 'requested')))
       .returning();
     return updated[0] ? toRow(updated[0]) : null;
+  }
+
+  /**
+   * Apply one guarded lifecycle transition for the bound driver. Wraps a
+   * `SELECT … FOR UPDATE` of the ride row inside a transaction (per
+   * [[module-rides]] concurrency rule) so a transition can never race a
+   * concurrent one. Classifies failure before writing: a missing row is
+   * `not_found`, a caller who is not the bound driver is `not_owner`, and a
+   * `fromStatus` that no longer matches the live row is `invalid_transition`
+   * (out-of-order / already advanced). On success it stamps the timestamp
+   * column for `toStatus`. RCAB-E4.S6.
+   */
+  async transition(
+    rideId: string,
+    driverId: string,
+    fromStatus: string,
+    toStatus: string,
+  ): Promise<RideTransitionResult> {
+    return this.db.transaction(async (tx) => {
+      const rows = await tx
+        .select()
+        .from(rides)
+        .where(eq(rides.id, rideId))
+        .for('update')
+        .limit(1);
+      const current = rows[0];
+      if (!current) return { ok: false, reason: 'not_found' };
+      if (current.driverId !== driverId) return { ok: false, reason: 'not_owner' };
+      if (current.status !== fromStatus) return { ok: false, reason: 'invalid_transition' };
+
+      const now = new Date();
+      const patch: Partial<typeof rides.$inferInsert> = { status: toStatus, updatedAt: now };
+      const tsField = TIMESTAMP_FOR_STATUS[toStatus];
+      if (tsField) patch[tsField] = now;
+
+      const updated = await tx.update(rides).set(patch).where(eq(rides.id, rideId)).returning();
+      return { ok: true, row: toRow(updated[0]) };
+    });
   }
 }

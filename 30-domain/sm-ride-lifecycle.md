@@ -46,7 +46,7 @@ stateDiagram-v2
 
 ## Implementation note
 
-State transitions go through a single `RideStateMachine.apply(rideId, event)` service in [[module-rides]]. The service:
+State transitions go through a single `RideStateMachine.apply(rideId, driverId, event)` service in [[module-rides]]. The service:
 
 1. SELECTs the current row `FOR UPDATE` inside a transaction.
 2. Validates the transition.
@@ -54,6 +54,10 @@ State transitions go through a single `RideStateMachine.apply(rideId, event)` se
 4. Emits a domain event on `RealtimeBus` ([[module-realtime]]).
 
 This eliminates "what if two updates race" classes of bugs.
+
+## As-built — solo (RCAB-E4.S6)
+
+The solo `rides` table uses the state strings **`en_route`** / **`arrived`** (no `_pickup` suffix — that suffix is a shared multi-stop concept; a solo ride has one pickup and one drop). The forward machine is `RideStateMachine.apply(rideId, driverId, event)` in [[module-rides]], with events `start_en_route` → `mark_arrived` → `start_ride` → `end_ride`. It is driven by the driver over REST (`POST /v1/rides/:id/state`, see [[rest-endpoints]]) and broadcasts `ride_state_changed` to room `ride:<id>` after commit (see [[websocket-events]]). `start_en_route` is an explicit "Start trip" button in E4.S6; the "implicit on first location update" trigger lands with the driver location stream in RCAB-E4.S7. Cancellation / `no_show` transitions are RCAB-E4.S8. Shared rides advance instead through per-stop confirms (`RideLifecycleService`, RCAB-E5.S7).
 
 ## See also
 - [[entity-ride]] · [[sm-booking-flow]] · [[sm-shared-ride-pool]]

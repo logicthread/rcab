@@ -67,6 +67,10 @@ function soloRide(overrides: Partial<RideRow> = {}): RideRow {
     idempotencyKey: 'idem-1',
     driverId: null,
     acceptedAt: null,
+    enRouteAt: null,
+    arrivedAt: null,
+    startedAt: null,
+    completedAt: null,
     ...overrides,
   };
 }
