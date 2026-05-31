@@ -64,7 +64,8 @@ export type RideStatus =
   | 'in_progress'
   | 'completed'
   | 'no_driver'
-  | 'cancelled';
+  | 'cancelled'
+  | 'no_show';
 
 /** Live driver position fanned out to the ride room (≤ 1 Hz). */
 export interface DriverLocationEvent {

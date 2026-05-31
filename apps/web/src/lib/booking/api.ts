@@ -124,3 +124,18 @@ export function createNormalRide(
 export function fetchRide(rideId: string, jwt: string): Promise<RideDetailResponse> {
   return getJson<RideDetailResponse>(`/v1/rides/${rideId}`, jwt);
 }
+
+export interface CancelRideResponse {
+  rideId: string;
+  status: string;
+  cancelledBy: string | null;
+}
+
+/**
+ * Cancel the active ride (client side). No idempotency key — cancel is naturally
+ * idempotent on a terminal row, and a re-cancel just returns a 409 the UI
+ * ignores (the ride is already terminal). RCAB-E4.S8.
+ */
+export function cancelRide(rideId: string, jwt: string): Promise<CancelRideResponse> {
+  return postJson<CancelRideResponse>(`/v1/rides/${rideId}/cancel`, {}, jwt);
+}

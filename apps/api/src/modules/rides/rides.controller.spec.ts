@@ -69,6 +69,9 @@ function soloRideRow(overrides: Partial<RideRow> = {}): RideRow {
     arrivedAt: null,
     startedAt: null,
     completedAt: null,
+    cancelledAt: null,
+    cancelledBy: null,
+    cancelReason: null,
     ...overrides,
   };
 }
@@ -84,6 +87,7 @@ function makeController(
     ridesFindById?: ReturnType<typeof vi.fn>;
     redisGet?: ReturnType<typeof vi.fn>;
     apply?: ReturnType<typeof vi.fn>;
+    cancel?: ReturnType<typeof vi.fn>;
   } = {},
 ) {
   const matching = { findOrCreatePool: vi.fn() };
@@ -110,7 +114,7 @@ function makeController(
     create: opts.ridesCreate ?? vi.fn(),
     findById: opts.ridesFindById ?? vi.fn(),
   };
-  const stateMachine = { apply: opts.apply ?? vi.fn() };
+  const stateMachine = { apply: opts.apply ?? vi.fn(), cancel: opts.cancel ?? vi.fn() };
   const bus = { joinRide: vi.fn().mockResolvedValue(undefined) };
   const redis = {
     get: opts.redisGet ?? vi.fn().mockResolvedValue(null),
@@ -413,9 +417,10 @@ describe('RidesController.transition', () => {
   const body = (event: string) => ({ event }) as never;
 
   it('200 + new status on a legal transition, delegating to the state machine', async () => {
-    const apply = vi
-      .fn()
-      .mockResolvedValue({ ok: true, row: soloRideRow({ id: RIDE_ID, status: 'en_route', driverId: DRIVER_ID }) });
+    const apply = vi.fn().mockResolvedValue({
+      ok: true,
+      row: soloRideRow({ id: RIDE_ID, status: 'en_route', driverId: DRIVER_ID }),
+    });
     const { ctrl } = makeController({ apply });
     const res = await ctrl.transition(driverReq as never, RIDE_ID, body('start_en_route'));
     expect(res).toEqual({ rideId: RIDE_ID, status: 'en_route' });
@@ -426,44 +431,44 @@ describe('RidesController.transition', () => {
     const { ctrl } = makeController({
       apply: vi.fn().mockResolvedValue({ ok: false, reason: 'invalid_transition' }),
     });
-    await expect(ctrl.transition(driverReq as never, RIDE_ID, body('start_ride'))).rejects.toBeInstanceOf(
-      ConflictException,
-    );
+    await expect(
+      ctrl.transition(driverReq as never, RIDE_ID, body('start_ride')),
+    ).rejects.toBeInstanceOf(ConflictException);
   });
 
   it('403 ForbiddenException on not_owner', async () => {
     const { ctrl } = makeController({
       apply: vi.fn().mockResolvedValue({ ok: false, reason: 'not_owner' }),
     });
-    await expect(ctrl.transition(driverReq as never, RIDE_ID, body('start_en_route'))).rejects.toBeInstanceOf(
-      ForbiddenException,
-    );
+    await expect(
+      ctrl.transition(driverReq as never, RIDE_ID, body('start_en_route')),
+    ).rejects.toBeInstanceOf(ForbiddenException);
   });
 
   it('404 NotFoundException on not_found', async () => {
     const { ctrl } = makeController({
       apply: vi.fn().mockResolvedValue({ ok: false, reason: 'not_found' }),
     });
-    await expect(ctrl.transition(driverReq as never, RIDE_ID, body('start_en_route'))).rejects.toBeInstanceOf(
-      NotFoundException,
-    );
+    await expect(
+      ctrl.transition(driverReq as never, RIDE_ID, body('start_en_route')),
+    ).rejects.toBeInstanceOf(NotFoundException);
   });
 
   it('400 BadRequestException on unknown_event', async () => {
     const { ctrl } = makeController({
       apply: vi.fn().mockResolvedValue({ ok: false, reason: 'unknown_event' }),
     });
-    await expect(ctrl.transition(driverReq as never, RIDE_ID, body('teleport'))).rejects.toBeInstanceOf(
-      BadRequestException,
-    );
+    await expect(
+      ctrl.transition(driverReq as never, RIDE_ID, body('teleport')),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 
   it('403 and never calls the state machine when the caller is not a driver', async () => {
     const { ctrl, stateMachine } = makeController();
     const clientReq = { user: { sub: 'c-1', role: 'client' } as JwtPayload };
-    await expect(ctrl.transition(clientReq as never, RIDE_ID, body('start_en_route'))).rejects.toBeInstanceOf(
-      ForbiddenException,
-    );
+    await expect(
+      ctrl.transition(clientReq as never, RIDE_ID, body('start_en_route')),
+    ).rejects.toBeInstanceOf(ForbiddenException);
     expect(stateMachine.apply).not.toHaveBeenCalled();
   });
 });
@@ -491,13 +496,124 @@ describe('RidesController.getRide', () => {
   it('404 when the ride does not exist', async () => {
     const { ctrl } = makeController({ ridesFindById: vi.fn().mockResolvedValue(null) });
     const clientReq = { user: { sub: 'c-1', role: 'client' } as JwtPayload };
-    await expect(ctrl.getRide(clientReq as never, 'ghost')).rejects.toBeInstanceOf(NotFoundException);
+    await expect(ctrl.getRide(clientReq as never, 'ghost')).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
   });
 
   it('403 when the caller is neither passenger nor bound driver', async () => {
     const r = soloRideRow({ passengerId: 'c-1', driverId: DRIVER_ID });
     const { ctrl } = makeController({ ridesFindById: vi.fn().mockResolvedValue(r) });
     const strangerReq = { user: { sub: 'c-2', role: 'client' } as JwtPayload };
-    await expect(ctrl.getRide(strangerReq as never, 'ride-9')).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(ctrl.getRide(strangerReq as never, 'ride-9')).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+  });
+
+  it('exposes the cancellation trail (cancelledBy / cancelReason / cancelledAt)', async () => {
+    const r = soloRideRow({
+      status: 'cancelled',
+      passengerId: 'c-1',
+      cancelledBy: 'driver',
+      cancelReason: 'vehicle issue',
+      cancelledAt: new Date('2026-05-31T10:00:00.000Z'),
+    });
+    const { ctrl } = makeController({ ridesFindById: vi.fn().mockResolvedValue(r) });
+    const res = await ctrl.getRide(
+      { user: { sub: 'c-1', role: 'client' } as JwtPayload } as never,
+      'ride-9',
+    );
+    expect(res.cancelledBy).toBe('driver');
+    expect(res.cancelReason).toBe('vehicle issue');
+    expect(res.timestamps.cancelledAt).toBe('2026-05-31T10:00:00.000Z');
+  });
+});
+
+describe('RidesController.cancel', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  const clientReq = { user: { sub: 'c-1', role: 'client' } as JwtPayload };
+  const driverReq = { user: jwtDriver() };
+
+  it('200 + cancelledBy on a client cancel, delegating to the state machine', async () => {
+    const cancel = vi.fn().mockResolvedValue({
+      ok: true,
+      row: soloRideRow({ status: 'cancelled', cancelledBy: 'client' }),
+    });
+    const { ctrl } = makeController({ cancel });
+    const res = await ctrl.cancel(clientReq as never, RIDE_ID, {});
+    expect(res).toEqual({ rideId: 'ride-9', status: 'cancelled', cancelledBy: 'client' });
+    expect(cancel).toHaveBeenCalledWith({
+      rideId: RIDE_ID,
+      actor: 'client',
+      actorId: 'c-1',
+      isNoShow: false,
+      reason: null,
+    });
+  });
+
+  it('200 on a driver no-show (event=mark_no_show), passing isNoShow + reason', async () => {
+    const cancel = vi.fn().mockResolvedValue({
+      ok: true,
+      row: soloRideRow({ status: 'no_show', cancelledBy: 'driver' }),
+    });
+    const { ctrl } = makeController({ cancel });
+    const res = await ctrl.cancel(driverReq as never, RIDE_ID, { event: 'mark_no_show' });
+    expect(res.status).toBe('no_show');
+    expect(cancel).toHaveBeenCalledWith({
+      rideId: RIDE_ID,
+      actor: 'driver',
+      actorId: DRIVER_ID,
+      isNoShow: true,
+      reason: 'no_show',
+    });
+  });
+
+  it('400 when a driver cancels without a reason', async () => {
+    const { ctrl, stateMachine } = makeController();
+    await expect(ctrl.cancel(driverReq as never, RIDE_ID, {})).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+    expect(stateMachine.cancel).not.toHaveBeenCalled();
+  });
+
+  it('403 when a client tries to report a no-show', async () => {
+    const { ctrl, stateMachine } = makeController();
+    await expect(
+      ctrl.cancel(clientReq as never, RIDE_ID, { event: 'mark_no_show' }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(stateMachine.cancel).not.toHaveBeenCalled();
+  });
+
+  it('409 ConflictException on invalid_transition (e.g. client cancel of an in_progress ride)', async () => {
+    const cancel = vi.fn().mockResolvedValue({ ok: false, reason: 'invalid_transition' });
+    const { ctrl } = makeController({ cancel });
+    await expect(ctrl.cancel(clientReq as never, RIDE_ID, {})).rejects.toBeInstanceOf(
+      ConflictException,
+    );
+  });
+
+  it('409 ConflictException on no_show_too_early', async () => {
+    const cancel = vi.fn().mockResolvedValue({ ok: false, reason: 'no_show_too_early' });
+    const { ctrl } = makeController({ cancel });
+    await expect(
+      ctrl.cancel(driverReq as never, RIDE_ID, { event: 'mark_no_show' }),
+    ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('404 NotFoundException on not_found', async () => {
+    const cancel = vi.fn().mockResolvedValue({ ok: false, reason: 'not_found' });
+    const { ctrl } = makeController({ cancel });
+    await expect(ctrl.cancel(clientReq as never, RIDE_ID, {})).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+  });
+
+  it('403 ForbiddenException on not_owner', async () => {
+    const cancel = vi.fn().mockResolvedValue({ ok: false, reason: 'not_owner' });
+    const { ctrl } = makeController({ cancel });
+    await expect(ctrl.cancel(clientReq as never, RIDE_ID, {})).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
   });
 });

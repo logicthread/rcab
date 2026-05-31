@@ -182,6 +182,11 @@ export const rides = pgTable(
     arrivedAt: timestamp('arrived_at', { withTimezone: true }),
     startedAt: timestamp('started_at', { withTimezone: true }),
     completedAt: timestamp('completed_at', { withTimezone: true }),
+    // Cancellation / no-show bookkeeping — RCAB-E4.S8. No fee column ships in
+    // Phase-0 (cancellation is free; fee mechanism deferred to a later phase).
+    cancelledAt: timestamp('cancelled_at', { withTimezone: true }),
+    cancelledBy: text('cancelled_by'),
+    cancelReason: text('cancel_reason'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -190,7 +195,11 @@ export const rides = pgTable(
     index('rides_driver_idx').on(t.driverId),
     check(
       'rides_status_check',
-      sql`${t.status} IN ('requested','dispatching','accepted','en_route','arrived','in_progress','completed','cancelled','no_driver')`,
+      sql`${t.status} IN ('requested','dispatching','accepted','en_route','arrived','in_progress','completed','cancelled','no_driver','no_show')`,
+    ),
+    check(
+      'rides_cancelled_by_check',
+      sql`${t.cancelledBy} IS NULL OR ${t.cancelledBy} IN ('client','driver')`,
     ),
   ],
 );

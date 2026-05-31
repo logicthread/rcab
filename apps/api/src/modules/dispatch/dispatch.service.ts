@@ -25,6 +25,10 @@ import {
 } from '../matching/shared-ride.repository';
 import { RideStopRepository } from '../matching/ride-stop.repository';
 import { RidesRepository, type RideRow } from '../rides/rides.repository';
+import {
+  RIDE_CANCELLED_EVENT,
+  type RideCancelledEventPayload,
+} from '../rides/ride-state-machine.service';
 import type {
   ClaimResult,
   OfferStop,
@@ -365,6 +369,29 @@ export class DispatchService {
     await this.revokeAllOffers(rideId);
     // Phase-0: an aborted pool is terminal. Re-queueing each member as an
     // individual solo ride (the solo path now exists) is a future enhancement.
+  }
+
+  /**
+   * A solo ride was cancelled / marked no-show ([[module-rides]] emits this
+   * after commit). Unwind anything still in flight so no driver is left holding
+   * a stale offer and no timer fires on a terminal ride.
+   */
+  @OnEvent(RIDE_CANCELLED_EVENT, { async: true })
+  async onRideCancelled(payload: RideCancelledEventPayload): Promise<void> {
+    await this.releaseDispatch(payload.rideId);
+  }
+
+  /**
+   * Drop the Redis claim, revoke every outstanding offer, and remove the wave-2
+   * + hard-fail timers for a ride. Every step is a safe no-op when there is
+   * nothing in flight (e.g. the ride was cancelled long after a clean claim, or
+   * after a hard-fail already swept the offers). RCAB-E4.S8.
+   */
+  async releaseDispatch(rideId: string): Promise<void> {
+    await this.redis.del(`claim:ride:${rideId}`).catch(() => {});
+    await this.revokeAllOffers(rideId);
+    await this.queue.remove(waveTimeoutJobId(rideId, 2)).catch(() => {});
+    await this.queue.remove(hardFailJobId(rideId)).catch(() => {});
   }
 
   async claimPool(rideId: string, driverId: string): Promise<ClaimResult> {

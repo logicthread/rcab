@@ -30,6 +30,7 @@ import type { SeatQuote } from '../pricing/pricing.types';
 import { CreateRideDto, RideType } from './dto/create-ride.dto';
 import { QuoteRideDto } from './dto/quote-ride.dto';
 import { TransitionRideDto } from './dto/transition-ride.dto';
+import { CancelRideDto } from './dto/cancel-ride.dto';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { QuoteTokenService, type QuoteClaims } from './quote-token.service';
 import { RidesRepository, type RideRow } from './rides.repository';
@@ -77,12 +78,15 @@ export interface RideDetailResponse {
   fare: Money;
   origin: { lat: number; lng: number };
   dropoff: { lat: number; lng: number };
+  cancelledBy: string | null;
+  cancelReason: string | null;
   timestamps: {
     acceptedAt: string | null;
     enRouteAt: string | null;
     arrivedAt: string | null;
     startedAt: string | null;
     completedAt: string | null;
+    cancelledAt: string | null;
   };
 }
 
@@ -381,6 +385,72 @@ export class RidesController {
     return { rideId: result.row.id, status: result.row.status };
   }
 
+  /**
+   * Cancel a solo ride, or (driver-only) report a no-show. Role-aware: a client
+   * cancels their own ride before the trip starts; the bound driver may cancel
+   * any time pre-completion or report a no-show once `arrived` + the 5-min wait.
+   * A driver-initiated cancel requires a reason. Maps the state-machine result
+   * to HTTP: 200, 403 (not your ride / non-driver no-show), 404, 409
+   * (out-of-order or `no_show_too_early`). No fee in Phase-0. RCAB-E4.S8.
+   */
+  @Post(':id/cancel')
+  @HttpCode(200)
+  async cancel(
+    @Req() req: Request & { user: JwtPayload },
+    @Param('id') rideId: string,
+    @Body() dto: CancelRideDto,
+  ): Promise<{ rideId: string; status: string; cancelledBy: string | null }> {
+    const role = req.user.role;
+    if (role !== 'client' && role !== 'driver') {
+      throw new ForbiddenException({ code: 'forbidden', message: 'cannot cancel this ride' });
+    }
+    const isNoShow = dto.event === 'mark_no_show';
+    if (isNoShow && role !== 'driver') {
+      throw new ForbiddenException({
+        code: 'forbidden',
+        message: 'only the driver can report a no-show',
+      });
+    }
+    if (role === 'driver' && !isNoShow && !dto.reason) {
+      throw new BadRequestException({
+        code: 'reason_required',
+        message: 'a driver cancellation requires a reason',
+      });
+    }
+
+    const result = await this.stateMachine.cancel({
+      rideId,
+      actor: role,
+      actorId: req.user.sub,
+      isNoShow,
+      reason: isNoShow ? 'no_show' : (dto.reason ?? null),
+    });
+    if (!result.ok) {
+      switch (result.reason) {
+        case 'not_found':
+          throw new NotFoundException({ code: 'ride_not_found', message: 'ride not found' });
+        case 'not_owner':
+          throw new ForbiddenException({ code: 'forbidden', message: 'not your ride' });
+        case 'no_show_too_early':
+          throw new ConflictException({
+            code: 'no_show_too_early',
+            message: 'the no-show wait has not elapsed yet',
+          });
+        case 'invalid_transition':
+        default:
+          throw new ConflictException({
+            code: 'invalid_transition',
+            message: "the ride's current state cannot be cancelled",
+          });
+      }
+    }
+    return {
+      rideId: result.row.id,
+      status: result.row.status,
+      cancelledBy: result.row.cancelledBy,
+    };
+  }
+
   private assertClient(user: JwtPayload): void {
     if (user.role !== 'client') {
       throw new ForbiddenException({
@@ -443,12 +513,15 @@ function rideDetail(row: RideRow): RideDetailResponse {
     fare: { amount: row.fareCents, currency: 'INR' },
     origin: { lat: row.originLat, lng: row.originLng },
     dropoff: { lat: row.destLat, lng: row.destLng },
+    cancelledBy: row.cancelledBy,
+    cancelReason: row.cancelReason,
     timestamps: {
       acceptedAt: row.acceptedAt?.toISOString() ?? null,
       enRouteAt: row.enRouteAt?.toISOString() ?? null,
       arrivedAt: row.arrivedAt?.toISOString() ?? null,
       startedAt: row.startedAt?.toISOString() ?? null,
       completedAt: row.completedAt?.toISOString() ?? null,
+      cancelledAt: row.cancelledAt?.toISOString() ?? null,
     },
   };
 }

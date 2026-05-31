@@ -93,6 +93,7 @@ const KNOWN_STATUSES: readonly RideStatus[] = [
   'completed',
   'no_driver',
   'cancelled',
+  'no_show',
 ];
 
 function normalizeStatus(state: string): RideStatus {

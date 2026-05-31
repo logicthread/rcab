@@ -31,7 +31,7 @@ Completing every story in this epic ⇒ Demo 3 passes.
 | RCAB-E4.S5 | [[story-rcab-e4-s5-driver-offer-screen]] — Driver offer screen + accept/decline | ■ |
 | RCAB-E4.S6 | [[story-rcab-e4-s6-ride-state-machine]] — Ride state machine (solo: accepted → en_route → arrived → in_progress → completed) | ■ |
 | RCAB-E4.S7 | [[story-rcab-e4-s7-driver-location-stream]] — Driver location stream → client WS (1 Hz throttle) | ■ |
-| RCAB-E4.S8 | Cancellation paths (client & driver, fee tiers) | · |
+| RCAB-E4.S8 | [[story-rcab-e4-s8-cancellation-paths]] — Ride cancellation & no-show paths | ■ |
 | RCAB-E4.S9 | Rating prompts post-completion | · |
 
 ## Demo 3 headline (verbatim from [[delivery-roadmap]])

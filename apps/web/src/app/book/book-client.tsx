@@ -15,6 +15,7 @@ import {
 } from '../../lib/booking/types';
 import {
   BookingApiError,
+  cancelRide,
   createNormalRide,
   createSharedRide,
   fetchQuote,
@@ -256,6 +257,15 @@ function BookPage() {
     reset();
   }, [reset]);
 
+  const cancelActiveRide = useCallback(() => {
+    if (!jwt || !rideId) return;
+    cancelRide(rideId, jwt)
+      .then((res) => applyRideState(res.status))
+      // A 409 (already terminal / not cancellable) is benign — the
+      // `ride_state_changed` socket event reconciles the true state.
+      .catch(() => undefined);
+  }, [jwt, rideId, applyRideState]);
+
   return (
     <main
       style={{
@@ -298,6 +308,7 @@ function BookPage() {
             status={rideStatus ?? 'requested'}
             driver={driver}
             onNewBooking={clearActiveRide}
+            onCancel={cancelActiveRide}
           />
         </>
       ) : (

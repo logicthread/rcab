@@ -12,6 +12,14 @@ abstract class RideService {
 
   /// Advance the ride; returns the new status string from the server.
   Future<String> advance(String rideId, String event);
+
+  /// Cancel the ride (driver-initiated, reason required); returns the new
+  /// status. RCAB-E4.S8.
+  Future<String> cancel(String rideId, {String? reason});
+
+  /// Report the passenger as a no-show (only valid `arrived` + 5-min wait,
+  /// re-validated server-side); returns the new status. RCAB-E4.S8.
+  Future<String> reportNoShow(String rideId);
 }
 
 class HttpRideService implements RideService {
@@ -33,6 +41,24 @@ class HttpRideService implements RideService {
     );
     return res.data!['status'] as String;
   }
+
+  @override
+  Future<String> cancel(String rideId, {String? reason}) async {
+    final res = await _dio.post<Map<String, dynamic>>(
+      '/v1/rides/$rideId/cancel',
+      data: {if (reason != null) 'reason': reason},
+    );
+    return res.data!['status'] as String;
+  }
+
+  @override
+  Future<String> reportNoShow(String rideId) async {
+    final res = await _dio.post<Map<String, dynamic>>(
+      '/v1/rides/$rideId/cancel',
+      data: {'event': 'mark_no_show'},
+    );
+    return res.data!['status'] as String;
+  }
 }
 
 class RideNotifier extends StateNotifier<RideState> {
@@ -51,6 +77,7 @@ class RideNotifier extends StateNotifier<RideState> {
         originLng: d.originLng,
         destLat: d.destLat,
         destLng: d.destLng,
+        arrivedAt: d.arrivedAt,
         loaded: true,
       );
     } catch (_) {
@@ -65,6 +92,34 @@ class RideNotifier extends StateNotifier<RideState> {
     state = state.copyWith(busy: true);
     try {
       final newStatus = await _service.advance(state.rideId, event);
+      state = state.copyWith(status: RideStatus.parse(newStatus), busy: false);
+    } catch (_) {
+      state = state.copyWith(busy: false);
+      await load();
+    }
+  }
+
+  /// Cancel the ride with a reason. On error (e.g. the state moved) re-sync from
+  /// the server. RCAB-E4.S8.
+  Future<void> cancel(String reason) async {
+    if (state.busy) return;
+    state = state.copyWith(busy: true);
+    try {
+      final newStatus = await _service.cancel(state.rideId, reason: reason);
+      state = state.copyWith(status: RideStatus.parse(newStatus), busy: false);
+    } catch (_) {
+      state = state.copyWith(busy: false);
+      await load();
+    }
+  }
+
+  /// Report a no-show. A 409 (`no_show_too_early`) re-syncs (the ride stays
+  /// `arrived`) rather than advancing. RCAB-E4.S8.
+  Future<void> reportNoShow() async {
+    if (state.busy) return;
+    state = state.copyWith(busy: true);
+    try {
+      final newStatus = await _service.reportNoShow(state.rideId);
       state = state.copyWith(status: RideStatus.parse(newStatus), busy: false);
     } catch (_) {
       state = state.copyWith(busy: false);

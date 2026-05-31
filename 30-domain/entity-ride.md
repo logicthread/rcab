@@ -46,6 +46,8 @@ A `Ride` represents the **driver-side** record. For solo bookings, one `RideRequ
 - `total_fare` set only when `state ∈ {completed}`.
 - `state` transitions are constrained — only the values in [[sm-ride-lifecycle]] are allowed and only via the state machine code.
 
+> **As-built — solo `rides` (RCAB-E4.S8).** The shipped solo table uses a single `cancelled` status discriminated by `cancelled_by` (`'client'` | `'driver'`) plus a distinct `no_show`, not separate `canceled_*` states. Columns are `cancelled_at` / `cancelled_by` / `cancel_reason` (migration 0009). **No cancellation/no-show fee ships in Phase-0** (the fee mechanism — schedule + a fee column — is deferred to a later phase, HITL decision 2026-05-31). See [[sm-ride-lifecycle]] § As-built.
+
 ## See also
 - [[entity-ride-request]] · [[entity-shared-ride]]
 - [[sm-ride-lifecycle]] · [[module-rides]]
