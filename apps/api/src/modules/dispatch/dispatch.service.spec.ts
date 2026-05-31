@@ -71,6 +71,9 @@ function soloRide(overrides: Partial<RideRow> = {}): RideRow {
     arrivedAt: null,
     startedAt: null,
     completedAt: null,
+    cancelledAt: null,
+    cancelledBy: null,
+    cancelReason: null,
     ...overrides,
   };
 }
@@ -726,5 +729,40 @@ describe('DispatchService.handleHardFail (solo)', () => {
     const { svc, bus } = makeService({ soloNoDriverResult: null });
     await svc.handleHardFail({ data: { rideId: 'ride-1', kind: 'solo' } } as Job<HardFailJob>);
     expect(bus.toUser).not.toHaveBeenCalled();
+  });
+});
+
+describe('DispatchService.onRideCancelled / releaseDispatch (RCAB-E4.S8)', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('drops the claim, revokes outstanding offers, removes both timers', async () => {
+    const { svc, redis, queue, bus } = makeService({
+      offerListIds: ['o-1'],
+      offerOwners: { 'o-1': 'd-loser' },
+    });
+    await svc.onRideCancelled({ rideId: 'ride-1', driverId: 'd-1' });
+
+    expect(redis.del).toHaveBeenCalledWith('claim:ride:ride-1');
+    expect(redis.del).toHaveBeenCalledWith('offer:o-1');
+    expect(bus.toDriver).toHaveBeenCalledWith(
+      'd-loser',
+      'ride_offer_revoked',
+      expect.objectContaining({ offerId: 'o-1' }),
+    );
+    expect(queue.remove).toHaveBeenCalledWith('dispatch:wave2-timeout:ride-1');
+    expect(queue.remove).toHaveBeenCalledWith('dispatch:hard-fail:ride-1');
+  });
+
+  it('is a safe no-op when nothing is in flight', async () => {
+    const { svc, redis, queue, bus } = makeService({ offerListIds: [] });
+    await expect(
+      svc.onRideCancelled({ rideId: 'ride-9', driverId: null }),
+    ).resolves.toBeUndefined();
+
+    // del + timer removal are always attempted (each a no-op if the key is absent).
+    expect(redis.del).toHaveBeenCalledWith('claim:ride:ride-9');
+    expect(queue.remove).toHaveBeenCalledWith('dispatch:wave2-timeout:ride-9');
+    expect(queue.remove).toHaveBeenCalledWith('dispatch:hard-fail:ride-9');
+    expect(bus.toDriver).not.toHaveBeenCalled();
   });
 });

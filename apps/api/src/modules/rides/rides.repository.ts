@@ -19,6 +19,9 @@ export interface RideRow {
   arrivedAt: Date | null;
   startedAt: Date | null;
   completedAt: Date | null;
+  cancelledAt: Date | null;
+  cancelledBy: string | null;
+  cancelReason: string | null;
 }
 
 /**
@@ -28,6 +31,38 @@ export interface RideRow {
 export type RideTransitionResult =
   | { ok: true; row: RideRow }
   | { ok: false; reason: 'not_found' | 'not_owner' | 'invalid_transition' };
+
+/**
+ * Result of a guarded cancellation. `no_show_too_early` is the extra reason for
+ * a no-show reported before the 5-minute wait has elapsed (→ HTTP 409). RCAB-E4.S8.
+ */
+export type RideCancelResult =
+  | { ok: true; row: RideRow }
+  | {
+      ok: false;
+      reason: 'not_found' | 'not_owner' | 'invalid_transition' | 'no_show_too_early';
+    };
+
+// Which live states each actor may cancel from. A plain cancel lands on
+// `cancelled`; a driver no-show (from `arrived` only) lands on `no_show`. The
+// client may bail any time before the trip starts; the driver may bail any time
+// before completion (and is only ever the bound driver, so requested/dispatching
+// — which have no driver_id — fall out via the ownership check). RCAB-E4.S8.
+const CLIENT_CANCELLABLE: ReadonlySet<string> = new Set([
+  'requested',
+  'dispatching',
+  'accepted',
+  'en_route',
+  'arrived',
+]);
+const DRIVER_CANCELLABLE: ReadonlySet<string> = new Set([
+  'requested',
+  'dispatching',
+  'accepted',
+  'en_route',
+  'arrived',
+  'in_progress',
+]);
 
 // Each forward target state stamps exactly one timestamp column. `accepted` is
 // stamped by claimSolo (0007); the rest land here on transition.
@@ -58,6 +93,9 @@ function toRow(r: typeof rides.$inferSelect): RideRow {
     arrivedAt: r.arrivedAt,
     startedAt: r.startedAt,
     completedAt: r.completedAt,
+    cancelledAt: r.cancelledAt,
+    cancelledBy: r.cancelledBy,
+    cancelReason: r.cancelReason,
   };
 }
 
@@ -158,12 +196,7 @@ export class RidesRepository {
     toStatus: string,
   ): Promise<RideTransitionResult> {
     return this.db.transaction(async (tx) => {
-      const rows = await tx
-        .select()
-        .from(rides)
-        .where(eq(rides.id, rideId))
-        .for('update')
-        .limit(1);
+      const rows = await tx.select().from(rides).where(eq(rides.id, rideId)).for('update').limit(1);
       const current = rows[0];
       if (!current) return { ok: false, reason: 'not_found' };
       if (current.driverId !== driverId) return { ok: false, reason: 'not_owner' };
@@ -175,6 +208,68 @@ export class RidesRepository {
       if (tsField) patch[tsField] = now;
 
       const updated = await tx.update(rides).set(patch).where(eq(rides.id, rideId)).returning();
+      return { ok: true, row: toRow(updated[0]) };
+    });
+  }
+
+  /**
+   * Guarded cancellation / no-show. Like `transition`, runs a
+   * `SELECT … FOR UPDATE` inside a transaction so it can never race a forward
+   * step or a concurrent cancel. Classifies failure before writing: missing row
+   * → `not_found`; a caller who is not the bound party → `not_owner`; a current
+   * state that is not cancellable for the actor → `invalid_transition`. A no-show
+   * is only valid from `arrived` and only once `now − arrived_at ≥ noShowWaitMs`
+   * (else `no_show_too_early`). On success it stamps `cancelled_at` + records
+   * `cancelled_by` / `cancel_reason`. No fee is computed (Phase-0). RCAB-E4.S8.
+   */
+  async cancel(params: {
+    rideId: string;
+    actor: 'client' | 'driver';
+    actorId: string;
+    isNoShow: boolean;
+    reason: string | null;
+    noShowWaitMs: number;
+  }): Promise<RideCancelResult> {
+    const { rideId, actor, actorId, isNoShow, reason, noShowWaitMs } = params;
+    return this.db.transaction(async (tx) => {
+      const rows = await tx.select().from(rides).where(eq(rides.id, rideId)).for('update').limit(1);
+      const current = rows[0];
+      if (!current) return { ok: false, reason: 'not_found' };
+
+      const owns =
+        actor === 'client' ? current.passengerId === actorId : current.driverId === actorId;
+      if (!owns) return { ok: false, reason: 'not_owner' };
+
+      const now = new Date();
+      let toStatus: 'cancelled' | 'no_show';
+      if (isNoShow) {
+        // No-show is driver-only (the controller enforces the role) and only
+        // ever from `arrived`, after the wait elapses.
+        if (current.status !== 'arrived') return { ok: false, reason: 'invalid_transition' };
+        const arrivedMs = current.arrivedAt?.getTime();
+        if (arrivedMs === undefined || now.getTime() - arrivedMs < noShowWaitMs) {
+          return { ok: false, reason: 'no_show_too_early' };
+        }
+        toStatus = 'no_show';
+      } else {
+        const cancellable = actor === 'client' ? CLIENT_CANCELLABLE : DRIVER_CANCELLABLE;
+        if (!cancellable.has(current.status)) {
+          return { ok: false, reason: 'invalid_transition' };
+        }
+        toStatus = 'cancelled';
+      }
+
+      const updated = await tx
+        .update(rides)
+        .set({
+          status: toStatus,
+          cancelledAt: now,
+          cancelledBy: actor,
+          cancelReason: reason,
+          updatedAt: now,
+        })
+        .where(eq(rides.id, rideId))
+        .returning();
       return { ok: true, row: toRow(updated[0]) };
     });
   }

@@ -65,6 +65,12 @@ class _FakeRideService implements RideService {
 
   @override
   Future<String> advance(String rideId, String event) async => 'accepted';
+
+  @override
+  Future<String> cancel(String rideId, {String? reason}) async => 'cancelled';
+
+  @override
+  Future<String> reportNoShow(String rideId) async => 'no_show';
 }
 
 // ---------------------------------------------------------------------------

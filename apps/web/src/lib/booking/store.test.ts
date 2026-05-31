@@ -171,6 +171,14 @@ describe('useBookingStore', () => {
     expect(useBookingStore.getState().rideStatus).toBe('requested');
   });
 
+  it('applyRideState accepts the terminal cancellation states (cancelled / no_show)', () => {
+    useBookingStore.getState().setSoloRequested('ride-solo-1', 'arrived');
+    useBookingStore.getState().applyRideState('no_show');
+    expect(useBookingStore.getState().rideStatus).toBe('no_show');
+    useBookingStore.getState().applyRideState('cancelled');
+    expect(useBookingStore.getState().rideStatus).toBe('cancelled');
+  });
+
   it('applyRideState is ignored once there is no active ride', () => {
     useBookingStore.getState().applyRideState('en_route');
     expect(useBookingStore.getState().rideStatus).toBeNull();

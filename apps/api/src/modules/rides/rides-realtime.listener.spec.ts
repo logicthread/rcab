@@ -25,16 +25,22 @@ function rideRow(overrides: Partial<RideRow> = {}): RideRow {
     arrivedAt: null,
     startedAt: null,
     completedAt: null,
+    cancelledAt: null,
+    cancelledBy: null,
+    cancelReason: null,
     ...overrides,
   };
 }
 
-function build(opts: {
-  apply?: ReturnType<typeof vi.fn>;
-  findById?: ReturnType<typeof vi.fn>;
-} = {}) {
+function build(
+  opts: {
+    apply?: ReturnType<typeof vi.fn>;
+    findById?: ReturnType<typeof vi.fn>;
+  } = {},
+) {
   const stateMachine = {
-    apply: opts.apply ?? vi.fn().mockResolvedValue({ ok: true, row: rideRow({ status: 'en_route' }) }),
+    apply:
+      opts.apply ?? vi.fn().mockResolvedValue({ ok: true, row: rideRow({ status: 'en_route' }) }),
   };
   const ridesRepo = { findById: opts.findById ?? vi.fn().mockResolvedValue(rideRow()) };
   const bus = { joinRide: vi.fn().mockResolvedValue(undefined) };
