@@ -36,6 +36,8 @@ See [[algo-top-k-dispatch]] for the full algorithm and parameters.
   - `@OnEvent('pool.closed')` listener — auto-dispatches when `PoolLifecycleService` closes a pool with reason `closed_full` or `closed_timeout`.
   - `@OnEvent('ride.requested')` listener — auto-dispatches a freshly persisted solo ride (E4.S3).
   - `@OnEvent('dispatch.ride_offer_response')` listener — driven by `RealtimeGateway`; a pool offer → `claimPool`, a solo offer (`offer:type='solo'`) → `claimSolo` (winner gets `ride_offer_accepted`, race-loser gets `ride_offer_revoked` reason `taken`). Decline → just deletes the offer lock.
+  - `releaseDispatch(rideId): Promise<void>` — unwinds in-flight dispatch for a ride: `DEL claim:ride:<id>`, `revokeAllOffers`, removes the wave-2 + hard-fail jobs. Every step is a safe no-op when nothing is in flight.
+  - `@OnEvent('ride.cancelled')` listener (E4.S8) — fired by `RideStateMachine.cancel` after a solo ride is cancelled / no-showed; calls `releaseDispatch` so no driver is left holding a stale offer and no timer fires on a terminal ride. Keeps [[module-rides]] free of dispatch internals.
 
 ## State
 

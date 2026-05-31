@@ -120,6 +120,11 @@ CREATE TABLE ride (
 );
 CREATE INDEX ON ride (driver_id, created_at DESC);
 CREATE INDEX ON ride (state);
+```
+
+> **As-built — solo `rides` table (migrations 0006–0009).** The shipped solo-ride table is named **`rides`** (distinct from the indicative `ride` above and from `shared_rides`). It uses `status` (not `state`) with CHECK `('requested','dispatching','accepted','en_route','arrived','in_progress','completed','cancelled','no_driver','no_show')`, `fare_cents int`, per-state timestamp columns (`accepted_at`/`en_route_at`/`arrived_at`/`started_at`/`completed_at`), and — from **migration 0009 (RCAB-E4.S8)** — the cancellation columns `cancelled_at timestamptz`, `cancelled_by text CHECK (… IN ('client','driver'))`, `cancel_reason text`. **No fee column** ships in Phase-0 (cancellation is free; the fee mechanism is deferred to a later phase).
+
+```sql
 
 -- SHARED RIDE
 CREATE TABLE shared_ride (

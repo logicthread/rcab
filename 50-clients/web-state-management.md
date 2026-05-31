@@ -40,7 +40,9 @@ The draft is a Zustand store hydrated from `localStorage`. If the user closes th
 
 ## Solo live-tracking (RCAB-E4.S7)
 
-The booking store (`lib/booking/store.ts`) gained a `tracking` stage plus `{ rideId, rideStatus, driver }`. Rather than the React-Query bridge above, the booking surface consumes `ride_state_changed` (→ `applyRideState`) and `driver_location` (→ `applyDriverLocation`) **directly into the Zustand store** — the booking flow is Zustand-first, not query-backed. The active solo `rideId` is persisted to `localStorage` (`rcab_active_ride`); on a full reload the page rehydrates via `GET /v1/rides/:id` and re-`ride:subscribe`s the socket. Terminal states (`completed`/`no_driver`/`cancelled`) clear the key.
+The booking store (`lib/booking/store.ts`) gained a `tracking` stage plus `{ rideId, rideStatus, driver }`. Rather than the React-Query bridge above, the booking surface consumes `ride_state_changed` (→ `applyRideState`) and `driver_location` (→ `applyDriverLocation`) **directly into the Zustand store** — the booking flow is Zustand-first, not query-backed. The active solo `rideId` is persisted to `localStorage` (`rcab_active_ride`); on a full reload the page rehydrates via `GET /v1/rides/:id` and re-`ride:subscribe`s the socket. Terminal states (`completed`/`no_driver`/`cancelled`/`no_show`) clear the key.
+
+**RCAB-E4.S8 — cancel:** the tracking panel shows a **Cancel ride** button before the trip starts (hidden once `in_progress` or terminal); `cancelActiveRide` calls `POST /v1/rides/:id/cancel` and applies the returned status. `no_show` is a recognised terminal status; cancellation is **free in Phase-0** (no fee surfaced).
 
 ## See also
 - [[web-nextjs-structure]] · [[web-osm-integration]] · [[websocket-events]]
