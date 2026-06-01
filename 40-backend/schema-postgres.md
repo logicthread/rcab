@@ -175,6 +175,10 @@ CREATE TABLE rating (
   CHECK (rater_id <> subject_id)
 );
 CREATE INDEX ON rating (subject_id, created_at DESC);
+-- AS-BUILT (RCAB-E4.S9): shipped as table `ratings` (plural) via migration 0010,
+-- same columns/constraints as above EXCEPT ride_id/rater_id/subject_id are plain
+-- uuid (no FK — mirrors rides.driver_id). Capture only; aggregation + the denorm
+-- to user.rating_avg/_count is Epic E7.
 
 -- RIDE LOCATION SAMPLE
 CREATE TABLE ride_location_sample (

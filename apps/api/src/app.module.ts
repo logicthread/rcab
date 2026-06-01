@@ -18,6 +18,7 @@ import { RealtimeModule } from './modules/realtime/realtime.module';
 import { RidesModule } from './modules/rides/rides.module';
 import { DispatchModule } from './modules/dispatch/dispatch.module';
 import { RideLifecycleModule } from './modules/ride-lifecycle/ride-lifecycle.module';
+import { RatingModule } from './modules/rating/rating.module';
 import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
 import { MetricsMiddleware } from './common/middleware/metrics.middleware';
 import { AppExceptionFilter } from './common/filters/app-exception.filter';
@@ -53,6 +54,7 @@ function parseRedisConnection() {
     RidesModule,
     DispatchModule,
     RideLifecycleModule,
+    RatingModule,
   ],
   providers: [
     { provide: APP_FILTER, useClass: AppExceptionFilter },

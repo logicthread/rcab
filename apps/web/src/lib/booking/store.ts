@@ -45,6 +45,8 @@ export interface BookingState {
   rideId: string | null;
   rideStatus: RideStatus | null;
   driver: DriverPosition | null;
+  // Whether the rider has rated (or skipped) this completed ride — RCAB-E4.S9.
+  rated: boolean;
 
   setRideType: (next: RideType) => void;
   setActiveField: (field: PointField) => void;
@@ -62,6 +64,7 @@ export interface BookingState {
   setSoloRequested: (rideId: string, status: string) => void;
   applyRideState: (state: string) => void;
   applyDriverLocation: (rideId: string, lat: number, lng: number, heading: number) => void;
+  markRated: () => void;
   reset: () => void;
 }
 
@@ -80,6 +83,7 @@ const INITIAL_STATE = {
   rideId: null as string | null,
   rideStatus: null as RideStatus | null,
   driver: null as DriverPosition | null,
+  rated: false,
 };
 
 // The API emits a fixed lifecycle vocabulary; anything unexpected falls back to
@@ -172,7 +176,13 @@ export const useBookingStore = create<BookingState>((set, get) => ({
   },
 
   setSoloRequested(rideId, status) {
-    set({ rideId, rideStatus: normalizeStatus(status), driver: null, stage: 'tracking' });
+    set({
+      rideId,
+      rideStatus: normalizeStatus(status),
+      driver: null,
+      rated: false,
+      stage: 'tracking',
+    });
   },
 
   applyRideState(state) {
@@ -185,6 +195,10 @@ export const useBookingStore = create<BookingState>((set, get) => ({
   applyDriverLocation(rideId, lat, lng, heading) {
     if (get().rideId !== rideId) return;
     set({ driver: { lat, lng, heading } });
+  },
+
+  markRated() {
+    set({ rated: true });
   },
 
   reset() {

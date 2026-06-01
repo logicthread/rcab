@@ -20,6 +20,7 @@ import {
   createSharedRide,
   fetchQuote,
   fetchRide,
+  submitRating,
 } from '../../lib/booking/api';
 import { connectBookingSocket } from '../../lib/booking/ws';
 import { reverseGeocode } from '../../lib/geo/nominatim';
@@ -77,6 +78,7 @@ function BookPage() {
     rideId,
     rideStatus,
     driver,
+    rated,
     setRideType,
     setActiveField,
     setPoint,
@@ -93,6 +95,7 @@ function BookPage() {
     setSoloRequested,
     applyRideState,
     applyDriverLocation,
+    markRated,
     reset,
   } = useBookingStore();
 
@@ -266,6 +269,17 @@ function BookPage() {
       .catch(() => undefined);
   }, [jwt, rideId, applyRideState]);
 
+  const rateActiveRide = useCallback(
+    (stars: number, text: string) => {
+      if (!jwt || !rideId) return;
+      // Fire-and-mark: any failure (incl. a 409 already_rated) is benign — we
+      // still collapse the prompt so the rider isn't stuck re-rating.
+      submitRating(rideId, stars, text, jwt).catch(() => undefined);
+      markRated();
+    },
+    [jwt, rideId, markRated],
+  );
+
   return (
     <main
       style={{
@@ -309,6 +323,9 @@ function BookPage() {
             driver={driver}
             onNewBooking={clearActiveRide}
             onCancel={cancelActiveRide}
+            rated={rated}
+            onRate={rateActiveRide}
+            onSkipRating={markRated}
           />
         </>
       ) : (

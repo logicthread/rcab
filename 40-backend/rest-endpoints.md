@@ -63,7 +63,7 @@ audience: both
 ## rating
 | Method | Path | Description |
 |---|---|---|
-| POST | `/v1/rides/:id/ratings` 🔒 | Body: `{ stars, text }` — direction inferred from auth |
+| POST | `/v1/rides/:id/ratings` 🔒 | Body: `{ stars (1–5), text? }` — rate the other party of a **completed** ride; direction inferred from auth (client→driver / driver→client). **Shipped RCAB-E4.S9.** 201 `{ id, rideId, subjectId, stars }`; 400 stars out of range; 403 not a party; 404 unknown; 409 `ride_not_completed` / `already_rated`. Capture only — aggregation + the rating display are E7. |
 
 ## notifications
 | Method | Path | Description |

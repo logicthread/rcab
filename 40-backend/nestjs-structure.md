@@ -38,7 +38,7 @@ apps/api/src/
     dispatch/
     matching/
     shared-rides/
-    rating/
+    rating/               #   RatingController + RatingService — insert built E4.S9; aggregate E7
     geo/
     notifications/
     realtime/             #   Socket.IO gateway + RealtimeBus provider

@@ -44,7 +44,11 @@ Once `status=matched`, the client is already in the `ride:<id>` room (joined at 
 - Client cancels mid-flow → all outstanding offers revoked, request marked `canceled_by_client`.
 - **Cancellation & no-show (RCAB-E4.S8):** the rider can tap **Cancel ride** any time before the trip starts (`POST /v1/rides/:id/cancel`); the ride goes `cancelled`, the driver is freed, and dispatch unwinds (claim/offers/timers via `RIDE_CANCELLED_EVENT`). Once `in_progress` the rider can no longer cancel (the trip ends via the driver). If the rider never shows, the driver can **Report no-show** from `arrived` after a 5-min wait → `no_show`. **Cancellation is free in Phase-0** — the fee mechanism is deferred to a later phase.
 
+## After completion — rating (RCAB-E4.S9)
+
+Once the ride reaches `completed`, both sides are prompted to rate the other 1–5 stars (optional comment): the rider in-place on the booking panel, the driver on `/rating/:id`. Submit persists via `POST /v1/rides/:id/ratings` (direction inferred from auth); Skip writes nothing. Rating is **capture only** in Phase-0 — the aggregated score + history/earnings surfaces are Demo 6 ([[features-rating-system]]). A cancelled / no-show ride never opens the prompt.
+
 ## See also
 - [[features-normal-booking]] · [[algo-top-k-dispatch]]
 - [[sm-booking-flow]] · [[sm-ride-lifecycle]]
-- [[module-dispatch]]
+- [[module-dispatch]] · [[features-rating-system]]

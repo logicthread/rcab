@@ -22,7 +22,7 @@ audience: both
 | `dispatch` | Top-K offer flow, offer locks, retries | `DispatchService` | [[module-dispatch]] |
 | `matching` | Shared-ride matching, route similarity | `MatchingService` | [[module-matching]] |
 | `shared-rides` | Pool entity, slot/open operations | `SharedRidesService` | |
-| `rating` | Insert + aggregate ratings | `RatingService` | |
+| `rating` | Insert + aggregate ratings | `RatingService` | **Insert + invariants built RCAB-E4.S9** (`POST /v1/rides/:id/ratings`, `RatingRepository`); aggregation + denorm is E7 |
 | `geo` | Redis geo wrappers, geohash, distance helpers | `GeoService` | |
 | `notifications` | Persist + dispatch (push/WS) | `NotificationsService` | |
 | `realtime` | Socket.IO gateway + bus, room conventions | `RealtimeBus` | [[module-realtime]] |

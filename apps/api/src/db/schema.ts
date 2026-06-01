@@ -4,6 +4,7 @@ import {
   text,
   timestamp,
   integer,
+  smallint,
   numeric,
   boolean,
   doublePrecision,
@@ -11,6 +12,7 @@ import {
   check,
   index,
   primaryKey,
+  unique,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 
@@ -201,5 +203,27 @@ export const rides = pgTable(
       'rides_cancelled_by_check',
       sql`${t.cancelledBy} IS NULL OR ${t.cancelledBy} IN ('client','driver')`,
     ),
+  ],
+);
+
+// Two-sided ratings — RCAB-E4.S9. One row per (ride, rater, subject); capture
+// only (aggregation + denorm to user.rating_avg/_count is Epic E7). Plain uuid
+// refs (no cross-table FK — mirrors rides.driver_id).
+export const ratings = pgTable(
+  'ratings',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    rideId: uuid('ride_id').notNull(),
+    raterId: uuid('rater_id').notNull(),
+    subjectId: uuid('subject_id').notNull(),
+    stars: smallint('stars').notNull(),
+    text: text('text'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    unique('ratings_unique_direction').on(t.rideId, t.raterId, t.subjectId),
+    check('ratings_stars_check', sql`${t.stars} BETWEEN 1 AND 5`),
+    check('ratings_no_self_check', sql`${t.raterId} <> ${t.subjectId}`),
+    index('ratings_subject_idx').on(t.subjectId, t.createdAt),
   ],
 );

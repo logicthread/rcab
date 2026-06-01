@@ -205,4 +205,29 @@ describe('useBookingStore', () => {
     expect(s.rideStatus).toBeNull();
     expect(s.driver).toBeNull();
   });
+
+  // ── Rating (RCAB-E4.S9) ──────────────────────────────────────────────────────
+
+  it('starts a fresh tracked ride un-rated', () => {
+    useBookingStore.getState().setSoloRequested('ride-solo-1', 'requested');
+    expect(useBookingStore.getState().rated).toBe(false);
+  });
+
+  it('markRated flips the rated flag', () => {
+    useBookingStore.getState().setSoloRequested('ride-solo-1', 'completed');
+    useBookingStore.getState().markRated();
+    expect(useBookingStore.getState().rated).toBe(true);
+  });
+
+  it('setSoloRequested resets rated for the next ride', () => {
+    useBookingStore.getState().markRated();
+    useBookingStore.getState().setSoloRequested('ride-solo-2', 'requested');
+    expect(useBookingStore.getState().rated).toBe(false);
+  });
+
+  it('reset clears the rated flag', () => {
+    useBookingStore.getState().markRated();
+    useBookingStore.getState().reset();
+    expect(useBookingStore.getState().rated).toBe(false);
+  });
 });

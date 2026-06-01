@@ -71,7 +71,7 @@ audience: both
 | RCAB-E4.S6 | [[story-rcab-e4-s6-ride-state-machine]] — Ride state machine (solo: accepted → en_route → arrived → in_progress → completed) | ■ |
 | RCAB-E4.S7 | [[story-rcab-e4-s7-driver-location-stream]] — Driver location stream → client WS (1 Hz throttle) | ■ |
 | RCAB-E4.S8 | [[story-rcab-e4-s8-cancellation-paths]] — Ride cancellation & no-show paths | ■ |
-| RCAB-E4.S9 | Rating prompts post-completion | · |
+| RCAB-E4.S9 | [[story-rcab-e4-s9-rating-prompts]] — Rating prompts post-completion | ■ |
 
 ## E5 — Shared booking → Demo 4 · "Shared works"
 *Pool, route similarity, matching, shared lifecycle.* See [[epic-e5-shared-booking]].
@@ -101,7 +101,7 @@ audience: both
 
 | ID | Title | Status |
 |---|---|---|
-| RCAB-E7.S1 | Rating insert endpoint + invariants | · |
+| RCAB-E7.S1 | Rating moderation view + cold-start "New" display (insert + invariants shipped in RCAB-E4.S9) | · |
 | RCAB-E7.S2 | Weighted-recency aggregation job + denorm fields | · |
 | RCAB-E7.S3 | Web history page (list, detail) | · |
 | RCAB-E7.S4 | Driver earnings dashboard (today / week / month) | · |

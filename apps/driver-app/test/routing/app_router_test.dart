@@ -17,6 +17,8 @@ import 'package:driver_app/features/offer/offer_screen.dart';
 import 'package:driver_app/features/ride/ride_screen.dart';
 import 'package:driver_app/features/ride/ride_provider.dart';
 import 'package:driver_app/features/ride/ride_models.dart';
+import 'package:driver_app/features/rating/rating_screen.dart';
+import 'package:driver_app/features/rating/rating_provider.dart';
 import 'package:driver_app/features/earnings/earnings_screen.dart';
 import 'package:driver_app/features/profile/profile_screen.dart';
 
@@ -71,6 +73,12 @@ class _FakeRideService implements RideService {
 
   @override
   Future<String> reportNoShow(String rideId) async => 'no_show';
+}
+
+/// No-op rating service so [RatingScreen] builds without a real Dio.
+class _FakeRatingService implements RatingService {
+  @override
+  Future<void> submit(String rideId, int stars, String? text) async {}
 }
 
 // ---------------------------------------------------------------------------
@@ -206,6 +214,16 @@ void main() {
         extraOverrides: [rideServiceProvider.overrideWithValue(_FakeRideService())],
       );
       expect(find.byKey(const Key('ride_screen')), findsOneWidget);
+    });
+
+    testWidgets('/rating/:id', (tester) async {
+      await _pumpRoute(
+        tester,
+        '/rating/test-id',
+        const RatingScreen(rideId: 'test-id'),
+        extraOverrides: [ratingServiceProvider.overrideWithValue(_FakeRatingService())],
+      );
+      expect(find.byKey(const Key('rating_screen')), findsOneWidget);
     });
 
     testWidgets('/earnings', (tester) async {

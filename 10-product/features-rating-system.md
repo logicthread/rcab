@@ -24,6 +24,11 @@ audience: both
 - **Phase-0:** rating *does not* affect dispatch order. Recorded but advisory only.
 - **Phase-1 (gated by sufficient data):** dispatch ranking will blend `distance × ETA × rating_compat` — see [[algo-top-k-dispatch]] §Future.
 
+## Phase-0 split (as-built)
+
+- **Capture — RCAB-E4.S9 (Demo 3):** the post-completion prompt (driver `/rating/:id` + the web rider panel) and `POST /v1/rides/:id/ratings`, persisting raw `ratings` rows with the [[entity-rating]] invariants. Rating is optional (Skip writes nothing) and one-per-direction-per-ride.
+- **Read / aggregate — Epic E7 (Demo 6):** the weighted-recency mean + `rating_avg`/`rating_count` denorm ([[algo-rating-aggregation]]), the "New" (<5 ratings) display, the low-rating moderation view, and the history / earnings surfaces ([[features-history-dashboard]]).
+
 ## See also
 - [[entity-rating]] · [[algo-rating-aggregation]]
 - [[features-history-dashboard]]
