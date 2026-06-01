@@ -139,3 +139,30 @@ export interface CancelRideResponse {
 export function cancelRide(rideId: string, jwt: string): Promise<CancelRideResponse> {
   return postJson<CancelRideResponse>(`/v1/rides/${rideId}/cancel`, {}, jwt);
 }
+
+export interface RatingResponse {
+  id: string;
+  rideId: string;
+  subjectId: string;
+  stars: number;
+}
+
+/**
+ * Submit a 1–5 star rating (+ optional text) for the other party of a completed
+ * ride. The direction (who is rated) is inferred from auth server-side. The
+ * caller swallows a 409 (`already_rated`) — re-rating a ride is benign.
+ * RCAB-E4.S9.
+ */
+export function submitRating(
+  rideId: string,
+  stars: number,
+  text: string | undefined,
+  jwt: string,
+): Promise<RatingResponse> {
+  const trimmed = text?.trim();
+  return postJson<RatingResponse>(
+    `/v1/rides/${rideId}/ratings`,
+    { stars, ...(trimmed ? { text: trimmed } : {}) },
+    jwt,
+  );
+}
