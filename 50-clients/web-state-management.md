@@ -44,5 +44,7 @@ The booking store (`lib/booking/store.ts`) gained a `tracking` stage plus `{ rid
 
 **RCAB-E4.S8 — cancel:** the tracking panel shows a **Cancel ride** button before the trip starts (hidden once `in_progress` or terminal); `cancelActiveRide` calls `POST /v1/rides/:id/cancel` and applies the returned status. `no_show` is a recognised terminal status; cancellation is **free in Phase-0** (no fee surfaced).
 
+**RCAB-E4.S9 — rating:** the store gained a `rated` flag (+ `markRated`); `setSoloRequested` resets it per ride. On `completed`, the tracking panel renders an inline rating card (1–5 stars + optional text); `rateActiveRide` calls `POST /v1/rides/:id/ratings` then `markRated` (a 409 `already_rated` is swallowed — re-rating is benign), and Skip just `markRated`s. Rating happens in-place (no `/rating` web route — that's the driver app). A reload after completion does not re-prompt: reconnect-restore skips `completed` rides.
+
 ## See also
 - [[web-nextjs-structure]] · [[web-osm-integration]] · [[websocket-events]]

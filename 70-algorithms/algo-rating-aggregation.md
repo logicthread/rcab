@@ -37,6 +37,10 @@ A driver with brilliant ratings two years ago and recent slips should reflect th
 
 In Phase-0 ratings only inform a future ranking change (see [[algo-top-k-dispatch]] §Future). Tie-breaking isn't critical until that's live.
 
+## Status (as-built)
+
+> **Not wired yet.** RCAB-E4.S9 ships rating *capture* only — it writes raw `ratings` rows and does **not** update `user.rating_avg` / `rating_count`. This aggregation (the trimmed weighted-recency mean + the denorm update, nightly + on-insert for small N) is the **E7** read side that consumes those rows.
+
 ## See also
 - [[entity-rating]] · [[features-rating-system]]
 - [[algo-top-k-dispatch]]

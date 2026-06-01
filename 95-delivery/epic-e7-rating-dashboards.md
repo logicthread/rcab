@@ -24,7 +24,7 @@ Completing every story in this epic ⇒ Demo 6 passes.
 
 | ID | Title | Status |
 |---|---|---|
-| RCAB-E7.S1 | Rating insert endpoint + invariants | · |
+| RCAB-E7.S1 | Rating moderation view + cold-start "New" display (insert + invariants shipped in RCAB-E4.S9) | · |
 | RCAB-E7.S2 | Weighted-recency aggregation job + denorm fields | · |
 | RCAB-E7.S3 | Web history page (list, detail) | · |
 | RCAB-E7.S4 | Driver earnings dashboard (today / week / month) | · |
