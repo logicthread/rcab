@@ -7,7 +7,7 @@ export interface PoolExpireJobData {
   rideId: string;
 }
 
-@Processor(MATCHING_QUEUE)
+@Processor(MATCHING_QUEUE, { autorun: process.env.RCAB_DISABLE_BULL_AUTORUN !== '1' })
 export class PoolExpireProcessor extends WorkerHost {
   private readonly log = new Logger(PoolExpireProcessor.name);
 

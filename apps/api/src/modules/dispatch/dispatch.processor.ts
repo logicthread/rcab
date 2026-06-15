@@ -10,7 +10,7 @@ import {
   type WaveTimeoutJob,
 } from './dispatch.service';
 
-@Processor(DISPATCH_QUEUE)
+@Processor(DISPATCH_QUEUE, { autorun: process.env.RCAB_DISABLE_BULL_AUTORUN !== '1' })
 export class DispatchProcessor extends WorkerHost {
   private readonly log = new Logger(DispatchProcessor.name);
 

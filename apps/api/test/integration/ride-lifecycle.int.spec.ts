@@ -8,6 +8,7 @@ import { randomUUID } from 'node:crypto';
 import * as schema from '../../src/db/schema';
 import { SharedRideRepository } from '../../src/modules/matching/shared-ride.repository';
 import { RideStopRepository } from '../../src/modules/matching/ride-stop.repository';
+import { RidesRepository } from '../../src/modules/rides/rides.repository';
 import {
   PoolLifecycleService,
   MATCHING_QUEUE,
@@ -57,6 +58,7 @@ describe.skipIf(skip)(
       const db = drizzle(pgPool as never, { schema });
       const sharedRepo = new SharedRideRepository(db as never);
       const stopsRepo = new RideStopRepository(db as never);
+      const ridesRepo = new RidesRepository(db as never);
 
       const conn = parseRedis(process.env.TEST_REDIS_URL!);
       matchingQueue = new Queue(MATCHING_QUEUE, { connection: conn });
@@ -85,6 +87,7 @@ describe.skipIf(skip)(
 
       dispatch = new DispatchService(
         sharedRepo,
+        ridesRepo,
         stopsRepo,
         lifecycle,
         bus as never,

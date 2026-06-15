@@ -26,7 +26,8 @@ describe.skipIf(skip)('health/ready integration', () => {
     mockOsrm = createServer((_req, res) => {
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end('{"code":"Ok"}');
-    }).listen(0);
+    });
+    await new Promise<void>((resolve) => mockOsrm.listen(0, '127.0.0.1', resolve));
     const osrmAddr = mockOsrm.address() as AddressInfo;
     process.env.OSRM_URL = `http://127.0.0.1:${osrmAddr.port}`;
 
@@ -51,8 +52,12 @@ describe.skipIf(skip)('health/ready integration', () => {
 
   it('returns 200 with all deps true when everything is up', async () => {
     const res = await supertest(app.getHttpServer()).get('/v1/health/ready');
-    expect(res.status).toBe(200);
+    if (res.status !== 200) {
+      // eslint-disable-next-line no-console
+      console.error('health/ready debug:', res.status, res.body);
+    }
     expect(res.body).toEqual({ ok: true, postgres: true, redis: true, osrm: true });
+    expect(res.status).toBe(200);
   });
 
   it('returns 503 with redis=false after Redis is disconnected', async () => {

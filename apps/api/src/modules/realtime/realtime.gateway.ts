@@ -8,7 +8,7 @@ import {
   MessageBody,
   ConnectedSocket,
 } from '@nestjs/websockets';
-import { Inject, Logger } from '@nestjs/common';
+import { Inject, Logger, OnModuleDestroy } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { JwtService } from '@nestjs/jwt';
 import type { Server, Socket } from 'socket.io';
@@ -69,11 +69,15 @@ export interface RideSubscribeRequestEvent {
 }
 
 @WebSocketGateway({ cors: { origin: '*' }, transports: ['websocket'] })
-export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect {
+export class RealtimeGateway
+  implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect, OnModuleDestroy
+{
   @WebSocketServer()
   server!: Server;
 
   private readonly log = new Logger(RealtimeGateway.name);
+  private _adapterPub?: Redis;
+  private _adapterSub?: Redis;
   // Geo-index freshness gate (per-driver). Independent of the fan-out gate.
   private readonly _geoThrottle = new Map<string, number>();
   // Client fan-out gate (per-ride) — the smooth-dot 1 Hz debouncer.
@@ -93,12 +97,31 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
   ) {}
 
   afterInit(server: Server): void {
-    // Wire Redis adapter for pub/sub (no-op at single-node, zero code change for multi-node)
-    const pub = this.redis.duplicate();
-    const sub = this.redis.duplicate();
-    server.adapter(createAdapter(pub, sub));
+    // Wire the Redis scale-out adapter for multi-node pub/sub. At single node it
+    // is effectively a no-op; when the injected client can't duplicate (e.g. a
+    // lightweight test stub), skip it and fall back to the default in-memory
+    // adapter rather than crashing init.
+    const redis = this.redis as Partial<Redis>;
+    if (typeof redis.duplicate === 'function') {
+      const pub = redis.duplicate();
+      const sub = redis.duplicate();
+      this._adapterPub = pub;
+      this._adapterSub = sub;
+      pub.on('error', (err) => this.log.warn(`adapter pub error: ${err.message}`));
+      sub.on('error', (err) => this.log.warn(`adapter sub error: ${err.message}`));
+      server.adapter(createAdapter(pub, sub));
+    }
     this.bus.setServer(server);
     this.log.log('RealtimeGateway initialised');
+  }
+
+  async onModuleDestroy(): Promise<void> {
+    await Promise.allSettled([
+      this._adapterPub?.quit(),
+      this._adapterSub?.quit(),
+    ]);
+    this._adapterPub = undefined;
+    this._adapterSub = undefined;
   }
 
   handleConnection(client: Socket): void {

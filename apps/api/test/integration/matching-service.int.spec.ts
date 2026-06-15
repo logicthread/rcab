@@ -56,8 +56,15 @@ describe.skipIf(skip)('MatchingService — integration (Postgres + Redis)', () =
     const conn = parseRedis(process.env.TEST_REDIS_URL!);
     queue = new Queue(MATCHING_QUEUE, { connection: conn });
     const events = new EventEmitter2();
+    const bus = {
+      toUser: vi.fn(),
+      toRide: vi.fn(),
+      toPool: vi.fn(),
+      joinPool: vi.fn().mockResolvedValue(undefined),
+      broadcast: vi.fn(),
+    };
     const lifecycle = new PoolLifecycleService(
-      repo, queue as never, redis, events, config as never,
+      repo, queue as never, redis, events, bus as never, config as never,
     );
 
     // Mock RouteSimilarityService: return 0.95 for requests near pool A, 0.1 for pool B
