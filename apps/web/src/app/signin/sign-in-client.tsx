@@ -31,15 +31,22 @@ export default function SignInPage() {
     if (user) router.replace('/book');
   }, [user, router]);
 
-  // Mount invisible reCAPTCHA
-  useEffect(() => {
-    if (!recaptchaContainerRef.current) return;
+  // Lazy-init the invisible reCAPTCHA on first phone submit. Initializing
+  // in a useEffect interacts badly with React Strict Mode (the cleanup
+  // pass nulls the DOM node the recaptcha library still holds a reference
+  // to, and the next render throws `Cannot read properties of null
+  // (reading 'style')` from inside grecaptcha).
+  function getRecaptcha(): RecaptchaVerifier {
+    if (recaptchaRef.current) return recaptchaRef.current;
+    if (!recaptchaContainerRef.current) {
+      throw new Error('reCAPTCHA container not mounted');
+    }
     const verifier = new RecaptchaVerifier(firebaseAuth, recaptchaContainerRef.current, {
       size: 'invisible',
     });
     recaptchaRef.current = verifier;
-    return () => { verifier.clear(); };
-  }, []);
+    return verifier;
+  }
 
   async function handlePhoneSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -49,7 +56,7 @@ export default function SignInPage() {
       const confirmation = await signInWithPhoneNumber(
         firebaseAuth,
         phone,
-        recaptchaRef.current!,
+        getRecaptcha(),
       );
       confirmationRef.current = confirmation;
       setStep('otp');
