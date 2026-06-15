@@ -1,4 +1,4 @@
-import { Controller, Post, Body, UseGuards, HttpCode, Req, Res, UnauthorizedException } from '@nestjs/common';
+import { Controller, Post, Body, UseGuards, HttpCode, Req, Res, UnauthorizedException, Inject } from '@nestjs/common';
 import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import type { Request, Response } from 'express';
 import { FirebaseExchangeDto } from './dto/firebase-exchange.dto';
@@ -27,7 +27,7 @@ function tokenBody(tokens: TokenResponse): PublicTokenResponse {
 @Controller('v1/auth')
 @UseGuards(ThrottlerGuard)
 export class AuthController {
-  constructor(private auth: AuthService) {}
+  constructor(@Inject(AuthService) private auth: AuthService) {}
 
   @Post('firebase-exchange')
   @Throttle({ default: { limit: 10, ttl: 60000 } })

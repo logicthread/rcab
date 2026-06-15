@@ -28,9 +28,9 @@ export interface TokenResponse {
 @Injectable()
 export class AuthService {
   constructor(
-    private firebase: FirebaseAdminService,
-    private google: GoogleVerifierService,
-    private jwt: JwtService,
+    @Inject(FirebaseAdminService) private firebase: FirebaseAdminService,
+    @Inject(GoogleVerifierService) private google: GoogleVerifierService,
+    @Inject(JwtService) private jwt: JwtService,
     @Inject(PG_POOL) private pool: Pool,
   ) {}
 
