@@ -27,7 +27,10 @@ pipeline {
 
         stage('Unit tests') {
             steps {
-                sh 'pnpm test'
+                // API unit run enforces the coverage floor (vitest thresholds);
+                // web keeps its plain unit run.
+                sh 'pnpm --filter @rcab/api run test:cov'
+                sh 'pnpm --filter @rcab/web run test'
                 sh 'pnpm test:probe'
             }
         }
