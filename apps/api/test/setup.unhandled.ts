@@ -16,3 +16,10 @@
 // all 88 individual tests pass. Tracked as a known issue; see
 // docs/manual-testing/findings-2026-06-15.md.
 process.env.RCAB_DISABLE_BULL_AUTORUN = '1';
+
+// The socket.io Redis adapter (multi-node pub/sub scale-out) has no value in a
+// single-process integration test, and its subscriber-mode ioredis clients
+// leave a pending SUBSCRIBE that rejects `Connection is closed.` on teardown —
+// escaping every JS handler and failing the file at afterAll. Disable it here;
+// gateway logic is exercised directly via fake sockets, not the real adapter.
+process.env.RCAB_DISABLE_WS_ADAPTER = '1';

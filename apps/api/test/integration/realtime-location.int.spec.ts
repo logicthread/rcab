@@ -38,9 +38,12 @@ beforeAll(async () => {
 }, 30_000);
 
 afterAll(async () => {
+  // app.close() quits the injected REDIS client via RedisModule.onApplicationShutdown
+  // (we overrode the REDIS provider with `redis`). A second redis.quit() here would
+  // hit an already-closing connection and leak a `Connection is closed.` rejection
+  // that fails this file at teardown. Let the app own the close.
   await app?.close();
   await pool?.end();
-  await redis?.quit();
   vi.unstubAllGlobals();
 });
 
