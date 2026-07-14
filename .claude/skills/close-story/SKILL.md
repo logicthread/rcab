@@ -16,13 +16,16 @@ The exit gate for a story. Use this when you believe every acceptance criterion 
 1. **Sanity-check the story is in_progress.**
    - Read `95-delivery/stories/story-rcab-eX-sY-*.md`; frontmatter `status:` must be `in_progress`. If `done`, refuse — already closed. If anything else, ask before proceeding.
 
-2. **Run the test suite.** Execute (in this order, stop on first failure):
+2. **Run the verification gate.** Execute (stop on first failure):
    ```bash
-   pnpm --filter ...[HEAD^1]... lint
    pnpm build
-   pnpm test
+   pnpm verify   # lint + API unit-with-coverage-floor + integration (Testcontainers)
    ```
-   If any fail, stop. Report what failed. Do NOT proceed to status changes. The scoped lint filter runs only packages changed since the last commit plus their dependents — avoids pre-existing failures in untouched packages.
+   `pnpm verify` is the story-done proof — a green run means lint clean, the API
+   coverage floor held, and every integration test passed against real Postgres +
+   Redis. If any stage fails, stop, report what failed, and do NOT proceed to status
+   changes. (Integration needs Docker; run `pnpm dev:up` deps or ensure the daemon is
+   up first.)
 
 
 3. **Run the affected-criteria check.** Re-read the story's acceptance criteria and confirm each has a test (search the test files for behavior matching the criterion's wording). For any AC without a matching test, ask the user before continuing.

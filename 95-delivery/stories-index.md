@@ -36,7 +36,8 @@ audience: both
 | RCAB-E1.S10 | [[story-rcab-e1-s10-code-graph]] — code knowledge graph for agent memory (`pnpm code:graph` + `/code-graph`) | ■ |
 | RCAB-E1.S11 | [[story-rcab-e1-s11-int-teardown-fix]] — fix flaky integration teardown (make `pnpm test:int` honest) | ■ |
 | RCAB-E1.S12 | [[story-rcab-e1-s12-concurrency-tests]] — concurrency test suite for race-prone paths | ■ |
-| RCAB-E1.S13 | [[story-rcab-e1-s13-e2e-load-wiring]] — wire e2e + load CI scripts, first Playwright spec | ▶ |
+| RCAB-E1.S13 | [[story-rcab-e1-s13-e2e-load-wiring]] — wire e2e + load CI scripts, first Playwright spec | ■ |
+| RCAB-E1.S14 | [[story-rcab-e1-s14-verify-gate]] — verification gate (coverage floor + `pnpm verify`) | ▶ |
 
 ## E2 — Auth & Identity → Demo 1 · "I am a real user"
 *Firebase phone OTP, JWT issue/refresh, Google linking.* See [[epic-e2-auth]].
