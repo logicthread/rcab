@@ -102,7 +102,7 @@ export class RealtimeGateway
     // lightweight test stub), skip it and fall back to the default in-memory
     // adapter rather than crashing init.
     const redis = this.redis as Partial<Redis>;
-    if (typeof redis.duplicate === 'function') {
+    if (typeof redis.duplicate === 'function' && process.env.RCAB_DISABLE_WS_ADAPTER !== '1') {
       const pub = redis.duplicate();
       const sub = redis.duplicate();
       this._adapterPub = pub;
