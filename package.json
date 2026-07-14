@@ -17,6 +17,8 @@
     "dev:logs": "docker compose --env-file .env.dev -f infra/docker/docker-compose.dev.yml --profile obs logs -f",
     "dev:smoke": "bash scripts/dev-smoke.sh",
     "test:int": "turbo test:int",
+    "test:e2e": "turbo test:e2e",
+    "test:load": "k6 run infra/load/probe.js",
     "prod:up": "docker compose -f infra/docker/docker-compose.prod.yml -f infra/docker/docker-compose.prod-test.yml up -d --build",
     "prod:down": "docker compose -f infra/docker/docker-compose.prod.yml -f infra/docker/docker-compose.prod-test.yml down -v",
     "prod:smoke": "bash scripts/prod-smoke.sh",

@@ -26,6 +26,12 @@ system-probe-report.json
 codegraph/.stale
 codegraph/memory-ingest.json
 
+# Playwright e2e artifacts
+test-results/
+playwright-report/
+blob-report/
+.last-run.json
+
 # --- Future code (monorepo) — ignored ahead of time so accidental builds don't pollute commits
 
 # Node / pnpm / turbo
