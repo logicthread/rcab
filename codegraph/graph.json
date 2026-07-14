@@ -1,0 +1,5223 @@
+{
+  "version": 1,
+  "generatedAt": "2026-06-15T21:08:07+05:30",
+  "gitSha": "d0c8a482100f65c3ddf322f634f90a7ac34d5c61",
+  "counts": {
+    "nodes": 239,
+    "edges": 377,
+    "byNodeKind": {
+      "file": 138,
+      "module": 16,
+      "symbol": 54,
+      "route": 22,
+      "table": 9
+    },
+    "byEdgeKind": {
+      "imports": 266,
+      "di-import": 29,
+      "di-provides": 32,
+      "route": 22,
+      "riverpod-provides": 22,
+      "fk": 6
+    }
+  },
+  "nodes": [
+    {
+      "meta": {},
+      "id": "apps/api/src/app.module.ts",
+      "kind": "file",
+      "path": "apps/api/src/app.module.ts",
+      "name": "app.module.ts",
+      "app": "api"
+    },
+    {
+      "meta": {
+        "imports": [
+          "DrizzleModule",
+          "RedisModule",
+          "FirebaseModule",
+          "GoogleModule",
+          "HealthModule",
+          "AuthModule",
+          "VehiclesModule",
+          "DriversModule",
+          "RealtimeModule",
+          "RidesModule",
+          "DispatchModule",
+          "RideLifecycleModule",
+          "RatingModule"
+        ],
+        "providers": [],
+        "controllers": [],
+        "exports": []
+      },
+      "id": "apps/api/src/app.module.ts#AppModule",
+      "kind": "module",
+      "path": "apps/api/src/app.module.ts",
+      "name": "AppModule",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/common/filters/app-exception.filter.ts",
+      "kind": "file",
+      "path": "apps/api/src/common/filters/app-exception.filter.ts",
+      "name": "app-exception.filter.ts",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/common/guards/auth.guard.ts",
+      "kind": "file",
+      "path": "apps/api/src/common/guards/auth.guard.ts",
+      "name": "auth.guard.ts",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/common/guards/auth.guard.ts#AuthGuard",
+      "kind": "symbol",
+      "path": "apps/api/src/common/guards/auth.guard.ts",
+      "name": "AuthGuard",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/common/guards/csrf.guard.ts",
+      "kind": "file",
+      "path": "apps/api/src/common/guards/csrf.guard.ts",
+      "name": "csrf.guard.ts",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/common/guards/csrf.guard.ts#CsrfGuard",
+      "kind": "symbol",
+      "path": "apps/api/src/common/guards/csrf.guard.ts",
+      "name": "CsrfGuard",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/common/middleware/metrics.middleware.ts",
+      "kind": "file",
+      "path": "apps/api/src/common/middleware/metrics.middleware.ts",
+      "name": "metrics.middleware.ts",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/common/middleware/request-id.middleware.ts",
+      "kind": "file",
+      "path": "apps/api/src/common/middleware/request-id.middleware.ts",
+      "name": "request-id.middleware.ts",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/common/utils/cookie.ts",
+      "kind": "file",
+      "path": "apps/api/src/common/utils/cookie.ts",
+      "name": "cookie.ts",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/context.ts",
+      "kind": "file",
+      "path": "apps/api/src/context.ts",
+      "name": "context.ts",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/db/schema.ts",
+      "kind": "file",
+      "path": "apps/api/src/db/schema.ts",
+      "name": "schema.ts",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/infra/db/drizzle.module.ts",
+      "kind": "file",
+      "path": "apps/api/src/infra/db/drizzle.module.ts",
+      "name": "drizzle.module.ts",
+      "app": "api"
+    },
+    {
+      "meta": {
+        "imports": [],
+        "providers": [],
+        "controllers": [],
+        "exports": [
+          "PG_POOL",
+          "DRIZZLE_DB"
+        ]
+      },
+      "id": "apps/api/src/infra/db/drizzle.module.ts#DrizzleModule",
+      "kind": "module",
+      "path": "apps/api/src/infra/db/drizzle.module.ts",
+      "name": "DrizzleModule",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/infra/firebase/firebase-admin.service.ts",
+      "kind": "file",
+      "path": "apps/api/src/infra/firebase/firebase-admin.service.ts",
+      "name": "firebase-admin.service.ts",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/infra/firebase/firebase-admin.service.ts#FirebaseAdminService",
+      "kind": "symbol",
+      "path": "apps/api/src/infra/firebase/firebase-admin.service.ts",
+      "name": "FirebaseAdminService",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/infra/firebase/firebase.module.ts",
+      "kind": "file",
+      "path": "apps/api/src/infra/firebase/firebase.module.ts",
+      "name": "firebase.module.ts",
+      "app": "api"
+    },
+    {
+      "meta": {
+        "imports": [],
+        "providers": [
+          "FirebaseAdminService"
+        ],
+        "controllers": [],
+        "exports": [
+          "FirebaseAdminService"
+        ]
+      },
+      "id": "apps/api/src/infra/firebase/firebase.module.ts#FirebaseModule",
+      "kind": "module",
+      "path": "apps/api/src/infra/firebase/firebase.module.ts",
+      "name": "FirebaseModule",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/infra/google/google-verifier.service.ts",
+      "kind": "file",
+      "path": "apps/api/src/infra/google/google-verifier.service.ts",
+      "name": "google-verifier.service.ts",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/infra/google/google-verifier.service.ts#GoogleVerifierService",
+      "kind": "symbol",
+      "path": "apps/api/src/infra/google/google-verifier.service.ts",
+      "name": "GoogleVerifierService",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/infra/google/google.module.ts",
+      "kind": "file",
+      "path": "apps/api/src/infra/google/google.module.ts",
+      "name": "google.module.ts",
+      "app": "api"
+    },
+    {
+      "meta": {
+        "imports": [],
+        "providers": [
+          "GoogleVerifierService"
+        ],
+        "controllers": [],
+        "exports": [
+          "GoogleVerifierService"
+        ]
+      },
+      "id": "apps/api/src/infra/google/google.module.ts#GoogleModule",
+      "kind": "module",
+      "path": "apps/api/src/infra/google/google.module.ts",
+      "name": "GoogleModule",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/infra/redis/redis.module.ts",
+      "kind": "file",
+      "path": "apps/api/src/infra/redis/redis.module.ts",
+      "name": "redis.module.ts",
+      "app": "api"
+    },
+    {
+      "meta": {
+        "imports": [],
+        "providers": [],
+        "controllers": [],
+        "exports": [
+          "REDIS"
+        ]
+      },
+      "id": "apps/api/src/infra/redis/redis.module.ts#RedisModule",
+      "kind": "module",
+      "path": "apps/api/src/infra/redis/redis.module.ts",
+      "name": "RedisModule",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/logger.ts",
+      "kind": "file",
+      "path": "apps/api/src/logger.ts",
+      "name": "logger.ts",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/main.ts",
+      "kind": "file",
+      "path": "apps/api/src/main.ts",
+      "name": "main.ts",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/metrics.ts",
+      "kind": "file",
+      "path": "apps/api/src/metrics.ts",
+      "name": "metrics.ts",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/migrate.ts",
+      "kind": "file",
+      "path": "apps/api/src/migrate.ts",
+      "name": "migrate.ts",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/auth/auth.controller.ts",
+      "kind": "file",
+      "path": "apps/api/src/modules/auth/auth.controller.ts",
+      "name": "auth.controller.ts",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/auth/auth.controller.ts#AuthController",
+      "kind": "symbol",
+      "path": "apps/api/src/modules/auth/auth.controller.ts",
+      "name": "AuthController",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/auth/auth.module.ts",
+      "kind": "file",
+      "path": "apps/api/src/modules/auth/auth.module.ts",
+      "name": "auth.module.ts",
+      "app": "api"
+    },
+    {
+      "meta": {
+        "imports": [],
+        "providers": [
+          "AuthService",
+          "AuthGuard",
+          "CsrfGuard"
+        ],
+        "controllers": [
+          "AuthController"
+        ],
+        "exports": [
+          "AuthGuard",
+          "CsrfGuard",
+          "JwtModule"
+        ]
+      },
+      "id": "apps/api/src/modules/auth/auth.module.ts#AuthModule",
+      "kind": "module",
+      "path": "apps/api/src/modules/auth/auth.module.ts",
+      "name": "AuthModule",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/auth/auth.service.ts",
+      "kind": "file",
+      "path": "apps/api/src/modules/auth/auth.service.ts",
+      "name": "auth.service.ts",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/auth/auth.service.ts#AuthService",
+      "kind": "symbol",
+      "path": "apps/api/src/modules/auth/auth.service.ts",
+      "name": "AuthService",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/auth/dto/firebase-exchange.dto.ts",
+      "kind": "file",
+      "path": "apps/api/src/modules/auth/dto/firebase-exchange.dto.ts",
+      "name": "firebase-exchange.dto.ts",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/auth/dto/google-id-token.dto.ts",
+      "kind": "file",
+      "path": "apps/api/src/modules/auth/dto/google-id-token.dto.ts",
+      "name": "google-id-token.dto.ts",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/auth/dto/refresh-token.dto.ts",
+      "kind": "file",
+      "path": "apps/api/src/modules/auth/dto/refresh-token.dto.ts",
+      "name": "refresh-token.dto.ts",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/dispatch/dispatch.module.ts",
+      "kind": "file",
+      "path": "apps/api/src/modules/dispatch/dispatch.module.ts",
+      "name": "dispatch.module.ts",
+      "app": "api"
+    },
+    {
+      "meta": {
+        "imports": [
+          "ConfigModule",
+          "MatchingModule",
+          "RealtimeModule",
+          "RidesModule"
+        ],
+        "providers": [
+          "DispatchService",
+          "DispatchProcessor"
+        ],
+        "controllers": [],
+        "exports": [
+          "DispatchService"
+        ]
+      },
+      "id": "apps/api/src/modules/dispatch/dispatch.module.ts#DispatchModule",
+      "kind": "module",
+      "path": "apps/api/src/modules/dispatch/dispatch.module.ts",
+      "name": "DispatchModule",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/dispatch/dispatch.processor.ts",
+      "kind": "file",
+      "path": "apps/api/src/modules/dispatch/dispatch.processor.ts",
+      "name": "dispatch.processor.ts",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/dispatch/dispatch.processor.ts#DispatchProcessor",
+      "kind": "symbol",
+      "path": "apps/api/src/modules/dispatch/dispatch.processor.ts",
+      "name": "DispatchProcessor",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/dispatch/dispatch.service.ts",
+      "kind": "file",
+      "path": "apps/api/src/modules/dispatch/dispatch.service.ts",
+      "name": "dispatch.service.ts",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/dispatch/dispatch.service.ts#DispatchService",
+      "kind": "symbol",
+      "path": "apps/api/src/modules/dispatch/dispatch.service.ts",
+      "name": "DispatchService",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/dispatch/dispatch.types.ts",
+      "kind": "file",
+      "path": "apps/api/src/modules/dispatch/dispatch.types.ts",
+      "name": "dispatch.types.ts",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/drivers/drivers.controller.ts",
+      "kind": "file",
+      "path": "apps/api/src/modules/drivers/drivers.controller.ts",
+      "name": "drivers.controller.ts",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/drivers/drivers.controller.ts#DriversController",
+      "kind": "symbol",
+      "path": "apps/api/src/modules/drivers/drivers.controller.ts",
+      "name": "DriversController",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/drivers/drivers.module.ts",
+      "kind": "file",
+      "path": "apps/api/src/modules/drivers/drivers.module.ts",
+      "name": "drivers.module.ts",
+      "app": "api"
+    },
+    {
+      "meta": {
+        "imports": [
+          "AuthModule",
+          "RealtimeModule"
+        ],
+        "providers": [
+          "DriversService"
+        ],
+        "controllers": [
+          "DriversController"
+        ],
+        "exports": [
+          "DriversService"
+        ]
+      },
+      "id": "apps/api/src/modules/drivers/drivers.module.ts#DriversModule",
+      "kind": "module",
+      "path": "apps/api/src/modules/drivers/drivers.module.ts",
+      "name": "DriversModule",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/drivers/drivers.service.ts",
+      "kind": "file",
+      "path": "apps/api/src/modules/drivers/drivers.service.ts",
+      "name": "drivers.service.ts",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/drivers/drivers.service.ts#DriversService",
+      "kind": "symbol",
+      "path": "apps/api/src/modules/drivers/drivers.service.ts",
+      "name": "DriversService",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/drivers/dto/go-online.dto.ts",
+      "kind": "file",
+      "path": "apps/api/src/modules/drivers/dto/go-online.dto.ts",
+      "name": "go-online.dto.ts",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/drivers/dto/set-vehicle.dto.ts",
+      "kind": "file",
+      "path": "apps/api/src/modules/drivers/dto/set-vehicle.dto.ts",
+      "name": "set-vehicle.dto.ts",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/health/health.controller.ts",
+      "kind": "file",
+      "path": "apps/api/src/modules/health/health.controller.ts",
+      "name": "health.controller.ts",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/health/health.controller.ts#HealthController",
+      "kind": "symbol",
+      "path": "apps/api/src/modules/health/health.controller.ts",
+      "name": "HealthController",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/health/health.module.ts",
+      "kind": "file",
+      "path": "apps/api/src/modules/health/health.module.ts",
+      "name": "health.module.ts",
+      "app": "api"
+    },
+    {
+      "meta": {
+        "imports": [],
+        "providers": [
+          "HealthService"
+        ],
+        "controllers": [
+          "HealthController"
+        ],
+        "exports": []
+      },
+      "id": "apps/api/src/modules/health/health.module.ts#HealthModule",
+      "kind": "module",
+      "path": "apps/api/src/modules/health/health.module.ts",
+      "name": "HealthModule",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/health/health.service.ts",
+      "kind": "file",
+      "path": "apps/api/src/modules/health/health.service.ts",
+      "name": "health.service.ts",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/health/health.service.ts#HealthService",
+      "kind": "symbol",
+      "path": "apps/api/src/modules/health/health.service.ts",
+      "name": "HealthService",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/matching/matching.module.ts",
+      "kind": "file",
+      "path": "apps/api/src/modules/matching/matching.module.ts",
+      "name": "matching.module.ts",
+      "app": "api"
+    },
+    {
+      "meta": {
+        "imports": [
+          "HttpModule",
+          "ConfigModule",
+          "RealtimeModule"
+        ],
+        "providers": [
+          "RouteSimilarityService",
+          "SharedRideRepository",
+          "RideStopRepository",
+          "PoolLifecycleService",
+          "MatchingService",
+          "PoolExpireProcessor"
+        ],
+        "controllers": [],
+        "exports": [
+          "RouteSimilarityService",
+          "SharedRideRepository",
+          "RideStopRepository",
+          "PoolLifecycleService",
+          "MatchingService"
+        ]
+      },
+      "id": "apps/api/src/modules/matching/matching.module.ts#MatchingModule",
+      "kind": "module",
+      "path": "apps/api/src/modules/matching/matching.module.ts",
+      "name": "MatchingModule",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/matching/matching.service.ts",
+      "kind": "file",
+      "path": "apps/api/src/modules/matching/matching.service.ts",
+      "name": "matching.service.ts",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/matching/matching.service.ts#MatchingService",
+      "kind": "symbol",
+      "path": "apps/api/src/modules/matching/matching.service.ts",
+      "name": "MatchingService",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/matching/osrm-unavailable.exception.ts",
+      "kind": "file",
+      "path": "apps/api/src/modules/matching/osrm-unavailable.exception.ts",
+      "name": "osrm-unavailable.exception.ts",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/matching/pool-expire.processor.ts",
+      "kind": "file",
+      "path": "apps/api/src/modules/matching/pool-expire.processor.ts",
+      "name": "pool-expire.processor.ts",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/matching/pool-expire.processor.ts#PoolExpireProcessor",
+      "kind": "symbol",
+      "path": "apps/api/src/modules/matching/pool-expire.processor.ts",
+      "name": "PoolExpireProcessor",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/matching/pool-lifecycle.service.ts",
+      "kind": "file",
+      "path": "apps/api/src/modules/matching/pool-lifecycle.service.ts",
+      "name": "pool-lifecycle.service.ts",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/matching/pool-lifecycle.service.ts#PoolLifecycleService",
+      "kind": "symbol",
+      "path": "apps/api/src/modules/matching/pool-lifecycle.service.ts",
+      "name": "PoolLifecycleService",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/matching/ride-stop.repository.ts",
+      "kind": "file",
+      "path": "apps/api/src/modules/matching/ride-stop.repository.ts",
+      "name": "ride-stop.repository.ts",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/matching/ride-stop.repository.ts#RideStopRepository",
+      "kind": "symbol",
+      "path": "apps/api/src/modules/matching/ride-stop.repository.ts",
+      "name": "RideStopRepository",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/matching/route-similarity.service.ts",
+      "kind": "file",
+      "path": "apps/api/src/modules/matching/route-similarity.service.ts",
+      "name": "route-similarity.service.ts",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/matching/route-similarity.service.ts#RouteSimilarityService",
+      "kind": "symbol",
+      "path": "apps/api/src/modules/matching/route-similarity.service.ts",
+      "name": "RouteSimilarityService",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/matching/shared-ride.repository.ts",
+      "kind": "file",
+      "path": "apps/api/src/modules/matching/shared-ride.repository.ts",
+      "name": "shared-ride.repository.ts",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/matching/shared-ride.repository.ts#SharedRideRepository",
+      "kind": "symbol",
+      "path": "apps/api/src/modules/matching/shared-ride.repository.ts",
+      "name": "SharedRideRepository",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/pricing/money.ts",
+      "kind": "file",
+      "path": "apps/api/src/modules/pricing/money.ts",
+      "name": "money.ts",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/pricing/pricing.module.ts",
+      "kind": "file",
+      "path": "apps/api/src/modules/pricing/pricing.module.ts",
+      "name": "pricing.module.ts",
+      "app": "api"
+    },
+    {
+      "meta": {
+        "imports": [
+          "HttpModule",
+          "ConfigModule"
+        ],
+        "providers": [
+          "PricingService"
+        ],
+        "controllers": [],
+        "exports": [
+          "PricingService"
+        ]
+      },
+      "id": "apps/api/src/modules/pricing/pricing.module.ts#PricingModule",
+      "kind": "module",
+      "path": "apps/api/src/modules/pricing/pricing.module.ts",
+      "name": "PricingModule",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/pricing/pricing.service.ts",
+      "kind": "file",
+      "path": "apps/api/src/modules/pricing/pricing.service.ts",
+      "name": "pricing.service.ts",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/pricing/pricing.service.ts#PricingService",
+      "kind": "symbol",
+      "path": "apps/api/src/modules/pricing/pricing.service.ts",
+      "name": "PricingService",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/pricing/pricing.types.ts",
+      "kind": "file",
+      "path": "apps/api/src/modules/pricing/pricing.types.ts",
+      "name": "pricing.types.ts",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/rating/dto/create-rating.dto.ts",
+      "kind": "file",
+      "path": "apps/api/src/modules/rating/dto/create-rating.dto.ts",
+      "name": "create-rating.dto.ts",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/rating/rating.controller.ts",
+      "kind": "file",
+      "path": "apps/api/src/modules/rating/rating.controller.ts",
+      "name": "rating.controller.ts",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/rating/rating.controller.ts#RatingController",
+      "kind": "symbol",
+      "path": "apps/api/src/modules/rating/rating.controller.ts",
+      "name": "RatingController",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/rating/rating.module.ts",
+      "kind": "file",
+      "path": "apps/api/src/modules/rating/rating.module.ts",
+      "name": "rating.module.ts",
+      "app": "api"
+    },
+    {
+      "meta": {
+        "imports": [
+          "AuthModule",
+          "RidesModule"
+        ],
+        "providers": [
+          "RatingService",
+          "RatingRepository"
+        ],
+        "controllers": [
+          "RatingController"
+        ],
+        "exports": []
+      },
+      "id": "apps/api/src/modules/rating/rating.module.ts#RatingModule",
+      "kind": "module",
+      "path": "apps/api/src/modules/rating/rating.module.ts",
+      "name": "RatingModule",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/rating/rating.repository.ts",
+      "kind": "file",
+      "path": "apps/api/src/modules/rating/rating.repository.ts",
+      "name": "rating.repository.ts",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/rating/rating.repository.ts#RatingRepository",
+      "kind": "symbol",
+      "path": "apps/api/src/modules/rating/rating.repository.ts",
+      "name": "RatingRepository",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/rating/rating.service.ts",
+      "kind": "file",
+      "path": "apps/api/src/modules/rating/rating.service.ts",
+      "name": "rating.service.ts",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/rating/rating.service.ts#RatingService",
+      "kind": "symbol",
+      "path": "apps/api/src/modules/rating/rating.service.ts",
+      "name": "RatingService",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/realtime/realtime.bus.ts",
+      "kind": "file",
+      "path": "apps/api/src/modules/realtime/realtime.bus.ts",
+      "name": "realtime.bus.ts",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/realtime/realtime.bus.ts#RealtimeBus",
+      "kind": "symbol",
+      "path": "apps/api/src/modules/realtime/realtime.bus.ts",
+      "name": "RealtimeBus",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/realtime/realtime.gateway.ts",
+      "kind": "file",
+      "path": "apps/api/src/modules/realtime/realtime.gateway.ts",
+      "name": "realtime.gateway.ts",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/realtime/realtime.gateway.ts#RealtimeGateway",
+      "kind": "symbol",
+      "path": "apps/api/src/modules/realtime/realtime.gateway.ts",
+      "name": "RealtimeGateway",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/realtime/realtime.module.ts",
+      "kind": "file",
+      "path": "apps/api/src/modules/realtime/realtime.module.ts",
+      "name": "realtime.module.ts",
+      "app": "api"
+    },
+    {
+      "meta": {
+        "imports": [
+          "AuthModule"
+        ],
+        "providers": [
+          "RealtimeGateway",
+          "RealtimeBus"
+        ],
+        "controllers": [],
+        "exports": [
+          "RealtimeBus"
+        ]
+      },
+      "id": "apps/api/src/modules/realtime/realtime.module.ts#RealtimeModule",
+      "kind": "module",
+      "path": "apps/api/src/modules/realtime/realtime.module.ts",
+      "name": "RealtimeModule",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/ride-lifecycle/ride-lifecycle.module.ts",
+      "kind": "file",
+      "path": "apps/api/src/modules/ride-lifecycle/ride-lifecycle.module.ts",
+      "name": "ride-lifecycle.module.ts",
+      "app": "api"
+    },
+    {
+      "meta": {
+        "imports": [
+          "MatchingModule",
+          "RealtimeModule"
+        ],
+        "providers": [
+          "RideLifecycleService"
+        ],
+        "controllers": [],
+        "exports": [
+          "RideLifecycleService"
+        ]
+      },
+      "id": "apps/api/src/modules/ride-lifecycle/ride-lifecycle.module.ts#RideLifecycleModule",
+      "kind": "module",
+      "path": "apps/api/src/modules/ride-lifecycle/ride-lifecycle.module.ts",
+      "name": "RideLifecycleModule",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/ride-lifecycle/ride-lifecycle.service.ts",
+      "kind": "file",
+      "path": "apps/api/src/modules/ride-lifecycle/ride-lifecycle.service.ts",
+      "name": "ride-lifecycle.service.ts",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/ride-lifecycle/ride-lifecycle.service.ts#RideLifecycleService",
+      "kind": "symbol",
+      "path": "apps/api/src/modules/ride-lifecycle/ride-lifecycle.service.ts",
+      "name": "RideLifecycleService",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/rides/dto/cancel-ride.dto.ts",
+      "kind": "file",
+      "path": "apps/api/src/modules/rides/dto/cancel-ride.dto.ts",
+      "name": "cancel-ride.dto.ts",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/rides/dto/create-ride.dto.ts",
+      "kind": "file",
+      "path": "apps/api/src/modules/rides/dto/create-ride.dto.ts",
+      "name": "create-ride.dto.ts",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/rides/dto/quote-ride.dto.ts",
+      "kind": "file",
+      "path": "apps/api/src/modules/rides/dto/quote-ride.dto.ts",
+      "name": "quote-ride.dto.ts",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/rides/dto/transition-ride.dto.ts",
+      "kind": "file",
+      "path": "apps/api/src/modules/rides/dto/transition-ride.dto.ts",
+      "name": "transition-ride.dto.ts",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/rides/quote-token.service.ts",
+      "kind": "file",
+      "path": "apps/api/src/modules/rides/quote-token.service.ts",
+      "name": "quote-token.service.ts",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/rides/quote-token.service.ts#QuoteTokenService",
+      "kind": "symbol",
+      "path": "apps/api/src/modules/rides/quote-token.service.ts",
+      "name": "QuoteTokenService",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/rides/ride-state-machine.service.ts",
+      "kind": "file",
+      "path": "apps/api/src/modules/rides/ride-state-machine.service.ts",
+      "name": "ride-state-machine.service.ts",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/rides/ride-state-machine.service.ts#RideStateMachine",
+      "kind": "symbol",
+      "path": "apps/api/src/modules/rides/ride-state-machine.service.ts",
+      "name": "RideStateMachine",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/rides/rides-realtime.listener.ts",
+      "kind": "file",
+      "path": "apps/api/src/modules/rides/rides-realtime.listener.ts",
+      "name": "rides-realtime.listener.ts",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/rides/rides-realtime.listener.ts#RidesRealtimeListener",
+      "kind": "symbol",
+      "path": "apps/api/src/modules/rides/rides-realtime.listener.ts",
+      "name": "RidesRealtimeListener",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/rides/rides.controller.ts",
+      "kind": "file",
+      "path": "apps/api/src/modules/rides/rides.controller.ts",
+      "name": "rides.controller.ts",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/rides/rides.controller.ts#RidesController",
+      "kind": "symbol",
+      "path": "apps/api/src/modules/rides/rides.controller.ts",
+      "name": "RidesController",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/rides/rides.module.ts",
+      "kind": "file",
+      "path": "apps/api/src/modules/rides/rides.module.ts",
+      "name": "rides.module.ts",
+      "app": "api"
+    },
+    {
+      "meta": {
+        "imports": [
+          "AuthModule",
+          "MatchingModule",
+          "PricingModule",
+          "RealtimeModule"
+        ],
+        "providers": [
+          "QuoteTokenService",
+          "RidesRepository",
+          "RideStateMachine",
+          "RidesRealtimeListener"
+        ],
+        "controllers": [
+          "RidesController"
+        ],
+        "exports": [
+          "RidesRepository"
+        ]
+      },
+      "id": "apps/api/src/modules/rides/rides.module.ts#RidesModule",
+      "kind": "module",
+      "path": "apps/api/src/modules/rides/rides.module.ts",
+      "name": "RidesModule",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/rides/rides.repository.ts",
+      "kind": "file",
+      "path": "apps/api/src/modules/rides/rides.repository.ts",
+      "name": "rides.repository.ts",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/rides/rides.repository.ts#RidesRepository",
+      "kind": "symbol",
+      "path": "apps/api/src/modules/rides/rides.repository.ts",
+      "name": "RidesRepository",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/vehicles/dto/create-vehicle.dto.ts",
+      "kind": "file",
+      "path": "apps/api/src/modules/vehicles/dto/create-vehicle.dto.ts",
+      "name": "create-vehicle.dto.ts",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/vehicles/dto/update-vehicle.dto.ts",
+      "kind": "file",
+      "path": "apps/api/src/modules/vehicles/dto/update-vehicle.dto.ts",
+      "name": "update-vehicle.dto.ts",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/vehicles/vehicles.controller.ts",
+      "kind": "file",
+      "path": "apps/api/src/modules/vehicles/vehicles.controller.ts",
+      "name": "vehicles.controller.ts",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/vehicles/vehicles.controller.ts#VehiclesController",
+      "kind": "symbol",
+      "path": "apps/api/src/modules/vehicles/vehicles.controller.ts",
+      "name": "VehiclesController",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/vehicles/vehicles.module.ts",
+      "kind": "file",
+      "path": "apps/api/src/modules/vehicles/vehicles.module.ts",
+      "name": "vehicles.module.ts",
+      "app": "api"
+    },
+    {
+      "meta": {
+        "imports": [
+          "AuthModule"
+        ],
+        "providers": [
+          "VehiclesService"
+        ],
+        "controllers": [
+          "VehiclesController"
+        ],
+        "exports": []
+      },
+      "id": "apps/api/src/modules/vehicles/vehicles.module.ts#VehiclesModule",
+      "kind": "module",
+      "path": "apps/api/src/modules/vehicles/vehicles.module.ts",
+      "name": "VehiclesModule",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/vehicles/vehicles.service.ts",
+      "kind": "file",
+      "path": "apps/api/src/modules/vehicles/vehicles.service.ts",
+      "name": "vehicles.service.ts",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/vehicles/vehicles.service.ts#VehiclesService",
+      "kind": "symbol",
+      "path": "apps/api/src/modules/vehicles/vehicles.service.ts",
+      "name": "VehiclesService",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/driver-app/lib/app.dart",
+      "kind": "file",
+      "path": "apps/driver-app/lib/app.dart",
+      "name": "app.dart",
+      "app": "driver-app"
+    },
+    {
+      "meta": {},
+      "id": "apps/driver-app/lib/core/api/api_client.dart",
+      "kind": "file",
+      "path": "apps/driver-app/lib/core/api/api_client.dart",
+      "name": "api_client.dart",
+      "app": "driver-app"
+    },
+    {
+      "meta": {},
+      "id": "apps/driver-app/lib/core/auth/auth_notifier.dart",
+      "kind": "file",
+      "path": "apps/driver-app/lib/core/auth/auth_notifier.dart",
+      "name": "auth_notifier.dart",
+      "app": "driver-app"
+    },
+    {
+      "meta": {},
+      "id": "apps/driver-app/lib/core/auth/auth_state.dart",
+      "kind": "file",
+      "path": "apps/driver-app/lib/core/auth/auth_state.dart",
+      "name": "auth_state.dart",
+      "app": "driver-app"
+    },
+    {
+      "meta": {},
+      "id": "apps/driver-app/lib/core/auth/token_store.dart",
+      "kind": "file",
+      "path": "apps/driver-app/lib/core/auth/token_store.dart",
+      "name": "token_store.dart",
+      "app": "driver-app"
+    },
+    {
+      "meta": {},
+      "id": "apps/driver-app/lib/core/driver/driver_state_notifier.dart",
+      "kind": "file",
+      "path": "apps/driver-app/lib/core/driver/driver_state_notifier.dart",
+      "name": "driver_state_notifier.dart",
+      "app": "driver-app"
+    },
+    {
+      "meta": {},
+      "id": "apps/driver-app/lib/core/driver/driver_state.dart",
+      "kind": "file",
+      "path": "apps/driver-app/lib/core/driver/driver_state.dart",
+      "name": "driver_state.dart",
+      "app": "driver-app"
+    },
+    {
+      "meta": {},
+      "id": "apps/driver-app/lib/core/location/foreground_service.dart",
+      "kind": "file",
+      "path": "apps/driver-app/lib/core/location/foreground_service.dart",
+      "name": "foreground_service.dart",
+      "app": "driver-app"
+    },
+    {
+      "meta": {},
+      "id": "apps/driver-app/lib/core/realtime/location_bridge.dart",
+      "kind": "file",
+      "path": "apps/driver-app/lib/core/realtime/location_bridge.dart",
+      "name": "location_bridge.dart",
+      "app": "driver-app"
+    },
+    {
+      "meta": {},
+      "id": "apps/driver-app/lib/core/realtime/realtime_socket.dart",
+      "kind": "file",
+      "path": "apps/driver-app/lib/core/realtime/realtime_socket.dart",
+      "name": "realtime_socket.dart",
+      "app": "driver-app"
+    },
+    {
+      "meta": {},
+      "id": "apps/driver-app/lib/di/providers.dart",
+      "kind": "file",
+      "path": "apps/driver-app/lib/di/providers.dart",
+      "name": "providers.dart",
+      "app": "driver-app"
+    },
+    {
+      "meta": {},
+      "id": "apps/driver-app/lib/di/providers.dart#_exchangeDioProvider",
+      "kind": "symbol",
+      "path": "apps/driver-app/lib/di/providers.dart",
+      "name": "_exchangeDioProvider",
+      "app": "driver-app"
+    },
+    {
+      "meta": {},
+      "id": "apps/driver-app/lib/di/providers.dart#_foregroundServiceProvider",
+      "kind": "symbol",
+      "path": "apps/driver-app/lib/di/providers.dart",
+      "name": "_foregroundServiceProvider",
+      "app": "driver-app"
+    },
+    {
+      "meta": {},
+      "id": "apps/driver-app/lib/di/providers.dart#apiClientProvider",
+      "kind": "symbol",
+      "path": "apps/driver-app/lib/di/providers.dart",
+      "name": "apiClientProvider",
+      "app": "driver-app"
+    },
+    {
+      "meta": {},
+      "id": "apps/driver-app/lib/di/providers.dart#authProvider",
+      "kind": "symbol",
+      "path": "apps/driver-app/lib/di/providers.dart",
+      "name": "authProvider",
+      "app": "driver-app"
+    },
+    {
+      "meta": {},
+      "id": "apps/driver-app/lib/di/providers.dart#driverStateProvider",
+      "kind": "symbol",
+      "path": "apps/driver-app/lib/di/providers.dart",
+      "name": "driverStateProvider",
+      "app": "driver-app"
+    },
+    {
+      "meta": {},
+      "id": "apps/driver-app/lib/di/providers.dart#firebaseAuthProvider",
+      "kind": "symbol",
+      "path": "apps/driver-app/lib/di/providers.dart",
+      "name": "firebaseAuthProvider",
+      "app": "driver-app"
+    },
+    {
+      "meta": {},
+      "id": "apps/driver-app/lib/di/providers.dart#locationStreamProvider",
+      "kind": "symbol",
+      "path": "apps/driver-app/lib/di/providers.dart",
+      "name": "locationStreamProvider",
+      "app": "driver-app"
+    },
+    {
+      "meta": {},
+      "id": "apps/driver-app/lib/di/providers.dart#realtimeSocketProvider",
+      "kind": "symbol",
+      "path": "apps/driver-app/lib/di/providers.dart",
+      "name": "realtimeSocketProvider",
+      "app": "driver-app"
+    },
+    {
+      "meta": {},
+      "id": "apps/driver-app/lib/di/providers.dart#tokenStoreProvider",
+      "kind": "symbol",
+      "path": "apps/driver-app/lib/di/providers.dart",
+      "name": "tokenStoreProvider",
+      "app": "driver-app"
+    },
+    {
+      "meta": {},
+      "id": "apps/driver-app/lib/di/providers.dart#vehiclesProvider",
+      "kind": "symbol",
+      "path": "apps/driver-app/lib/di/providers.dart",
+      "name": "vehiclesProvider",
+      "app": "driver-app"
+    },
+    {
+      "meta": {},
+      "id": "apps/driver-app/lib/features/auth/sign_in_screen.dart",
+      "kind": "file",
+      "path": "apps/driver-app/lib/features/auth/sign_in_screen.dart",
+      "name": "sign_in_screen.dart",
+      "app": "driver-app"
+    },
+    {
+      "meta": {},
+      "id": "apps/driver-app/lib/features/earnings/earnings_screen.dart",
+      "kind": "file",
+      "path": "apps/driver-app/lib/features/earnings/earnings_screen.dart",
+      "name": "earnings_screen.dart",
+      "app": "driver-app"
+    },
+    {
+      "meta": {},
+      "id": "apps/driver-app/lib/features/home/home_screen.dart",
+      "kind": "file",
+      "path": "apps/driver-app/lib/features/home/home_screen.dart",
+      "name": "home_screen.dart",
+      "app": "driver-app"
+    },
+    {
+      "meta": {},
+      "id": "apps/driver-app/lib/features/home/oem_onboarding_sheet.dart",
+      "kind": "file",
+      "path": "apps/driver-app/lib/features/home/oem_onboarding_sheet.dart",
+      "name": "oem_onboarding_sheet.dart",
+      "app": "driver-app"
+    },
+    {
+      "meta": {},
+      "id": "apps/driver-app/lib/features/home/service_kill_banner.dart",
+      "kind": "file",
+      "path": "apps/driver-app/lib/features/home/service_kill_banner.dart",
+      "name": "service_kill_banner.dart",
+      "app": "driver-app"
+    },
+    {
+      "meta": {},
+      "id": "apps/driver-app/lib/features/offer/offer_controller.dart",
+      "kind": "file",
+      "path": "apps/driver-app/lib/features/offer/offer_controller.dart",
+      "name": "offer_controller.dart",
+      "app": "driver-app"
+    },
+    {
+      "meta": {},
+      "id": "apps/driver-app/lib/features/offer/offer_controller.dart#offerControllerProvider",
+      "kind": "symbol",
+      "path": "apps/driver-app/lib/features/offer/offer_controller.dart",
+      "name": "offerControllerProvider",
+      "app": "driver-app"
+    },
+    {
+      "meta": {},
+      "id": "apps/driver-app/lib/features/offer/offer_models.dart",
+      "kind": "file",
+      "path": "apps/driver-app/lib/features/offer/offer_models.dart",
+      "name": "offer_models.dart",
+      "app": "driver-app"
+    },
+    {
+      "meta": {},
+      "id": "apps/driver-app/lib/features/offer/offer_provider.dart",
+      "kind": "file",
+      "path": "apps/driver-app/lib/features/offer/offer_provider.dart",
+      "name": "offer_provider.dart",
+      "app": "driver-app"
+    },
+    {
+      "meta": {},
+      "id": "apps/driver-app/lib/features/offer/offer_provider.dart#offerProvider",
+      "kind": "symbol",
+      "path": "apps/driver-app/lib/features/offer/offer_provider.dart",
+      "name": "offerProvider",
+      "app": "driver-app"
+    },
+    {
+      "meta": {},
+      "id": "apps/driver-app/lib/features/offer/offer_provider.dart#offerResponseSenderProvider",
+      "kind": "symbol",
+      "path": "apps/driver-app/lib/features/offer/offer_provider.dart",
+      "name": "offerResponseSenderProvider",
+      "app": "driver-app"
+    },
+    {
+      "meta": {},
+      "id": "apps/driver-app/lib/features/offer/offer_screen.dart",
+      "kind": "file",
+      "path": "apps/driver-app/lib/features/offer/offer_screen.dart",
+      "name": "offer_screen.dart",
+      "app": "driver-app"
+    },
+    {
+      "meta": {},
+      "id": "apps/driver-app/lib/features/profile/models/vehicle.dart",
+      "kind": "file",
+      "path": "apps/driver-app/lib/features/profile/models/vehicle.dart",
+      "name": "vehicle.dart",
+      "app": "driver-app"
+    },
+    {
+      "meta": {},
+      "id": "apps/driver-app/lib/features/profile/models/vehicle.freezed.dart",
+      "kind": "file",
+      "path": "apps/driver-app/lib/features/profile/models/vehicle.freezed.dart",
+      "name": "vehicle.freezed.dart",
+      "app": "driver-app"
+    },
+    {
+      "meta": {},
+      "id": "apps/driver-app/lib/features/profile/models/vehicle.g.dart",
+      "kind": "file",
+      "path": "apps/driver-app/lib/features/profile/models/vehicle.g.dart",
+      "name": "vehicle.g.dart",
+      "app": "driver-app"
+    },
+    {
+      "meta": {},
+      "id": "apps/driver-app/lib/features/profile/profile_screen.dart",
+      "kind": "file",
+      "path": "apps/driver-app/lib/features/profile/profile_screen.dart",
+      "name": "profile_screen.dart",
+      "app": "driver-app"
+    },
+    {
+      "meta": {},
+      "id": "apps/driver-app/lib/features/profile/vehicle_form_screen.dart",
+      "kind": "file",
+      "path": "apps/driver-app/lib/features/profile/vehicle_form_screen.dart",
+      "name": "vehicle_form_screen.dart",
+      "app": "driver-app"
+    },
+    {
+      "meta": {},
+      "id": "apps/driver-app/lib/features/rating/rating_provider.dart",
+      "kind": "file",
+      "path": "apps/driver-app/lib/features/rating/rating_provider.dart",
+      "name": "rating_provider.dart",
+      "app": "driver-app"
+    },
+    {
+      "meta": {},
+      "id": "apps/driver-app/lib/features/rating/rating_provider.dart#ratingProvider",
+      "kind": "symbol",
+      "path": "apps/driver-app/lib/features/rating/rating_provider.dart",
+      "name": "ratingProvider",
+      "app": "driver-app"
+    },
+    {
+      "meta": {},
+      "id": "apps/driver-app/lib/features/rating/rating_provider.dart#ratingServiceProvider",
+      "kind": "symbol",
+      "path": "apps/driver-app/lib/features/rating/rating_provider.dart",
+      "name": "ratingServiceProvider",
+      "app": "driver-app"
+    },
+    {
+      "meta": {},
+      "id": "apps/driver-app/lib/features/rating/rating_screen.dart",
+      "kind": "file",
+      "path": "apps/driver-app/lib/features/rating/rating_screen.dart",
+      "name": "rating_screen.dart",
+      "app": "driver-app"
+    },
+    {
+      "meta": {},
+      "id": "apps/driver-app/lib/features/ride/ride_models.dart",
+      "kind": "file",
+      "path": "apps/driver-app/lib/features/ride/ride_models.dart",
+      "name": "ride_models.dart",
+      "app": "driver-app"
+    },
+    {
+      "meta": {},
+      "id": "apps/driver-app/lib/features/ride/ride_provider.dart",
+      "kind": "file",
+      "path": "apps/driver-app/lib/features/ride/ride_provider.dart",
+      "name": "ride_provider.dart",
+      "app": "driver-app"
+    },
+    {
+      "meta": {},
+      "id": "apps/driver-app/lib/features/ride/ride_provider.dart#mapsLauncherProvider",
+      "kind": "symbol",
+      "path": "apps/driver-app/lib/features/ride/ride_provider.dart",
+      "name": "mapsLauncherProvider",
+      "app": "driver-app"
+    },
+    {
+      "meta": {},
+      "id": "apps/driver-app/lib/features/ride/ride_provider.dart#rideProvider",
+      "kind": "symbol",
+      "path": "apps/driver-app/lib/features/ride/ride_provider.dart",
+      "name": "rideProvider",
+      "app": "driver-app"
+    },
+    {
+      "meta": {},
+      "id": "apps/driver-app/lib/features/ride/ride_provider.dart#rideServiceProvider",
+      "kind": "symbol",
+      "path": "apps/driver-app/lib/features/ride/ride_provider.dart",
+      "name": "rideServiceProvider",
+      "app": "driver-app"
+    },
+    {
+      "meta": {},
+      "id": "apps/driver-app/lib/features/ride/ride_screen.dart",
+      "kind": "file",
+      "path": "apps/driver-app/lib/features/ride/ride_screen.dart",
+      "name": "ride_screen.dart",
+      "app": "driver-app"
+    },
+    {
+      "meta": {},
+      "id": "apps/driver-app/lib/features/shared_ride/shared_ride_controller.dart",
+      "kind": "file",
+      "path": "apps/driver-app/lib/features/shared_ride/shared_ride_controller.dart",
+      "name": "shared_ride_controller.dart",
+      "app": "driver-app"
+    },
+    {
+      "meta": {},
+      "id": "apps/driver-app/lib/features/shared_ride/shared_ride_controller.dart#sharedRideControllerProvider",
+      "kind": "symbol",
+      "path": "apps/driver-app/lib/features/shared_ride/shared_ride_controller.dart",
+      "name": "sharedRideControllerProvider",
+      "app": "driver-app"
+    },
+    {
+      "meta": {},
+      "id": "apps/driver-app/lib/features/shared_ride/shared_ride_models.dart",
+      "kind": "file",
+      "path": "apps/driver-app/lib/features/shared_ride/shared_ride_models.dart",
+      "name": "shared_ride_models.dart",
+      "app": "driver-app"
+    },
+    {
+      "meta": {},
+      "id": "apps/driver-app/lib/features/shared_ride/shared_ride_provider.dart",
+      "kind": "file",
+      "path": "apps/driver-app/lib/features/shared_ride/shared_ride_provider.dart",
+      "name": "shared_ride_provider.dart",
+      "app": "driver-app"
+    },
+    {
+      "meta": {},
+      "id": "apps/driver-app/lib/features/shared_ride/shared_ride_provider.dart#sharedRideProvider",
+      "kind": "symbol",
+      "path": "apps/driver-app/lib/features/shared_ride/shared_ride_provider.dart",
+      "name": "sharedRideProvider",
+      "app": "driver-app"
+    },
+    {
+      "meta": {},
+      "id": "apps/driver-app/lib/features/shared_ride/shared_ride_provider.dart#sharedRideSenderProvider",
+      "kind": "symbol",
+      "path": "apps/driver-app/lib/features/shared_ride/shared_ride_provider.dart",
+      "name": "sharedRideSenderProvider",
+      "app": "driver-app"
+    },
+    {
+      "meta": {},
+      "id": "apps/driver-app/lib/features/shared_ride/shared_ride_screen.dart",
+      "kind": "file",
+      "path": "apps/driver-app/lib/features/shared_ride/shared_ride_screen.dart",
+      "name": "shared_ride_screen.dart",
+      "app": "driver-app"
+    },
+    {
+      "meta": {},
+      "id": "apps/driver-app/lib/features/shared_ride/stop_list_tile.dart",
+      "kind": "file",
+      "path": "apps/driver-app/lib/features/shared_ride/stop_list_tile.dart",
+      "name": "stop_list_tile.dart",
+      "app": "driver-app"
+    },
+    {
+      "meta": {},
+      "id": "apps/driver-app/lib/main.dart",
+      "kind": "file",
+      "path": "apps/driver-app/lib/main.dart",
+      "name": "main.dart",
+      "app": "driver-app"
+    },
+    {
+      "meta": {},
+      "id": "apps/driver-app/lib/routing/app_router.dart",
+      "kind": "file",
+      "path": "apps/driver-app/lib/routing/app_router.dart",
+      "name": "app_router.dart",
+      "app": "driver-app"
+    },
+    {
+      "meta": {},
+      "id": "apps/driver-app/lib/routing/app_router.dart#routerProvider",
+      "kind": "symbol",
+      "path": "apps/driver-app/lib/routing/app_router.dart",
+      "name": "routerProvider",
+      "app": "driver-app"
+    },
+    {
+      "meta": {},
+      "id": "apps/web/src/app/book/address-search.tsx",
+      "kind": "file",
+      "path": "apps/web/src/app/book/address-search.tsx",
+      "name": "address-search.tsx",
+      "app": "web"
+    },
+    {
+      "meta": {},
+      "id": "apps/web/src/app/book/book-client.tsx",
+      "kind": "file",
+      "path": "apps/web/src/app/book/book-client.tsx",
+      "name": "book-client.tsx",
+      "app": "web"
+    },
+    {
+      "meta": {},
+      "id": "apps/web/src/app/book/map-picker.tsx",
+      "kind": "file",
+      "path": "apps/web/src/app/book/map-picker.tsx",
+      "name": "map-picker.tsx",
+      "app": "web"
+    },
+    {
+      "meta": {},
+      "id": "apps/web/src/app/book/page.tsx",
+      "kind": "file",
+      "path": "apps/web/src/app/book/page.tsx",
+      "name": "page.tsx",
+      "app": "web"
+    },
+    {
+      "meta": {},
+      "id": "apps/web/src/app/book/pool-badge.tsx",
+      "kind": "file",
+      "path": "apps/web/src/app/book/pool-badge.tsx",
+      "name": "pool-badge.tsx",
+      "app": "web"
+    },
+    {
+      "meta": {},
+      "id": "apps/web/src/app/book/ride-tracking-panel.tsx",
+      "kind": "file",
+      "path": "apps/web/src/app/book/ride-tracking-panel.tsx",
+      "name": "ride-tracking-panel.tsx",
+      "app": "web"
+    },
+    {
+      "meta": {},
+      "id": "apps/web/src/app/book/ride-type-toggle.tsx",
+      "kind": "file",
+      "path": "apps/web/src/app/book/ride-type-toggle.tsx",
+      "name": "ride-type-toggle.tsx",
+      "app": "web"
+    },
+    {
+      "meta": {},
+      "id": "apps/web/src/app/book/solo-fallback-banner.tsx",
+      "kind": "file",
+      "path": "apps/web/src/app/book/solo-fallback-banner.tsx",
+      "name": "solo-fallback-banner.tsx",
+      "app": "web"
+    },
+    {
+      "meta": {},
+      "id": "apps/web/src/app/layout.tsx",
+      "kind": "file",
+      "path": "apps/web/src/app/layout.tsx",
+      "name": "layout.tsx",
+      "app": "web"
+    },
+    {
+      "meta": {},
+      "id": "apps/web/src/app/page.tsx",
+      "kind": "file",
+      "path": "apps/web/src/app/page.tsx",
+      "name": "page.tsx",
+      "app": "web"
+    },
+    {
+      "meta": {},
+      "id": "apps/web/src/app/signin/page.tsx",
+      "kind": "file",
+      "path": "apps/web/src/app/signin/page.tsx",
+      "name": "page.tsx",
+      "app": "web"
+    },
+    {
+      "meta": {},
+      "id": "apps/web/src/app/signin/sign-in-client.tsx",
+      "kind": "file",
+      "path": "apps/web/src/app/signin/sign-in-client.tsx",
+      "name": "sign-in-client.tsx",
+      "app": "web"
+    },
+    {
+      "meta": {},
+      "id": "apps/web/src/lib/auth/firebase.ts",
+      "kind": "file",
+      "path": "apps/web/src/lib/auth/firebase.ts",
+      "name": "firebase.ts",
+      "app": "web"
+    },
+    {
+      "meta": {},
+      "id": "apps/web/src/lib/auth/store.ts",
+      "kind": "file",
+      "path": "apps/web/src/lib/auth/store.ts",
+      "name": "store.ts",
+      "app": "web"
+    },
+    {
+      "meta": {},
+      "id": "apps/web/src/lib/auth/with-auth.tsx",
+      "kind": "file",
+      "path": "apps/web/src/lib/auth/with-auth.tsx",
+      "name": "with-auth.tsx",
+      "app": "web"
+    },
+    {
+      "meta": {},
+      "id": "apps/web/src/lib/booking/api.ts",
+      "kind": "file",
+      "path": "apps/web/src/lib/booking/api.ts",
+      "name": "api.ts",
+      "app": "web"
+    },
+    {
+      "meta": {},
+      "id": "apps/web/src/lib/booking/store.ts",
+      "kind": "file",
+      "path": "apps/web/src/lib/booking/store.ts",
+      "name": "store.ts",
+      "app": "web"
+    },
+    {
+      "meta": {},
+      "id": "apps/web/src/lib/booking/types.ts",
+      "kind": "file",
+      "path": "apps/web/src/lib/booking/types.ts",
+      "name": "types.ts",
+      "app": "web"
+    },
+    {
+      "meta": {},
+      "id": "apps/web/src/lib/booking/ws.ts",
+      "kind": "file",
+      "path": "apps/web/src/lib/booking/ws.ts",
+      "name": "ws.ts",
+      "app": "web"
+    },
+    {
+      "meta": {},
+      "id": "apps/web/src/lib/geo/nominatim.ts",
+      "kind": "file",
+      "path": "apps/web/src/lib/geo/nominatim.ts",
+      "name": "nominatim.ts",
+      "app": "web"
+    },
+    {
+      "meta": {},
+      "id": "apps/web/src/test-setup.ts",
+      "kind": "file",
+      "path": "apps/web/src/test-setup.ts",
+      "name": "test-setup.ts",
+      "app": "web"
+    },
+    {
+      "meta": {},
+      "id": "packages/api-client/src/index.ts",
+      "kind": "file",
+      "path": "packages/api-client/src/index.ts",
+      "name": "index.ts",
+      "app": "api-client"
+    },
+    {
+      "meta": {},
+      "id": "packages/shared/src/health.ts",
+      "kind": "file",
+      "path": "packages/shared/src/health.ts",
+      "name": "health.ts",
+      "app": "shared"
+    },
+    {
+      "meta": {},
+      "id": "packages/shared/src/index.ts",
+      "kind": "file",
+      "path": "packages/shared/src/index.ts",
+      "name": "index.ts",
+      "app": "shared"
+    },
+    {
+      "meta": {},
+      "id": "packages/test-fixtures/src/index.ts",
+      "kind": "file",
+      "path": "packages/test-fixtures/src/index.ts",
+      "name": "index.ts",
+      "app": "test-fixtures"
+    },
+    {
+      "meta": {},
+      "id": "packages/test-fixtures/src/migrations.ts",
+      "kind": "file",
+      "path": "packages/test-fixtures/src/migrations.ts",
+      "name": "migrations.ts",
+      "app": "test-fixtures"
+    },
+    {
+      "meta": {},
+      "id": "packages/test-fixtures/src/seeds.ts",
+      "kind": "file",
+      "path": "packages/test-fixtures/src/seeds.ts",
+      "name": "seeds.ts",
+      "app": "test-fixtures"
+    },
+    {
+      "meta": {
+        "method": "GET",
+        "path": "/",
+        "controller": "HealthController",
+        "handler": "rootReady"
+      },
+      "id": "route:GET /",
+      "kind": "route",
+      "path": "apps/api/src/modules/health/health.controller.ts",
+      "name": "GET /",
+      "app": "api"
+    },
+    {
+      "meta": {
+        "method": "GET",
+        "path": "/metrics",
+        "controller": "HealthController",
+        "handler": "metrics"
+      },
+      "id": "route:GET /metrics",
+      "kind": "route",
+      "path": "apps/api/src/modules/health/health.controller.ts",
+      "name": "GET /metrics",
+      "app": "api"
+    },
+    {
+      "meta": {
+        "method": "GET",
+        "path": "/v1/health/live",
+        "controller": "HealthController",
+        "handler": "live"
+      },
+      "id": "route:GET /v1/health/live",
+      "kind": "route",
+      "path": "apps/api/src/modules/health/health.controller.ts",
+      "name": "GET /v1/health/live",
+      "app": "api"
+    },
+    {
+      "meta": {
+        "method": "GET",
+        "path": "/v1/health/ready",
+        "controller": "HealthController",
+        "handler": "ready"
+      },
+      "id": "route:GET /v1/health/ready",
+      "kind": "route",
+      "path": "apps/api/src/modules/health/health.controller.ts",
+      "name": "GET /v1/health/ready",
+      "app": "api"
+    },
+    {
+      "meta": {
+        "method": "GET",
+        "path": "/v1/rides/:id",
+        "controller": "RidesController",
+        "handler": "getRide"
+      },
+      "id": "route:GET /v1/rides/:id",
+      "kind": "route",
+      "path": "apps/api/src/modules/rides/rides.controller.ts",
+      "name": "GET /v1/rides/:id",
+      "app": "api"
+    },
+    {
+      "meta": {
+        "method": "GET",
+        "path": "/v1/rides/:id/stops",
+        "controller": "RidesController",
+        "handler": "listStops"
+      },
+      "id": "route:GET /v1/rides/:id/stops",
+      "kind": "route",
+      "path": "apps/api/src/modules/rides/rides.controller.ts",
+      "name": "GET /v1/rides/:id/stops",
+      "app": "api"
+    },
+    {
+      "meta": {
+        "method": "GET",
+        "path": "/v1/vehicles",
+        "controller": "VehiclesController",
+        "handler": "findAll"
+      },
+      "id": "route:GET /v1/vehicles",
+      "kind": "route",
+      "path": "apps/api/src/modules/vehicles/vehicles.controller.ts",
+      "name": "GET /v1/vehicles",
+      "app": "api"
+    },
+    {
+      "meta": {
+        "method": "PATCH",
+        "path": "/v1/drivers/me/vehicle",
+        "controller": "DriversController",
+        "handler": "setVehicle"
+      },
+      "id": "route:PATCH /v1/drivers/me/vehicle",
+      "kind": "route",
+      "path": "apps/api/src/modules/drivers/drivers.controller.ts",
+      "name": "PATCH /v1/drivers/me/vehicle",
+      "app": "api"
+    },
+    {
+      "meta": {
+        "method": "PATCH",
+        "path": "/v1/vehicles/:id",
+        "controller": "VehiclesController",
+        "handler": "update"
+      },
+      "id": "route:PATCH /v1/vehicles/:id",
+      "kind": "route",
+      "path": "apps/api/src/modules/vehicles/vehicles.controller.ts",
+      "name": "PATCH /v1/vehicles/:id",
+      "app": "api"
+    },
+    {
+      "meta": {
+        "method": "POST",
+        "path": "/v1/auth/firebase-exchange",
+        "controller": "AuthController",
+        "handler": "firebaseExchange"
+      },
+      "id": "route:POST /v1/auth/firebase-exchange",
+      "kind": "route",
+      "path": "apps/api/src/modules/auth/auth.controller.ts",
+      "name": "POST /v1/auth/firebase-exchange",
+      "app": "api"
+    },
+    {
+      "meta": {
+        "method": "POST",
+        "path": "/v1/auth/google/link",
+        "controller": "AuthController",
+        "handler": "googleLink"
+      },
+      "id": "route:POST /v1/auth/google/link",
+      "kind": "route",
+      "path": "apps/api/src/modules/auth/auth.controller.ts",
+      "name": "POST /v1/auth/google/link",
+      "app": "api"
+    },
+    {
+      "meta": {
+        "method": "POST",
+        "path": "/v1/auth/google/login",
+        "controller": "AuthController",
+        "handler": "googleLogin"
+      },
+      "id": "route:POST /v1/auth/google/login",
+      "kind": "route",
+      "path": "apps/api/src/modules/auth/auth.controller.ts",
+      "name": "POST /v1/auth/google/login",
+      "app": "api"
+    },
+    {
+      "meta": {
+        "method": "POST",
+        "path": "/v1/auth/logout",
+        "controller": "AuthController",
+        "handler": "logout"
+      },
+      "id": "route:POST /v1/auth/logout",
+      "kind": "route",
+      "path": "apps/api/src/modules/auth/auth.controller.ts",
+      "name": "POST /v1/auth/logout",
+      "app": "api"
+    },
+    {
+      "meta": {
+        "method": "POST",
+        "path": "/v1/auth/refresh",
+        "controller": "AuthController",
+        "handler": "refresh"
+      },
+      "id": "route:POST /v1/auth/refresh",
+      "kind": "route",
+      "path": "apps/api/src/modules/auth/auth.controller.ts",
+      "name": "POST /v1/auth/refresh",
+      "app": "api"
+    },
+    {
+      "meta": {
+        "method": "POST",
+        "path": "/v1/drivers/offline",
+        "controller": "DriversController",
+        "handler": "goOffline"
+      },
+      "id": "route:POST /v1/drivers/offline",
+      "kind": "route",
+      "path": "apps/api/src/modules/drivers/drivers.controller.ts",
+      "name": "POST /v1/drivers/offline",
+      "app": "api"
+    },
+    {
+      "meta": {
+        "method": "POST",
+        "path": "/v1/drivers/online",
+        "controller": "DriversController",
+        "handler": "goOnline"
+      },
+      "id": "route:POST /v1/drivers/online",
+      "kind": "route",
+      "path": "apps/api/src/modules/drivers/drivers.controller.ts",
+      "name": "POST /v1/drivers/online",
+      "app": "api"
+    },
+    {
+      "meta": {
+        "method": "POST",
+        "path": "/v1/rides",
+        "controller": "RidesController",
+        "handler": "create"
+      },
+      "id": "route:POST /v1/rides",
+      "kind": "route",
+      "path": "apps/api/src/modules/rides/rides.controller.ts",
+      "name": "POST /v1/rides",
+      "app": "api"
+    },
+    {
+      "meta": {
+        "method": "POST",
+        "path": "/v1/rides/:id/cancel",
+        "controller": "RidesController",
+        "handler": "cancel"
+      },
+      "id": "route:POST /v1/rides/:id/cancel",
+      "kind": "route",
+      "path": "apps/api/src/modules/rides/rides.controller.ts",
+      "name": "POST /v1/rides/:id/cancel",
+      "app": "api"
+    },
+    {
+      "meta": {
+        "method": "POST",
+        "path": "/v1/rides/:id/ratings",
+        "controller": "RatingController",
+        "handler": "rate"
+      },
+      "id": "route:POST /v1/rides/:id/ratings",
+      "kind": "route",
+      "path": "apps/api/src/modules/rating/rating.controller.ts",
+      "name": "POST /v1/rides/:id/ratings",
+      "app": "api"
+    },
+    {
+      "meta": {
+        "method": "POST",
+        "path": "/v1/rides/:id/state",
+        "controller": "RidesController",
+        "handler": "transition"
+      },
+      "id": "route:POST /v1/rides/:id/state",
+      "kind": "route",
+      "path": "apps/api/src/modules/rides/rides.controller.ts",
+      "name": "POST /v1/rides/:id/state",
+      "app": "api"
+    },
+    {
+      "meta": {
+        "method": "POST",
+        "path": "/v1/rides/quote",
+        "controller": "RidesController",
+        "handler": "quote"
+      },
+      "id": "route:POST /v1/rides/quote",
+      "kind": "route",
+      "path": "apps/api/src/modules/rides/rides.controller.ts",
+      "name": "POST /v1/rides/quote",
+      "app": "api"
+    },
+    {
+      "meta": {
+        "method": "POST",
+        "path": "/v1/vehicles",
+        "controller": "VehiclesController",
+        "handler": "create"
+      },
+      "id": "route:POST /v1/vehicles",
+      "kind": "route",
+      "path": "apps/api/src/modules/vehicles/vehicles.controller.ts",
+      "name": "POST /v1/vehicles",
+      "app": "api"
+    },
+    {
+      "meta": {
+        "pgName": "app_user",
+        "columns": [
+          "id",
+          "firebaseUid",
+          "phoneE164",
+          "googleSub",
+          "email",
+          "displayName",
+          "role",
+          "status",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "id": "table:appUser",
+      "kind": "table",
+      "path": "apps/api/src/db/schema.ts",
+      "name": "appUser",
+      "app": "api"
+    },
+    {
+      "meta": {
+        "pgName": "auth_refresh_token",
+        "columns": [
+          "token",
+          "userId",
+          "expiresAt",
+          "revokedAt",
+          "createdAt"
+        ]
+      },
+      "id": "table:authRefreshToken",
+      "kind": "table",
+      "path": "apps/api/src/db/schema.ts",
+      "name": "authRefreshToken",
+      "app": "api"
+    },
+    {
+      "meta": {
+        "pgName": "client",
+        "columns": [
+          "userId",
+          "homeLabel",
+          "workLabel",
+          "ratingAvg",
+          "ratingCount",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "id": "table:client",
+      "kind": "table",
+      "path": "apps/api/src/db/schema.ts",
+      "name": "client",
+      "app": "api"
+    },
+    {
+      "meta": {
+        "pgName": "driver",
+        "columns": [
+          "userId",
+          "licenseNo",
+          "verifiedAt",
+          "availability",
+          "currentVehicleId",
+          "ratingAvg",
+          "ratingCount",
+          "totalRides",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "id": "table:driver",
+      "kind": "table",
+      "path": "apps/api/src/db/schema.ts",
+      "name": "driver",
+      "app": "api"
+    },
+    {
+      "meta": {
+        "pgName": "ratings",
+        "columns": [
+          "id",
+          "rideId",
+          "raterId",
+          "subjectId",
+          "stars",
+          "text",
+          "createdAt"
+        ]
+      },
+      "id": "table:ratings",
+      "kind": "table",
+      "path": "apps/api/src/db/schema.ts",
+      "name": "ratings",
+      "app": "api"
+    },
+    {
+      "meta": {
+        "pgName": "rides",
+        "columns": [
+          "id",
+          "passengerId",
+          "originLat",
+          "originLng",
+          "destLat",
+          "destLng",
+          "fareCents",
+          "status",
+          "idempotencyKey",
+          "driverId",
+          "acceptedAt",
+          "enRouteAt",
+          "arrivedAt",
+          "startedAt",
+          "completedAt",
+          "cancelledAt",
+          "cancelledBy",
+          "cancelReason",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "id": "table:rides",
+      "kind": "table",
+      "path": "apps/api/src/db/schema.ts",
+      "name": "rides",
+      "app": "api"
+    },
+    {
+      "meta": {
+        "pgName": "ride_stops",
+        "columns": [
+          "rideId",
+          "sequenceIndex",
+          "passengerId",
+          "type",
+          "lat",
+          "lng",
+          "confirmedAt"
+        ]
+      },
+      "id": "table:rideStop",
+      "kind": "table",
+      "path": "apps/api/src/db/schema.ts",
+      "name": "rideStop",
+      "app": "api"
+    },
+    {
+      "meta": {
+        "pgName": "shared_rides",
+        "columns": [
+          "rideId",
+          "seatCount",
+          "maxSeats",
+          "poolState",
+          "poolOpenedAt",
+          "poolClosedAt",
+          "detourBudgetM",
+          "originLat",
+          "originLng",
+          "destLat",
+          "destLng",
+          "members",
+          "claimedByDriverId",
+          "claimedAt",
+          "completedAt",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "id": "table:sharedRide",
+      "kind": "table",
+      "path": "apps/api/src/db/schema.ts",
+      "name": "sharedRide",
+      "app": "api"
+    },
+    {
+      "meta": {
+        "pgName": "vehicle",
+        "columns": [
+          "id",
+          "driverId",
+          "type",
+          "regNo",
+          "make",
+          "model",
+          "color",
+          "seats",
+          "active",
+          "createdAt"
+        ]
+      },
+      "id": "table:vehicle",
+      "kind": "table",
+      "path": "apps/api/src/db/schema.ts",
+      "name": "vehicle",
+      "app": "api"
+    }
+  ],
+  "edges": [
+    {
+      "from": "apps/api/src/app.module.ts",
+      "to": "apps/api/src/common/filters/app-exception.filter.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./common/filters/app-exception.filter"
+      }
+    },
+    {
+      "from": "apps/api/src/app.module.ts",
+      "to": "apps/api/src/common/middleware/metrics.middleware.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./common/middleware/metrics.middleware"
+      }
+    },
+    {
+      "from": "apps/api/src/app.module.ts",
+      "to": "apps/api/src/common/middleware/request-id.middleware.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./common/middleware/request-id.middleware"
+      }
+    },
+    {
+      "from": "apps/api/src/app.module.ts",
+      "to": "apps/api/src/infra/db/drizzle.module.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./infra/db/drizzle.module"
+      }
+    },
+    {
+      "from": "apps/api/src/app.module.ts",
+      "to": "apps/api/src/infra/firebase/firebase.module.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./infra/firebase/firebase.module"
+      }
+    },
+    {
+      "from": "apps/api/src/app.module.ts",
+      "to": "apps/api/src/infra/google/google.module.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./infra/google/google.module"
+      }
+    },
+    {
+      "from": "apps/api/src/app.module.ts",
+      "to": "apps/api/src/infra/redis/redis.module.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./infra/redis/redis.module"
+      }
+    },
+    {
+      "from": "apps/api/src/app.module.ts",
+      "to": "apps/api/src/modules/auth/auth.module.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./modules/auth/auth.module"
+      }
+    },
+    {
+      "from": "apps/api/src/app.module.ts",
+      "to": "apps/api/src/modules/dispatch/dispatch.module.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./modules/dispatch/dispatch.module"
+      }
+    },
+    {
+      "from": "apps/api/src/app.module.ts",
+      "to": "apps/api/src/modules/drivers/drivers.module.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./modules/drivers/drivers.module"
+      }
+    },
+    {
+      "from": "apps/api/src/app.module.ts",
+      "to": "apps/api/src/modules/health/health.module.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./modules/health/health.module"
+      }
+    },
+    {
+      "from": "apps/api/src/app.module.ts",
+      "to": "apps/api/src/modules/rating/rating.module.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./modules/rating/rating.module"
+      }
+    },
+    {
+      "from": "apps/api/src/app.module.ts",
+      "to": "apps/api/src/modules/realtime/realtime.module.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./modules/realtime/realtime.module"
+      }
+    },
+    {
+      "from": "apps/api/src/app.module.ts",
+      "to": "apps/api/src/modules/ride-lifecycle/ride-lifecycle.module.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./modules/ride-lifecycle/ride-lifecycle.module"
+      }
+    },
+    {
+      "from": "apps/api/src/app.module.ts",
+      "to": "apps/api/src/modules/rides/rides.module.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./modules/rides/rides.module"
+      }
+    },
+    {
+      "from": "apps/api/src/app.module.ts",
+      "to": "apps/api/src/modules/vehicles/vehicles.module.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./modules/vehicles/vehicles.module"
+      }
+    },
+    {
+      "from": "apps/api/src/app.module.ts#AppModule",
+      "to": "apps/api/src/infra/db/drizzle.module.ts#DrizzleModule",
+      "kind": "di-import",
+      "meta": {}
+    },
+    {
+      "from": "apps/api/src/app.module.ts#AppModule",
+      "to": "apps/api/src/infra/firebase/firebase.module.ts#FirebaseModule",
+      "kind": "di-import",
+      "meta": {}
+    },
+    {
+      "from": "apps/api/src/app.module.ts#AppModule",
+      "to": "apps/api/src/infra/google/google.module.ts#GoogleModule",
+      "kind": "di-import",
+      "meta": {}
+    },
+    {
+      "from": "apps/api/src/app.module.ts#AppModule",
+      "to": "apps/api/src/infra/redis/redis.module.ts#RedisModule",
+      "kind": "di-import",
+      "meta": {}
+    },
+    {
+      "from": "apps/api/src/app.module.ts#AppModule",
+      "to": "apps/api/src/modules/auth/auth.module.ts#AuthModule",
+      "kind": "di-import",
+      "meta": {}
+    },
+    {
+      "from": "apps/api/src/app.module.ts#AppModule",
+      "to": "apps/api/src/modules/dispatch/dispatch.module.ts#DispatchModule",
+      "kind": "di-import",
+      "meta": {}
+    },
+    {
+      "from": "apps/api/src/app.module.ts#AppModule",
+      "to": "apps/api/src/modules/drivers/drivers.module.ts#DriversModule",
+      "kind": "di-import",
+      "meta": {}
+    },
+    {
+      "from": "apps/api/src/app.module.ts#AppModule",
+      "to": "apps/api/src/modules/health/health.module.ts#HealthModule",
+      "kind": "di-import",
+      "meta": {}
+    },
+    {
+      "from": "apps/api/src/app.module.ts#AppModule",
+      "to": "apps/api/src/modules/rating/rating.module.ts#RatingModule",
+      "kind": "di-import",
+      "meta": {}
+    },
+    {
+      "from": "apps/api/src/app.module.ts#AppModule",
+      "to": "apps/api/src/modules/realtime/realtime.module.ts#RealtimeModule",
+      "kind": "di-import",
+      "meta": {}
+    },
+    {
+      "from": "apps/api/src/app.module.ts#AppModule",
+      "to": "apps/api/src/modules/ride-lifecycle/ride-lifecycle.module.ts#RideLifecycleModule",
+      "kind": "di-import",
+      "meta": {}
+    },
+    {
+      "from": "apps/api/src/app.module.ts#AppModule",
+      "to": "apps/api/src/modules/rides/rides.module.ts#RidesModule",
+      "kind": "di-import",
+      "meta": {}
+    },
+    {
+      "from": "apps/api/src/app.module.ts#AppModule",
+      "to": "apps/api/src/modules/vehicles/vehicles.module.ts#VehiclesModule",
+      "kind": "di-import",
+      "meta": {}
+    },
+    {
+      "from": "apps/api/src/common/middleware/metrics.middleware.ts",
+      "to": "apps/api/src/logger.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../logger"
+      }
+    },
+    {
+      "from": "apps/api/src/common/middleware/metrics.middleware.ts",
+      "to": "apps/api/src/metrics.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../metrics"
+      }
+    },
+    {
+      "from": "apps/api/src/infra/db/drizzle.module.ts",
+      "to": "apps/api/src/db/schema.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../db/schema"
+      }
+    },
+    {
+      "from": "apps/api/src/infra/firebase/firebase.module.ts",
+      "to": "apps/api/src/infra/firebase/firebase-admin.service.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./firebase-admin.service"
+      }
+    },
+    {
+      "from": "apps/api/src/infra/firebase/firebase.module.ts#FirebaseModule",
+      "to": "apps/api/src/infra/firebase/firebase-admin.service.ts#FirebaseAdminService",
+      "kind": "di-provides",
+      "meta": {}
+    },
+    {
+      "from": "apps/api/src/infra/google/google.module.ts",
+      "to": "apps/api/src/infra/google/google-verifier.service.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./google-verifier.service"
+      }
+    },
+    {
+      "from": "apps/api/src/infra/google/google.module.ts#GoogleModule",
+      "to": "apps/api/src/infra/google/google-verifier.service.ts#GoogleVerifierService",
+      "kind": "di-provides",
+      "meta": {}
+    },
+    {
+      "from": "apps/api/src/main.ts",
+      "to": "apps/api/src/app.module.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./app.module"
+      }
+    },
+    {
+      "from": "apps/api/src/main.ts",
+      "to": "apps/api/src/logger.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./logger"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/auth/auth.controller.ts",
+      "to": "apps/api/src/common/guards/auth.guard.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../common/guards/auth.guard"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/auth/auth.controller.ts",
+      "to": "apps/api/src/common/guards/csrf.guard.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../common/guards/csrf.guard"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/auth/auth.controller.ts",
+      "to": "apps/api/src/common/utils/cookie.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../common/utils/cookie"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/auth/auth.controller.ts",
+      "to": "apps/api/src/modules/auth/auth.service.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./auth.service"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/auth/auth.controller.ts",
+      "to": "apps/api/src/modules/auth/dto/firebase-exchange.dto.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./dto/firebase-exchange.dto"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/auth/auth.controller.ts",
+      "to": "apps/api/src/modules/auth/dto/google-id-token.dto.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./dto/google-id-token.dto"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/auth/auth.controller.ts",
+      "to": "apps/api/src/modules/auth/dto/refresh-token.dto.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./dto/refresh-token.dto"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/auth/auth.controller.ts#AuthController",
+      "to": "route:POST /v1/auth/firebase-exchange",
+      "kind": "route",
+      "meta": {
+        "handler": "firebaseExchange"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/auth/auth.controller.ts#AuthController",
+      "to": "route:POST /v1/auth/google/link",
+      "kind": "route",
+      "meta": {
+        "handler": "googleLink"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/auth/auth.controller.ts#AuthController",
+      "to": "route:POST /v1/auth/google/login",
+      "kind": "route",
+      "meta": {
+        "handler": "googleLogin"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/auth/auth.controller.ts#AuthController",
+      "to": "route:POST /v1/auth/logout",
+      "kind": "route",
+      "meta": {
+        "handler": "logout"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/auth/auth.controller.ts#AuthController",
+      "to": "route:POST /v1/auth/refresh",
+      "kind": "route",
+      "meta": {
+        "handler": "refresh"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/auth/auth.module.ts",
+      "to": "apps/api/src/common/guards/auth.guard.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../common/guards/auth.guard"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/auth/auth.module.ts",
+      "to": "apps/api/src/common/guards/csrf.guard.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../common/guards/csrf.guard"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/auth/auth.module.ts",
+      "to": "apps/api/src/modules/auth/auth.controller.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./auth.controller"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/auth/auth.module.ts",
+      "to": "apps/api/src/modules/auth/auth.service.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./auth.service"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/auth/auth.module.ts#AuthModule",
+      "to": "apps/api/src/common/guards/auth.guard.ts#AuthGuard",
+      "kind": "di-provides",
+      "meta": {}
+    },
+    {
+      "from": "apps/api/src/modules/auth/auth.module.ts#AuthModule",
+      "to": "apps/api/src/common/guards/csrf.guard.ts#CsrfGuard",
+      "kind": "di-provides",
+      "meta": {}
+    },
+    {
+      "from": "apps/api/src/modules/auth/auth.module.ts#AuthModule",
+      "to": "apps/api/src/modules/auth/auth.controller.ts#AuthController",
+      "kind": "di-provides",
+      "meta": {}
+    },
+    {
+      "from": "apps/api/src/modules/auth/auth.module.ts#AuthModule",
+      "to": "apps/api/src/modules/auth/auth.service.ts#AuthService",
+      "kind": "di-provides",
+      "meta": {}
+    },
+    {
+      "from": "apps/api/src/modules/auth/auth.service.ts",
+      "to": "apps/api/src/infra/db/drizzle.module.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../infra/db/drizzle.module"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/auth/auth.service.ts",
+      "to": "apps/api/src/infra/firebase/firebase-admin.service.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../infra/firebase/firebase-admin.service"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/auth/auth.service.ts",
+      "to": "apps/api/src/infra/google/google-verifier.service.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../infra/google/google-verifier.service"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/dispatch/dispatch.module.ts",
+      "to": "apps/api/src/modules/dispatch/dispatch.processor.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./dispatch.processor"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/dispatch/dispatch.module.ts",
+      "to": "apps/api/src/modules/dispatch/dispatch.service.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./dispatch.service"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/dispatch/dispatch.module.ts",
+      "to": "apps/api/src/modules/matching/matching.module.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../matching/matching.module"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/dispatch/dispatch.module.ts",
+      "to": "apps/api/src/modules/realtime/realtime.module.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../realtime/realtime.module"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/dispatch/dispatch.module.ts",
+      "to": "apps/api/src/modules/rides/rides.module.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../rides/rides.module"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/dispatch/dispatch.module.ts#DispatchModule",
+      "to": "apps/api/src/modules/dispatch/dispatch.processor.ts#DispatchProcessor",
+      "kind": "di-provides",
+      "meta": {}
+    },
+    {
+      "from": "apps/api/src/modules/dispatch/dispatch.module.ts#DispatchModule",
+      "to": "apps/api/src/modules/dispatch/dispatch.service.ts#DispatchService",
+      "kind": "di-provides",
+      "meta": {}
+    },
+    {
+      "from": "apps/api/src/modules/dispatch/dispatch.module.ts#DispatchModule",
+      "to": "apps/api/src/modules/matching/matching.module.ts#MatchingModule",
+      "kind": "di-import",
+      "meta": {}
+    },
+    {
+      "from": "apps/api/src/modules/dispatch/dispatch.module.ts#DispatchModule",
+      "to": "apps/api/src/modules/realtime/realtime.module.ts#RealtimeModule",
+      "kind": "di-import",
+      "meta": {}
+    },
+    {
+      "from": "apps/api/src/modules/dispatch/dispatch.module.ts#DispatchModule",
+      "to": "apps/api/src/modules/rides/rides.module.ts#RidesModule",
+      "kind": "di-import",
+      "meta": {}
+    },
+    {
+      "from": "apps/api/src/modules/dispatch/dispatch.processor.ts",
+      "to": "apps/api/src/modules/dispatch/dispatch.service.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./dispatch.service"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/dispatch/dispatch.service.ts",
+      "to": "apps/api/src/infra/redis/redis.module.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../infra/redis/redis.module"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/dispatch/dispatch.service.ts",
+      "to": "apps/api/src/modules/dispatch/dispatch.types.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./dispatch.types"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/dispatch/dispatch.service.ts",
+      "to": "apps/api/src/modules/matching/pool-lifecycle.service.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../matching/pool-lifecycle.service"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/dispatch/dispatch.service.ts",
+      "to": "apps/api/src/modules/matching/ride-stop.repository.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../matching/ride-stop.repository"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/dispatch/dispatch.service.ts",
+      "to": "apps/api/src/modules/matching/shared-ride.repository.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../matching/shared-ride.repository"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/dispatch/dispatch.service.ts",
+      "to": "apps/api/src/modules/realtime/realtime.bus.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../realtime/realtime.bus"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/dispatch/dispatch.service.ts",
+      "to": "apps/api/src/modules/realtime/realtime.gateway.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../realtime/realtime.gateway"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/dispatch/dispatch.service.ts",
+      "to": "apps/api/src/modules/rides/ride-state-machine.service.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../rides/ride-state-machine.service"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/dispatch/dispatch.service.ts",
+      "to": "apps/api/src/modules/rides/rides.repository.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../rides/rides.repository"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/drivers/drivers.controller.ts",
+      "to": "apps/api/src/common/guards/auth.guard.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../common/guards/auth.guard"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/drivers/drivers.controller.ts",
+      "to": "apps/api/src/modules/drivers/drivers.service.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./drivers.service"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/drivers/drivers.controller.ts",
+      "to": "apps/api/src/modules/drivers/dto/go-online.dto.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./dto/go-online.dto"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/drivers/drivers.controller.ts",
+      "to": "apps/api/src/modules/drivers/dto/set-vehicle.dto.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./dto/set-vehicle.dto"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/drivers/drivers.controller.ts#DriversController",
+      "to": "route:PATCH /v1/drivers/me/vehicle",
+      "kind": "route",
+      "meta": {
+        "handler": "setVehicle"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/drivers/drivers.controller.ts#DriversController",
+      "to": "route:POST /v1/drivers/offline",
+      "kind": "route",
+      "meta": {
+        "handler": "goOffline"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/drivers/drivers.controller.ts#DriversController",
+      "to": "route:POST /v1/drivers/online",
+      "kind": "route",
+      "meta": {
+        "handler": "goOnline"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/drivers/drivers.module.ts",
+      "to": "apps/api/src/modules/auth/auth.module.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../auth/auth.module"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/drivers/drivers.module.ts",
+      "to": "apps/api/src/modules/drivers/drivers.controller.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./drivers.controller"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/drivers/drivers.module.ts",
+      "to": "apps/api/src/modules/drivers/drivers.service.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./drivers.service"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/drivers/drivers.module.ts",
+      "to": "apps/api/src/modules/realtime/realtime.module.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../realtime/realtime.module"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/drivers/drivers.module.ts#DriversModule",
+      "to": "apps/api/src/modules/auth/auth.module.ts#AuthModule",
+      "kind": "di-import",
+      "meta": {}
+    },
+    {
+      "from": "apps/api/src/modules/drivers/drivers.module.ts#DriversModule",
+      "to": "apps/api/src/modules/drivers/drivers.controller.ts#DriversController",
+      "kind": "di-provides",
+      "meta": {}
+    },
+    {
+      "from": "apps/api/src/modules/drivers/drivers.module.ts#DriversModule",
+      "to": "apps/api/src/modules/drivers/drivers.service.ts#DriversService",
+      "kind": "di-provides",
+      "meta": {}
+    },
+    {
+      "from": "apps/api/src/modules/drivers/drivers.module.ts#DriversModule",
+      "to": "apps/api/src/modules/realtime/realtime.module.ts#RealtimeModule",
+      "kind": "di-import",
+      "meta": {}
+    },
+    {
+      "from": "apps/api/src/modules/drivers/drivers.service.ts",
+      "to": "apps/api/src/db/schema.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../db/schema"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/drivers/drivers.service.ts",
+      "to": "apps/api/src/infra/db/drizzle.module.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../infra/db/drizzle.module"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/drivers/drivers.service.ts",
+      "to": "apps/api/src/infra/redis/redis.module.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../infra/redis/redis.module"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/drivers/drivers.service.ts",
+      "to": "apps/api/src/modules/realtime/realtime.bus.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../realtime/realtime.bus"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/health/health.controller.ts",
+      "to": "apps/api/src/modules/health/health.service.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./health.service"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/health/health.controller.ts#HealthController",
+      "to": "route:GET /",
+      "kind": "route",
+      "meta": {
+        "handler": "rootReady"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/health/health.controller.ts#HealthController",
+      "to": "route:GET /metrics",
+      "kind": "route",
+      "meta": {
+        "handler": "metrics"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/health/health.controller.ts#HealthController",
+      "to": "route:GET /v1/health/live",
+      "kind": "route",
+      "meta": {
+        "handler": "live"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/health/health.controller.ts#HealthController",
+      "to": "route:GET /v1/health/ready",
+      "kind": "route",
+      "meta": {
+        "handler": "ready"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/health/health.module.ts",
+      "to": "apps/api/src/modules/health/health.controller.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./health.controller"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/health/health.module.ts",
+      "to": "apps/api/src/modules/health/health.service.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./health.service"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/health/health.module.ts#HealthModule",
+      "to": "apps/api/src/modules/health/health.controller.ts#HealthController",
+      "kind": "di-provides",
+      "meta": {}
+    },
+    {
+      "from": "apps/api/src/modules/health/health.module.ts#HealthModule",
+      "to": "apps/api/src/modules/health/health.service.ts#HealthService",
+      "kind": "di-provides",
+      "meta": {}
+    },
+    {
+      "from": "apps/api/src/modules/health/health.service.ts",
+      "to": "apps/api/src/infra/db/drizzle.module.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../infra/db/drizzle.module"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/health/health.service.ts",
+      "to": "apps/api/src/infra/redis/redis.module.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../infra/redis/redis.module"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/matching/matching.module.ts",
+      "to": "apps/api/src/modules/matching/matching.service.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./matching.service"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/matching/matching.module.ts",
+      "to": "apps/api/src/modules/matching/pool-expire.processor.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./pool-expire.processor"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/matching/matching.module.ts",
+      "to": "apps/api/src/modules/matching/pool-lifecycle.service.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./pool-lifecycle.service"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/matching/matching.module.ts",
+      "to": "apps/api/src/modules/matching/ride-stop.repository.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./ride-stop.repository"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/matching/matching.module.ts",
+      "to": "apps/api/src/modules/matching/route-similarity.service.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./route-similarity.service"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/matching/matching.module.ts",
+      "to": "apps/api/src/modules/matching/shared-ride.repository.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./shared-ride.repository"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/matching/matching.module.ts",
+      "to": "apps/api/src/modules/realtime/realtime.module.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../realtime/realtime.module"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/matching/matching.module.ts#MatchingModule",
+      "to": "apps/api/src/modules/matching/matching.service.ts#MatchingService",
+      "kind": "di-provides",
+      "meta": {}
+    },
+    {
+      "from": "apps/api/src/modules/matching/matching.module.ts#MatchingModule",
+      "to": "apps/api/src/modules/matching/pool-expire.processor.ts#PoolExpireProcessor",
+      "kind": "di-provides",
+      "meta": {}
+    },
+    {
+      "from": "apps/api/src/modules/matching/matching.module.ts#MatchingModule",
+      "to": "apps/api/src/modules/matching/pool-lifecycle.service.ts#PoolLifecycleService",
+      "kind": "di-provides",
+      "meta": {}
+    },
+    {
+      "from": "apps/api/src/modules/matching/matching.module.ts#MatchingModule",
+      "to": "apps/api/src/modules/matching/ride-stop.repository.ts#RideStopRepository",
+      "kind": "di-provides",
+      "meta": {}
+    },
+    {
+      "from": "apps/api/src/modules/matching/matching.module.ts#MatchingModule",
+      "to": "apps/api/src/modules/matching/route-similarity.service.ts#RouteSimilarityService",
+      "kind": "di-provides",
+      "meta": {}
+    },
+    {
+      "from": "apps/api/src/modules/matching/matching.module.ts#MatchingModule",
+      "to": "apps/api/src/modules/matching/shared-ride.repository.ts#SharedRideRepository",
+      "kind": "di-provides",
+      "meta": {}
+    },
+    {
+      "from": "apps/api/src/modules/matching/matching.module.ts#MatchingModule",
+      "to": "apps/api/src/modules/realtime/realtime.module.ts#RealtimeModule",
+      "kind": "di-import",
+      "meta": {}
+    },
+    {
+      "from": "apps/api/src/modules/matching/matching.service.ts",
+      "to": "apps/api/src/modules/matching/pool-lifecycle.service.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./pool-lifecycle.service"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/matching/matching.service.ts",
+      "to": "apps/api/src/modules/matching/route-similarity.service.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./route-similarity.service"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/matching/matching.service.ts",
+      "to": "apps/api/src/modules/matching/shared-ride.repository.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./shared-ride.repository"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/matching/pool-expire.processor.ts",
+      "to": "apps/api/src/modules/matching/pool-lifecycle.service.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./pool-lifecycle.service"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/matching/pool-lifecycle.service.ts",
+      "to": "apps/api/src/infra/redis/redis.module.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../infra/redis/redis.module"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/matching/pool-lifecycle.service.ts",
+      "to": "apps/api/src/modules/matching/shared-ride.repository.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./shared-ride.repository"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/matching/pool-lifecycle.service.ts",
+      "to": "apps/api/src/modules/realtime/realtime.bus.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../realtime/realtime.bus"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/matching/ride-stop.repository.ts",
+      "to": "apps/api/src/db/schema.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../db/schema"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/matching/ride-stop.repository.ts",
+      "to": "apps/api/src/infra/db/drizzle.module.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../infra/db/drizzle.module"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/matching/route-similarity.service.ts",
+      "to": "apps/api/src/infra/redis/redis.module.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../infra/redis/redis.module"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/matching/route-similarity.service.ts",
+      "to": "apps/api/src/modules/matching/osrm-unavailable.exception.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./osrm-unavailable.exception"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/matching/shared-ride.repository.ts",
+      "to": "apps/api/src/db/schema.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../db/schema"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/matching/shared-ride.repository.ts",
+      "to": "apps/api/src/infra/db/drizzle.module.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../infra/db/drizzle.module"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/pricing/pricing.module.ts",
+      "to": "apps/api/src/modules/pricing/pricing.service.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./pricing.service"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/pricing/pricing.module.ts#PricingModule",
+      "to": "apps/api/src/modules/pricing/pricing.service.ts#PricingService",
+      "kind": "di-provides",
+      "meta": {}
+    },
+    {
+      "from": "apps/api/src/modules/pricing/pricing.service.ts",
+      "to": "apps/api/src/infra/redis/redis.module.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../infra/redis/redis.module"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/pricing/pricing.service.ts",
+      "to": "apps/api/src/modules/matching/osrm-unavailable.exception.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../matching/osrm-unavailable.exception"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/pricing/pricing.service.ts",
+      "to": "apps/api/src/modules/pricing/money.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./money"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/pricing/pricing.service.ts",
+      "to": "apps/api/src/modules/pricing/pricing.types.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./pricing.types"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/pricing/pricing.types.ts",
+      "to": "apps/api/src/modules/matching/shared-ride.repository.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../matching/shared-ride.repository"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/pricing/pricing.types.ts",
+      "to": "apps/api/src/modules/pricing/money.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./money"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/rating/rating.controller.ts",
+      "to": "apps/api/src/common/guards/auth.guard.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../common/guards/auth.guard"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/rating/rating.controller.ts",
+      "to": "apps/api/src/modules/rating/dto/create-rating.dto.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./dto/create-rating.dto"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/rating/rating.controller.ts",
+      "to": "apps/api/src/modules/rating/rating.service.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./rating.service"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/rating/rating.controller.ts#RatingController",
+      "to": "route:POST /v1/rides/:id/ratings",
+      "kind": "route",
+      "meta": {
+        "handler": "rate"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/rating/rating.module.ts",
+      "to": "apps/api/src/modules/auth/auth.module.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../auth/auth.module"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/rating/rating.module.ts",
+      "to": "apps/api/src/modules/rating/rating.controller.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./rating.controller"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/rating/rating.module.ts",
+      "to": "apps/api/src/modules/rating/rating.repository.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./rating.repository"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/rating/rating.module.ts",
+      "to": "apps/api/src/modules/rating/rating.service.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./rating.service"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/rating/rating.module.ts",
+      "to": "apps/api/src/modules/rides/rides.module.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../rides/rides.module"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/rating/rating.module.ts#RatingModule",
+      "to": "apps/api/src/modules/auth/auth.module.ts#AuthModule",
+      "kind": "di-import",
+      "meta": {}
+    },
+    {
+      "from": "apps/api/src/modules/rating/rating.module.ts#RatingModule",
+      "to": "apps/api/src/modules/rating/rating.controller.ts#RatingController",
+      "kind": "di-provides",
+      "meta": {}
+    },
+    {
+      "from": "apps/api/src/modules/rating/rating.module.ts#RatingModule",
+      "to": "apps/api/src/modules/rating/rating.repository.ts#RatingRepository",
+      "kind": "di-provides",
+      "meta": {}
+    },
+    {
+      "from": "apps/api/src/modules/rating/rating.module.ts#RatingModule",
+      "to": "apps/api/src/modules/rating/rating.service.ts#RatingService",
+      "kind": "di-provides",
+      "meta": {}
+    },
+    {
+      "from": "apps/api/src/modules/rating/rating.module.ts#RatingModule",
+      "to": "apps/api/src/modules/rides/rides.module.ts#RidesModule",
+      "kind": "di-import",
+      "meta": {}
+    },
+    {
+      "from": "apps/api/src/modules/rating/rating.repository.ts",
+      "to": "apps/api/src/db/schema.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../db/schema"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/rating/rating.repository.ts",
+      "to": "apps/api/src/infra/db/drizzle.module.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../infra/db/drizzle.module"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/rating/rating.service.ts",
+      "to": "apps/api/src/modules/rating/rating.repository.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./rating.repository"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/rating/rating.service.ts",
+      "to": "apps/api/src/modules/rides/rides.repository.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../rides/rides.repository"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/realtime/realtime.gateway.ts",
+      "to": "apps/api/src/common/guards/auth.guard.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../common/guards/auth.guard"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/realtime/realtime.gateway.ts",
+      "to": "apps/api/src/infra/redis/redis.module.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../infra/redis/redis.module"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/realtime/realtime.gateway.ts",
+      "to": "apps/api/src/modules/realtime/realtime.bus.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./realtime.bus"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/realtime/realtime.module.ts",
+      "to": "apps/api/src/modules/auth/auth.module.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../auth/auth.module"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/realtime/realtime.module.ts",
+      "to": "apps/api/src/modules/realtime/realtime.bus.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./realtime.bus"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/realtime/realtime.module.ts",
+      "to": "apps/api/src/modules/realtime/realtime.gateway.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./realtime.gateway"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/realtime/realtime.module.ts#RealtimeModule",
+      "to": "apps/api/src/modules/auth/auth.module.ts#AuthModule",
+      "kind": "di-import",
+      "meta": {}
+    },
+    {
+      "from": "apps/api/src/modules/realtime/realtime.module.ts#RealtimeModule",
+      "to": "apps/api/src/modules/realtime/realtime.bus.ts#RealtimeBus",
+      "kind": "di-provides",
+      "meta": {}
+    },
+    {
+      "from": "apps/api/src/modules/realtime/realtime.module.ts#RealtimeModule",
+      "to": "apps/api/src/modules/realtime/realtime.gateway.ts#RealtimeGateway",
+      "kind": "di-provides",
+      "meta": {}
+    },
+    {
+      "from": "apps/api/src/modules/ride-lifecycle/ride-lifecycle.module.ts",
+      "to": "apps/api/src/modules/matching/matching.module.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../matching/matching.module"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/ride-lifecycle/ride-lifecycle.module.ts",
+      "to": "apps/api/src/modules/realtime/realtime.module.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../realtime/realtime.module"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/ride-lifecycle/ride-lifecycle.module.ts",
+      "to": "apps/api/src/modules/ride-lifecycle/ride-lifecycle.service.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./ride-lifecycle.service"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/ride-lifecycle/ride-lifecycle.module.ts#RideLifecycleModule",
+      "to": "apps/api/src/modules/matching/matching.module.ts#MatchingModule",
+      "kind": "di-import",
+      "meta": {}
+    },
+    {
+      "from": "apps/api/src/modules/ride-lifecycle/ride-lifecycle.module.ts#RideLifecycleModule",
+      "to": "apps/api/src/modules/realtime/realtime.module.ts#RealtimeModule",
+      "kind": "di-import",
+      "meta": {}
+    },
+    {
+      "from": "apps/api/src/modules/ride-lifecycle/ride-lifecycle.module.ts#RideLifecycleModule",
+      "to": "apps/api/src/modules/ride-lifecycle/ride-lifecycle.service.ts#RideLifecycleService",
+      "kind": "di-provides",
+      "meta": {}
+    },
+    {
+      "from": "apps/api/src/modules/ride-lifecycle/ride-lifecycle.service.ts",
+      "to": "apps/api/src/infra/redis/redis.module.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../infra/redis/redis.module"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/ride-lifecycle/ride-lifecycle.service.ts",
+      "to": "apps/api/src/modules/matching/ride-stop.repository.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../matching/ride-stop.repository"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/ride-lifecycle/ride-lifecycle.service.ts",
+      "to": "apps/api/src/modules/matching/shared-ride.repository.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../matching/shared-ride.repository"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/ride-lifecycle/ride-lifecycle.service.ts",
+      "to": "apps/api/src/modules/realtime/realtime.bus.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../realtime/realtime.bus"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/ride-lifecycle/ride-lifecycle.service.ts",
+      "to": "apps/api/src/modules/realtime/realtime.gateway.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../realtime/realtime.gateway"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/rides/dto/quote-ride.dto.ts",
+      "to": "apps/api/src/modules/rides/dto/create-ride.dto.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./create-ride.dto"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/rides/dto/transition-ride.dto.ts",
+      "to": "apps/api/src/modules/rides/ride-state-machine.service.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../ride-state-machine.service"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/rides/ride-state-machine.service.ts",
+      "to": "apps/api/src/infra/redis/redis.module.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../infra/redis/redis.module"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/rides/ride-state-machine.service.ts",
+      "to": "apps/api/src/modules/realtime/realtime.bus.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../realtime/realtime.bus"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/rides/ride-state-machine.service.ts",
+      "to": "apps/api/src/modules/rides/rides.repository.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./rides.repository"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/rides/rides-realtime.listener.ts",
+      "to": "apps/api/src/modules/realtime/realtime.bus.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../realtime/realtime.bus"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/rides/rides-realtime.listener.ts",
+      "to": "apps/api/src/modules/realtime/realtime.gateway.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../realtime/realtime.gateway"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/rides/rides-realtime.listener.ts",
+      "to": "apps/api/src/modules/rides/ride-state-machine.service.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./ride-state-machine.service"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/rides/rides-realtime.listener.ts",
+      "to": "apps/api/src/modules/rides/rides.repository.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./rides.repository"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/rides/rides.controller.ts",
+      "to": "apps/api/src/common/guards/auth.guard.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../common/guards/auth.guard"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/rides/rides.controller.ts",
+      "to": "apps/api/src/infra/redis/redis.module.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../infra/redis/redis.module"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/rides/rides.controller.ts",
+      "to": "apps/api/src/modules/dispatch/dispatch.service.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../dispatch/dispatch.service"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/rides/rides.controller.ts",
+      "to": "apps/api/src/modules/matching/matching.service.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../matching/matching.service"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/rides/rides.controller.ts",
+      "to": "apps/api/src/modules/matching/ride-stop.repository.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../matching/ride-stop.repository"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/rides/rides.controller.ts",
+      "to": "apps/api/src/modules/matching/route-similarity.service.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../matching/route-similarity.service"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/rides/rides.controller.ts",
+      "to": "apps/api/src/modules/matching/shared-ride.repository.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../matching/shared-ride.repository"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/rides/rides.controller.ts",
+      "to": "apps/api/src/modules/pricing/money.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../pricing/money"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/rides/rides.controller.ts",
+      "to": "apps/api/src/modules/pricing/pricing.service.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../pricing/pricing.service"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/rides/rides.controller.ts",
+      "to": "apps/api/src/modules/pricing/pricing.types.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../pricing/pricing.types"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/rides/rides.controller.ts",
+      "to": "apps/api/src/modules/realtime/realtime.bus.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../realtime/realtime.bus"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/rides/rides.controller.ts",
+      "to": "apps/api/src/modules/rides/dto/cancel-ride.dto.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./dto/cancel-ride.dto"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/rides/rides.controller.ts",
+      "to": "apps/api/src/modules/rides/dto/create-ride.dto.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./dto/create-ride.dto"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/rides/rides.controller.ts",
+      "to": "apps/api/src/modules/rides/dto/quote-ride.dto.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./dto/quote-ride.dto"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/rides/rides.controller.ts",
+      "to": "apps/api/src/modules/rides/dto/transition-ride.dto.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./dto/transition-ride.dto"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/rides/rides.controller.ts",
+      "to": "apps/api/src/modules/rides/quote-token.service.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./quote-token.service"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/rides/rides.controller.ts",
+      "to": "apps/api/src/modules/rides/ride-state-machine.service.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./ride-state-machine.service"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/rides/rides.controller.ts",
+      "to": "apps/api/src/modules/rides/rides.repository.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./rides.repository"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/rides/rides.controller.ts#RidesController",
+      "to": "route:GET /v1/rides/:id",
+      "kind": "route",
+      "meta": {
+        "handler": "getRide"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/rides/rides.controller.ts#RidesController",
+      "to": "route:GET /v1/rides/:id/stops",
+      "kind": "route",
+      "meta": {
+        "handler": "listStops"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/rides/rides.controller.ts#RidesController",
+      "to": "route:POST /v1/rides",
+      "kind": "route",
+      "meta": {
+        "handler": "create"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/rides/rides.controller.ts#RidesController",
+      "to": "route:POST /v1/rides/:id/cancel",
+      "kind": "route",
+      "meta": {
+        "handler": "cancel"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/rides/rides.controller.ts#RidesController",
+      "to": "route:POST /v1/rides/:id/state",
+      "kind": "route",
+      "meta": {
+        "handler": "transition"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/rides/rides.controller.ts#RidesController",
+      "to": "route:POST /v1/rides/quote",
+      "kind": "route",
+      "meta": {
+        "handler": "quote"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/rides/rides.module.ts",
+      "to": "apps/api/src/modules/auth/auth.module.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../auth/auth.module"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/rides/rides.module.ts",
+      "to": "apps/api/src/modules/matching/matching.module.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../matching/matching.module"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/rides/rides.module.ts",
+      "to": "apps/api/src/modules/pricing/pricing.module.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../pricing/pricing.module"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/rides/rides.module.ts",
+      "to": "apps/api/src/modules/realtime/realtime.module.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../realtime/realtime.module"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/rides/rides.module.ts",
+      "to": "apps/api/src/modules/rides/quote-token.service.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./quote-token.service"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/rides/rides.module.ts",
+      "to": "apps/api/src/modules/rides/ride-state-machine.service.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./ride-state-machine.service"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/rides/rides.module.ts",
+      "to": "apps/api/src/modules/rides/rides-realtime.listener.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./rides-realtime.listener"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/rides/rides.module.ts",
+      "to": "apps/api/src/modules/rides/rides.controller.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./rides.controller"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/rides/rides.module.ts",
+      "to": "apps/api/src/modules/rides/rides.repository.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./rides.repository"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/rides/rides.module.ts#RidesModule",
+      "to": "apps/api/src/modules/auth/auth.module.ts#AuthModule",
+      "kind": "di-import",
+      "meta": {}
+    },
+    {
+      "from": "apps/api/src/modules/rides/rides.module.ts#RidesModule",
+      "to": "apps/api/src/modules/matching/matching.module.ts#MatchingModule",
+      "kind": "di-import",
+      "meta": {}
+    },
+    {
+      "from": "apps/api/src/modules/rides/rides.module.ts#RidesModule",
+      "to": "apps/api/src/modules/pricing/pricing.module.ts#PricingModule",
+      "kind": "di-import",
+      "meta": {}
+    },
+    {
+      "from": "apps/api/src/modules/rides/rides.module.ts#RidesModule",
+      "to": "apps/api/src/modules/realtime/realtime.module.ts#RealtimeModule",
+      "kind": "di-import",
+      "meta": {}
+    },
+    {
+      "from": "apps/api/src/modules/rides/rides.module.ts#RidesModule",
+      "to": "apps/api/src/modules/rides/quote-token.service.ts#QuoteTokenService",
+      "kind": "di-provides",
+      "meta": {}
+    },
+    {
+      "from": "apps/api/src/modules/rides/rides.module.ts#RidesModule",
+      "to": "apps/api/src/modules/rides/ride-state-machine.service.ts#RideStateMachine",
+      "kind": "di-provides",
+      "meta": {}
+    },
+    {
+      "from": "apps/api/src/modules/rides/rides.module.ts#RidesModule",
+      "to": "apps/api/src/modules/rides/rides-realtime.listener.ts#RidesRealtimeListener",
+      "kind": "di-provides",
+      "meta": {}
+    },
+    {
+      "from": "apps/api/src/modules/rides/rides.module.ts#RidesModule",
+      "to": "apps/api/src/modules/rides/rides.controller.ts#RidesController",
+      "kind": "di-provides",
+      "meta": {}
+    },
+    {
+      "from": "apps/api/src/modules/rides/rides.module.ts#RidesModule",
+      "to": "apps/api/src/modules/rides/rides.repository.ts#RidesRepository",
+      "kind": "di-provides",
+      "meta": {}
+    },
+    {
+      "from": "apps/api/src/modules/rides/rides.repository.ts",
+      "to": "apps/api/src/db/schema.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../db/schema"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/rides/rides.repository.ts",
+      "to": "apps/api/src/infra/db/drizzle.module.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../infra/db/drizzle.module"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/vehicles/dto/update-vehicle.dto.ts",
+      "to": "apps/api/src/modules/vehicles/dto/create-vehicle.dto.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./create-vehicle.dto"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/vehicles/vehicles.controller.ts",
+      "to": "apps/api/src/common/guards/auth.guard.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../common/guards/auth.guard"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/vehicles/vehicles.controller.ts",
+      "to": "apps/api/src/modules/vehicles/dto/create-vehicle.dto.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./dto/create-vehicle.dto"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/vehicles/vehicles.controller.ts",
+      "to": "apps/api/src/modules/vehicles/dto/update-vehicle.dto.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./dto/update-vehicle.dto"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/vehicles/vehicles.controller.ts",
+      "to": "apps/api/src/modules/vehicles/vehicles.service.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./vehicles.service"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/vehicles/vehicles.controller.ts#VehiclesController",
+      "to": "route:GET /v1/vehicles",
+      "kind": "route",
+      "meta": {
+        "handler": "findAll"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/vehicles/vehicles.controller.ts#VehiclesController",
+      "to": "route:PATCH /v1/vehicles/:id",
+      "kind": "route",
+      "meta": {
+        "handler": "update"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/vehicles/vehicles.controller.ts#VehiclesController",
+      "to": "route:POST /v1/vehicles",
+      "kind": "route",
+      "meta": {
+        "handler": "create"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/vehicles/vehicles.module.ts",
+      "to": "apps/api/src/modules/auth/auth.module.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../auth/auth.module"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/vehicles/vehicles.module.ts",
+      "to": "apps/api/src/modules/vehicles/vehicles.controller.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./vehicles.controller"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/vehicles/vehicles.module.ts",
+      "to": "apps/api/src/modules/vehicles/vehicles.service.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./vehicles.service"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/vehicles/vehicles.module.ts#VehiclesModule",
+      "to": "apps/api/src/modules/auth/auth.module.ts#AuthModule",
+      "kind": "di-import",
+      "meta": {}
+    },
+    {
+      "from": "apps/api/src/modules/vehicles/vehicles.module.ts#VehiclesModule",
+      "to": "apps/api/src/modules/vehicles/vehicles.controller.ts#VehiclesController",
+      "kind": "di-provides",
+      "meta": {}
+    },
+    {
+      "from": "apps/api/src/modules/vehicles/vehicles.module.ts#VehiclesModule",
+      "to": "apps/api/src/modules/vehicles/vehicles.service.ts#VehiclesService",
+      "kind": "di-provides",
+      "meta": {}
+    },
+    {
+      "from": "apps/api/src/modules/vehicles/vehicles.service.ts",
+      "to": "apps/api/src/db/schema.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../db/schema"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/vehicles/vehicles.service.ts",
+      "to": "apps/api/src/infra/db/drizzle.module.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../infra/db/drizzle.module"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/vehicles/vehicles.service.ts",
+      "to": "apps/api/src/modules/vehicles/dto/create-vehicle.dto.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./dto/create-vehicle.dto"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/vehicles/vehicles.service.ts",
+      "to": "apps/api/src/modules/vehicles/dto/update-vehicle.dto.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./dto/update-vehicle.dto"
+      }
+    },
+    {
+      "from": "apps/driver-app/lib/app.dart",
+      "to": "apps/driver-app/lib/core/auth/auth_state.dart",
+      "kind": "imports",
+      "meta": {
+        "spec": "core/auth/auth_state.dart"
+      }
+    },
+    {
+      "from": "apps/driver-app/lib/app.dart",
+      "to": "apps/driver-app/lib/di/providers.dart",
+      "kind": "imports",
+      "meta": {
+        "spec": "di/providers.dart"
+      }
+    },
+    {
+      "from": "apps/driver-app/lib/app.dart",
+      "to": "apps/driver-app/lib/features/offer/offer_controller.dart",
+      "kind": "imports",
+      "meta": {
+        "spec": "features/offer/offer_controller.dart"
+      }
+    },
+    {
+      "from": "apps/driver-app/lib/app.dart",
+      "to": "apps/driver-app/lib/features/shared_ride/shared_ride_controller.dart",
+      "kind": "imports",
+      "meta": {
+        "spec": "features/shared_ride/shared_ride_controller.dart"
+      }
+    },
+    {
+      "from": "apps/driver-app/lib/app.dart",
+      "to": "apps/driver-app/lib/routing/app_router.dart",
+      "kind": "imports",
+      "meta": {
+        "spec": "routing/app_router.dart"
+      }
+    },
+    {
+      "from": "apps/driver-app/lib/core/api/api_client.dart",
+      "to": "apps/driver-app/lib/core/auth/token_store.dart",
+      "kind": "imports",
+      "meta": {
+        "spec": "../auth/token_store.dart"
+      }
+    },
+    {
+      "from": "apps/driver-app/lib/core/auth/auth_notifier.dart",
+      "to": "apps/driver-app/lib/core/auth/auth_state.dart",
+      "kind": "imports",
+      "meta": {
+        "spec": "auth_state.dart"
+      }
+    },
+    {
+      "from": "apps/driver-app/lib/core/auth/auth_notifier.dart",
+      "to": "apps/driver-app/lib/core/auth/token_store.dart",
+      "kind": "imports",
+      "meta": {
+        "spec": "token_store.dart"
+      }
+    },
+    {
+      "from": "apps/driver-app/lib/core/driver/driver_state_notifier.dart",
+      "to": "apps/driver-app/lib/core/auth/token_store.dart",
+      "kind": "imports",
+      "meta": {
+        "spec": "../auth/token_store.dart"
+      }
+    },
+    {
+      "from": "apps/driver-app/lib/core/driver/driver_state_notifier.dart",
+      "to": "apps/driver-app/lib/core/driver/driver_state.dart",
+      "kind": "imports",
+      "meta": {
+        "spec": "driver_state.dart"
+      }
+    },
+    {
+      "from": "apps/driver-app/lib/core/driver/driver_state_notifier.dart",
+      "to": "apps/driver-app/lib/core/location/foreground_service.dart",
+      "kind": "imports",
+      "meta": {
+        "spec": "../location/foreground_service.dart"
+      }
+    },
+    {
+      "from": "apps/driver-app/lib/core/driver/driver_state_notifier.dart",
+      "to": "apps/driver-app/lib/core/realtime/location_bridge.dart",
+      "kind": "imports",
+      "meta": {
+        "spec": "../realtime/location_bridge.dart"
+      }
+    },
+    {
+      "from": "apps/driver-app/lib/core/realtime/realtime_socket.dart",
+      "to": "apps/driver-app/lib/core/auth/token_store.dart",
+      "kind": "imports",
+      "meta": {
+        "spec": "../auth/token_store.dart"
+      }
+    },
+    {
+      "from": "apps/driver-app/lib/core/realtime/realtime_socket.dart",
+      "to": "apps/driver-app/lib/features/offer/offer_models.dart",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../features/offer/offer_models.dart"
+      }
+    },
+    {
+      "from": "apps/driver-app/lib/core/realtime/realtime_socket.dart",
+      "to": "apps/driver-app/lib/features/shared_ride/shared_ride_provider.dart",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../features/shared_ride/shared_ride_provider.dart"
+      }
+    },
+    {
+      "from": "apps/driver-app/lib/di/providers.dart",
+      "to": "apps/driver-app/lib/core/api/api_client.dart",
+      "kind": "imports",
+      "meta": {
+        "spec": "../core/api/api_client.dart"
+      }
+    },
+    {
+      "from": "apps/driver-app/lib/di/providers.dart",
+      "to": "apps/driver-app/lib/core/auth/auth_notifier.dart",
+      "kind": "imports",
+      "meta": {
+        "spec": "../core/auth/auth_notifier.dart"
+      }
+    },
+    {
+      "from": "apps/driver-app/lib/di/providers.dart",
+      "to": "apps/driver-app/lib/core/auth/auth_state.dart",
+      "kind": "imports",
+      "meta": {
+        "spec": "../core/auth/auth_state.dart"
+      }
+    },
+    {
+      "from": "apps/driver-app/lib/di/providers.dart",
+      "to": "apps/driver-app/lib/core/auth/token_store.dart",
+      "kind": "imports",
+      "meta": {
+        "spec": "../core/auth/token_store.dart"
+      }
+    },
+    {
+      "from": "apps/driver-app/lib/di/providers.dart",
+      "to": "apps/driver-app/lib/core/driver/driver_state_notifier.dart",
+      "kind": "imports",
+      "meta": {
+        "spec": "../core/driver/driver_state_notifier.dart"
+      }
+    },
+    {
+      "from": "apps/driver-app/lib/di/providers.dart",
+      "to": "apps/driver-app/lib/core/driver/driver_state.dart",
+      "kind": "imports",
+      "meta": {
+        "spec": "../core/driver/driver_state.dart"
+      }
+    },
+    {
+      "from": "apps/driver-app/lib/di/providers.dart",
+      "to": "apps/driver-app/lib/core/location/foreground_service.dart",
+      "kind": "imports",
+      "meta": {
+        "spec": "../core/location/foreground_service.dart"
+      }
+    },
+    {
+      "from": "apps/driver-app/lib/di/providers.dart",
+      "to": "apps/driver-app/lib/core/realtime/realtime_socket.dart",
+      "kind": "imports",
+      "meta": {
+        "spec": "../core/realtime/realtime_socket.dart"
+      }
+    },
+    {
+      "from": "apps/driver-app/lib/di/providers.dart",
+      "to": "apps/driver-app/lib/di/providers.dart#_exchangeDioProvider",
+      "kind": "riverpod-provides",
+      "meta": {}
+    },
+    {
+      "from": "apps/driver-app/lib/di/providers.dart",
+      "to": "apps/driver-app/lib/di/providers.dart#_foregroundServiceProvider",
+      "kind": "riverpod-provides",
+      "meta": {}
+    },
+    {
+      "from": "apps/driver-app/lib/di/providers.dart",
+      "to": "apps/driver-app/lib/di/providers.dart#apiClientProvider",
+      "kind": "riverpod-provides",
+      "meta": {}
+    },
+    {
+      "from": "apps/driver-app/lib/di/providers.dart",
+      "to": "apps/driver-app/lib/di/providers.dart#authProvider",
+      "kind": "riverpod-provides",
+      "meta": {}
+    },
+    {
+      "from": "apps/driver-app/lib/di/providers.dart",
+      "to": "apps/driver-app/lib/di/providers.dart#driverStateProvider",
+      "kind": "riverpod-provides",
+      "meta": {}
+    },
+    {
+      "from": "apps/driver-app/lib/di/providers.dart",
+      "to": "apps/driver-app/lib/di/providers.dart#firebaseAuthProvider",
+      "kind": "riverpod-provides",
+      "meta": {}
+    },
+    {
+      "from": "apps/driver-app/lib/di/providers.dart",
+      "to": "apps/driver-app/lib/di/providers.dart#locationStreamProvider",
+      "kind": "riverpod-provides",
+      "meta": {}
+    },
+    {
+      "from": "apps/driver-app/lib/di/providers.dart",
+      "to": "apps/driver-app/lib/di/providers.dart#realtimeSocketProvider",
+      "kind": "riverpod-provides",
+      "meta": {}
+    },
+    {
+      "from": "apps/driver-app/lib/di/providers.dart",
+      "to": "apps/driver-app/lib/di/providers.dart#tokenStoreProvider",
+      "kind": "riverpod-provides",
+      "meta": {}
+    },
+    {
+      "from": "apps/driver-app/lib/di/providers.dart",
+      "to": "apps/driver-app/lib/di/providers.dart#vehiclesProvider",
+      "kind": "riverpod-provides",
+      "meta": {}
+    },
+    {
+      "from": "apps/driver-app/lib/di/providers.dart",
+      "to": "apps/driver-app/lib/features/profile/models/vehicle.dart",
+      "kind": "imports",
+      "meta": {
+        "spec": "../features/profile/models/vehicle.dart"
+      }
+    },
+    {
+      "from": "apps/driver-app/lib/di/providers.dart",
+      "to": "apps/driver-app/lib/features/shared_ride/shared_ride_provider.dart",
+      "kind": "imports",
+      "meta": {
+        "spec": "../features/shared_ride/shared_ride_provider.dart"
+      }
+    },
+    {
+      "from": "apps/driver-app/lib/features/auth/sign_in_screen.dart",
+      "to": "apps/driver-app/lib/di/providers.dart",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../di/providers.dart"
+      }
+    },
+    {
+      "from": "apps/driver-app/lib/features/home/home_screen.dart",
+      "to": "apps/driver-app/lib/core/driver/driver_state.dart",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../core/driver/driver_state.dart"
+      }
+    },
+    {
+      "from": "apps/driver-app/lib/features/home/home_screen.dart",
+      "to": "apps/driver-app/lib/di/providers.dart",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../di/providers.dart"
+      }
+    },
+    {
+      "from": "apps/driver-app/lib/features/home/home_screen.dart",
+      "to": "apps/driver-app/lib/features/home/oem_onboarding_sheet.dart",
+      "kind": "imports",
+      "meta": {
+        "spec": "oem_onboarding_sheet.dart"
+      }
+    },
+    {
+      "from": "apps/driver-app/lib/features/home/home_screen.dart",
+      "to": "apps/driver-app/lib/features/home/service_kill_banner.dart",
+      "kind": "imports",
+      "meta": {
+        "spec": "service_kill_banner.dart"
+      }
+    },
+    {
+      "from": "apps/driver-app/lib/features/offer/offer_controller.dart",
+      "to": "apps/driver-app/lib/di/providers.dart",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../di/providers.dart"
+      }
+    },
+    {
+      "from": "apps/driver-app/lib/features/offer/offer_controller.dart",
+      "to": "apps/driver-app/lib/features/offer/offer_controller.dart#offerControllerProvider",
+      "kind": "riverpod-provides",
+      "meta": {}
+    },
+    {
+      "from": "apps/driver-app/lib/features/offer/offer_controller.dart",
+      "to": "apps/driver-app/lib/features/offer/offer_models.dart",
+      "kind": "imports",
+      "meta": {
+        "spec": "offer_models.dart"
+      }
+    },
+    {
+      "from": "apps/driver-app/lib/features/offer/offer_controller.dart",
+      "to": "apps/driver-app/lib/features/offer/offer_provider.dart",
+      "kind": "imports",
+      "meta": {
+        "spec": "offer_provider.dart"
+      }
+    },
+    {
+      "from": "apps/driver-app/lib/features/offer/offer_provider.dart",
+      "to": "apps/driver-app/lib/di/providers.dart",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../di/providers.dart"
+      }
+    },
+    {
+      "from": "apps/driver-app/lib/features/offer/offer_provider.dart",
+      "to": "apps/driver-app/lib/features/offer/offer_models.dart",
+      "kind": "imports",
+      "meta": {
+        "spec": "offer_models.dart"
+      }
+    },
+    {
+      "from": "apps/driver-app/lib/features/offer/offer_provider.dart",
+      "to": "apps/driver-app/lib/features/offer/offer_provider.dart#offerProvider",
+      "kind": "riverpod-provides",
+      "meta": {}
+    },
+    {
+      "from": "apps/driver-app/lib/features/offer/offer_provider.dart",
+      "to": "apps/driver-app/lib/features/offer/offer_provider.dart#offerResponseSenderProvider",
+      "kind": "riverpod-provides",
+      "meta": {}
+    },
+    {
+      "from": "apps/driver-app/lib/features/offer/offer_screen.dart",
+      "to": "apps/driver-app/lib/features/offer/offer_models.dart",
+      "kind": "imports",
+      "meta": {
+        "spec": "offer_models.dart"
+      }
+    },
+    {
+      "from": "apps/driver-app/lib/features/offer/offer_screen.dart",
+      "to": "apps/driver-app/lib/features/offer/offer_provider.dart",
+      "kind": "imports",
+      "meta": {
+        "spec": "offer_provider.dart"
+      }
+    },
+    {
+      "from": "apps/driver-app/lib/features/profile/profile_screen.dart",
+      "to": "apps/driver-app/lib/di/providers.dart",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../di/providers.dart"
+      }
+    },
+    {
+      "from": "apps/driver-app/lib/features/profile/profile_screen.dart",
+      "to": "apps/driver-app/lib/features/profile/models/vehicle.dart",
+      "kind": "imports",
+      "meta": {
+        "spec": "models/vehicle.dart"
+      }
+    },
+    {
+      "from": "apps/driver-app/lib/features/profile/vehicle_form_screen.dart",
+      "to": "apps/driver-app/lib/di/providers.dart",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../di/providers.dart"
+      }
+    },
+    {
+      "from": "apps/driver-app/lib/features/rating/rating_provider.dart",
+      "to": "apps/driver-app/lib/di/providers.dart",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../di/providers.dart"
+      }
+    },
+    {
+      "from": "apps/driver-app/lib/features/rating/rating_provider.dart",
+      "to": "apps/driver-app/lib/features/rating/rating_provider.dart#ratingProvider",
+      "kind": "riverpod-provides",
+      "meta": {}
+    },
+    {
+      "from": "apps/driver-app/lib/features/rating/rating_provider.dart",
+      "to": "apps/driver-app/lib/features/rating/rating_provider.dart#ratingServiceProvider",
+      "kind": "riverpod-provides",
+      "meta": {}
+    },
+    {
+      "from": "apps/driver-app/lib/features/rating/rating_screen.dart",
+      "to": "apps/driver-app/lib/features/rating/rating_provider.dart",
+      "kind": "imports",
+      "meta": {
+        "spec": "rating_provider.dart"
+      }
+    },
+    {
+      "from": "apps/driver-app/lib/features/ride/ride_provider.dart",
+      "to": "apps/driver-app/lib/di/providers.dart",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../di/providers.dart"
+      }
+    },
+    {
+      "from": "apps/driver-app/lib/features/ride/ride_provider.dart",
+      "to": "apps/driver-app/lib/features/ride/ride_models.dart",
+      "kind": "imports",
+      "meta": {
+        "spec": "ride_models.dart"
+      }
+    },
+    {
+      "from": "apps/driver-app/lib/features/ride/ride_provider.dart",
+      "to": "apps/driver-app/lib/features/ride/ride_provider.dart#mapsLauncherProvider",
+      "kind": "riverpod-provides",
+      "meta": {}
+    },
+    {
+      "from": "apps/driver-app/lib/features/ride/ride_provider.dart",
+      "to": "apps/driver-app/lib/features/ride/ride_provider.dart#rideProvider",
+      "kind": "riverpod-provides",
+      "meta": {}
+    },
+    {
+      "from": "apps/driver-app/lib/features/ride/ride_provider.dart",
+      "to": "apps/driver-app/lib/features/ride/ride_provider.dart#rideServiceProvider",
+      "kind": "riverpod-provides",
+      "meta": {}
+    },
+    {
+      "from": "apps/driver-app/lib/features/ride/ride_screen.dart",
+      "to": "apps/driver-app/lib/features/ride/ride_models.dart",
+      "kind": "imports",
+      "meta": {
+        "spec": "ride_models.dart"
+      }
+    },
+    {
+      "from": "apps/driver-app/lib/features/ride/ride_screen.dart",
+      "to": "apps/driver-app/lib/features/ride/ride_provider.dart",
+      "kind": "imports",
+      "meta": {
+        "spec": "ride_provider.dart"
+      }
+    },
+    {
+      "from": "apps/driver-app/lib/features/shared_ride/shared_ride_controller.dart",
+      "to": "apps/driver-app/lib/core/realtime/realtime_socket.dart",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../core/realtime/realtime_socket.dart"
+      }
+    },
+    {
+      "from": "apps/driver-app/lib/features/shared_ride/shared_ride_controller.dart",
+      "to": "apps/driver-app/lib/di/providers.dart",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../di/providers.dart"
+      }
+    },
+    {
+      "from": "apps/driver-app/lib/features/shared_ride/shared_ride_controller.dart",
+      "to": "apps/driver-app/lib/features/shared_ride/shared_ride_controller.dart#sharedRideControllerProvider",
+      "kind": "riverpod-provides",
+      "meta": {}
+    },
+    {
+      "from": "apps/driver-app/lib/features/shared_ride/shared_ride_controller.dart",
+      "to": "apps/driver-app/lib/features/shared_ride/shared_ride_models.dart",
+      "kind": "imports",
+      "meta": {
+        "spec": "shared_ride_models.dart"
+      }
+    },
+    {
+      "from": "apps/driver-app/lib/features/shared_ride/shared_ride_controller.dart",
+      "to": "apps/driver-app/lib/features/shared_ride/shared_ride_provider.dart",
+      "kind": "imports",
+      "meta": {
+        "spec": "shared_ride_provider.dart"
+      }
+    },
+    {
+      "from": "apps/driver-app/lib/features/shared_ride/shared_ride_provider.dart",
+      "to": "apps/driver-app/lib/features/shared_ride/shared_ride_models.dart",
+      "kind": "imports",
+      "meta": {
+        "spec": "shared_ride_models.dart"
+      }
+    },
+    {
+      "from": "apps/driver-app/lib/features/shared_ride/shared_ride_provider.dart",
+      "to": "apps/driver-app/lib/features/shared_ride/shared_ride_provider.dart#sharedRideProvider",
+      "kind": "riverpod-provides",
+      "meta": {}
+    },
+    {
+      "from": "apps/driver-app/lib/features/shared_ride/shared_ride_provider.dart",
+      "to": "apps/driver-app/lib/features/shared_ride/shared_ride_provider.dart#sharedRideSenderProvider",
+      "kind": "riverpod-provides",
+      "meta": {}
+    },
+    {
+      "from": "apps/driver-app/lib/features/shared_ride/shared_ride_screen.dart",
+      "to": "apps/driver-app/lib/features/shared_ride/shared_ride_models.dart",
+      "kind": "imports",
+      "meta": {
+        "spec": "shared_ride_models.dart"
+      }
+    },
+    {
+      "from": "apps/driver-app/lib/features/shared_ride/shared_ride_screen.dart",
+      "to": "apps/driver-app/lib/features/shared_ride/shared_ride_provider.dart",
+      "kind": "imports",
+      "meta": {
+        "spec": "shared_ride_provider.dart"
+      }
+    },
+    {
+      "from": "apps/driver-app/lib/features/shared_ride/shared_ride_screen.dart",
+      "to": "apps/driver-app/lib/features/shared_ride/stop_list_tile.dart",
+      "kind": "imports",
+      "meta": {
+        "spec": "stop_list_tile.dart"
+      }
+    },
+    {
+      "from": "apps/driver-app/lib/features/shared_ride/stop_list_tile.dart",
+      "to": "apps/driver-app/lib/features/shared_ride/shared_ride_models.dart",
+      "kind": "imports",
+      "meta": {
+        "spec": "shared_ride_models.dart"
+      }
+    },
+    {
+      "from": "apps/driver-app/lib/main.dart",
+      "to": "apps/driver-app/lib/app.dart",
+      "kind": "imports",
+      "meta": {
+        "spec": "app.dart"
+      }
+    },
+    {
+      "from": "apps/driver-app/lib/main.dart",
+      "to": "apps/driver-app/lib/di/providers.dart",
+      "kind": "imports",
+      "meta": {
+        "spec": "di/providers.dart"
+      }
+    },
+    {
+      "from": "apps/driver-app/lib/routing/app_router.dart",
+      "to": "apps/driver-app/lib/core/auth/auth_state.dart",
+      "kind": "imports",
+      "meta": {
+        "spec": "../core/auth/auth_state.dart"
+      }
+    },
+    {
+      "from": "apps/driver-app/lib/routing/app_router.dart",
+      "to": "apps/driver-app/lib/di/providers.dart",
+      "kind": "imports",
+      "meta": {
+        "spec": "../di/providers.dart"
+      }
+    },
+    {
+      "from": "apps/driver-app/lib/routing/app_router.dart",
+      "to": "apps/driver-app/lib/features/auth/sign_in_screen.dart",
+      "kind": "imports",
+      "meta": {
+        "spec": "../features/auth/sign_in_screen.dart"
+      }
+    },
+    {
+      "from": "apps/driver-app/lib/routing/app_router.dart",
+      "to": "apps/driver-app/lib/features/earnings/earnings_screen.dart",
+      "kind": "imports",
+      "meta": {
+        "spec": "../features/earnings/earnings_screen.dart"
+      }
+    },
+    {
+      "from": "apps/driver-app/lib/routing/app_router.dart",
+      "to": "apps/driver-app/lib/features/home/home_screen.dart",
+      "kind": "imports",
+      "meta": {
+        "spec": "../features/home/home_screen.dart"
+      }
+    },
+    {
+      "from": "apps/driver-app/lib/routing/app_router.dart",
+      "to": "apps/driver-app/lib/features/offer/offer_screen.dart",
+      "kind": "imports",
+      "meta": {
+        "spec": "../features/offer/offer_screen.dart"
+      }
+    },
+    {
+      "from": "apps/driver-app/lib/routing/app_router.dart",
+      "to": "apps/driver-app/lib/features/profile/profile_screen.dart",
+      "kind": "imports",
+      "meta": {
+        "spec": "../features/profile/profile_screen.dart"
+      }
+    },
+    {
+      "from": "apps/driver-app/lib/routing/app_router.dart",
+      "to": "apps/driver-app/lib/features/profile/vehicle_form_screen.dart",
+      "kind": "imports",
+      "meta": {
+        "spec": "../features/profile/vehicle_form_screen.dart"
+      }
+    },
+    {
+      "from": "apps/driver-app/lib/routing/app_router.dart",
+      "to": "apps/driver-app/lib/features/rating/rating_screen.dart",
+      "kind": "imports",
+      "meta": {
+        "spec": "../features/rating/rating_screen.dart"
+      }
+    },
+    {
+      "from": "apps/driver-app/lib/routing/app_router.dart",
+      "to": "apps/driver-app/lib/features/ride/ride_screen.dart",
+      "kind": "imports",
+      "meta": {
+        "spec": "../features/ride/ride_screen.dart"
+      }
+    },
+    {
+      "from": "apps/driver-app/lib/routing/app_router.dart",
+      "to": "apps/driver-app/lib/features/shared_ride/shared_ride_screen.dart",
+      "kind": "imports",
+      "meta": {
+        "spec": "../features/shared_ride/shared_ride_screen.dart"
+      }
+    },
+    {
+      "from": "apps/driver-app/lib/routing/app_router.dart",
+      "to": "apps/driver-app/lib/routing/app_router.dart#routerProvider",
+      "kind": "riverpod-provides",
+      "meta": {}
+    },
+    {
+      "from": "apps/web/src/app/book/address-search.tsx",
+      "to": "apps/web/src/lib/booking/types.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../lib/booking/types"
+      }
+    },
+    {
+      "from": "apps/web/src/app/book/address-search.tsx",
+      "to": "apps/web/src/lib/geo/nominatim.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../lib/geo/nominatim"
+      }
+    },
+    {
+      "from": "apps/web/src/app/book/book-client.tsx",
+      "to": "apps/web/src/app/book/address-search.tsx",
+      "kind": "imports",
+      "meta": {
+        "spec": "./address-search"
+      }
+    },
+    {
+      "from": "apps/web/src/app/book/book-client.tsx",
+      "to": "apps/web/src/app/book/pool-badge.tsx",
+      "kind": "imports",
+      "meta": {
+        "spec": "./pool-badge"
+      }
+    },
+    {
+      "from": "apps/web/src/app/book/book-client.tsx",
+      "to": "apps/web/src/app/book/ride-tracking-panel.tsx",
+      "kind": "imports",
+      "meta": {
+        "spec": "./ride-tracking-panel"
+      }
+    },
+    {
+      "from": "apps/web/src/app/book/book-client.tsx",
+      "to": "apps/web/src/app/book/ride-type-toggle.tsx",
+      "kind": "imports",
+      "meta": {
+        "spec": "./ride-type-toggle"
+      }
+    },
+    {
+      "from": "apps/web/src/app/book/book-client.tsx",
+      "to": "apps/web/src/app/book/solo-fallback-banner.tsx",
+      "kind": "imports",
+      "meta": {
+        "spec": "./solo-fallback-banner"
+      }
+    },
+    {
+      "from": "apps/web/src/app/book/book-client.tsx",
+      "to": "apps/web/src/lib/auth/store.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../lib/auth/store"
+      }
+    },
+    {
+      "from": "apps/web/src/app/book/book-client.tsx",
+      "to": "apps/web/src/lib/auth/with-auth.tsx",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../lib/auth/with-auth"
+      }
+    },
+    {
+      "from": "apps/web/src/app/book/book-client.tsx",
+      "to": "apps/web/src/lib/booking/api.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../lib/booking/api"
+      }
+    },
+    {
+      "from": "apps/web/src/app/book/book-client.tsx",
+      "to": "apps/web/src/lib/booking/store.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../lib/booking/store"
+      }
+    },
+    {
+      "from": "apps/web/src/app/book/book-client.tsx",
+      "to": "apps/web/src/lib/booking/types.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../lib/booking/types"
+      }
+    },
+    {
+      "from": "apps/web/src/app/book/book-client.tsx",
+      "to": "apps/web/src/lib/booking/ws.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../lib/booking/ws"
+      }
+    },
+    {
+      "from": "apps/web/src/app/book/book-client.tsx",
+      "to": "apps/web/src/lib/geo/nominatim.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../lib/geo/nominatim"
+      }
+    },
+    {
+      "from": "apps/web/src/app/book/map-picker.tsx",
+      "to": "apps/web/src/lib/booking/types.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../lib/booking/types"
+      }
+    },
+    {
+      "from": "apps/web/src/app/book/ride-tracking-panel.tsx",
+      "to": "apps/web/src/lib/booking/store.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../lib/booking/store"
+      }
+    },
+    {
+      "from": "apps/web/src/app/book/ride-tracking-panel.tsx",
+      "to": "apps/web/src/lib/booking/types.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../lib/booking/types"
+      }
+    },
+    {
+      "from": "apps/web/src/app/book/ride-type-toggle.tsx",
+      "to": "apps/web/src/lib/booking/types.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../lib/booking/types"
+      }
+    },
+    {
+      "from": "apps/web/src/app/book/solo-fallback-banner.tsx",
+      "to": "apps/web/src/lib/booking/types.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../lib/booking/types"
+      }
+    },
+    {
+      "from": "apps/web/src/app/page.tsx",
+      "to": "packages/shared/src/index.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "@rcab/shared"
+      }
+    },
+    {
+      "from": "apps/web/src/app/signin/sign-in-client.tsx",
+      "to": "apps/web/src/lib/auth/firebase.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../lib/auth/firebase"
+      }
+    },
+    {
+      "from": "apps/web/src/app/signin/sign-in-client.tsx",
+      "to": "apps/web/src/lib/auth/store.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../lib/auth/store"
+      }
+    },
+    {
+      "from": "apps/web/src/lib/auth/with-auth.tsx",
+      "to": "apps/web/src/lib/auth/store.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./store"
+      }
+    },
+    {
+      "from": "apps/web/src/lib/booking/api.ts",
+      "to": "apps/web/src/lib/booking/types.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./types"
+      }
+    },
+    {
+      "from": "apps/web/src/lib/booking/store.ts",
+      "to": "apps/web/src/lib/booking/types.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./types"
+      }
+    },
+    {
+      "from": "apps/web/src/lib/booking/ws.ts",
+      "to": "apps/web/src/lib/booking/types.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./types"
+      }
+    },
+    {
+      "from": "table:authRefreshToken",
+      "to": "table:appUser",
+      "kind": "fk",
+      "meta": {}
+    },
+    {
+      "from": "table:client",
+      "to": "table:appUser",
+      "kind": "fk",
+      "meta": {}
+    },
+    {
+      "from": "table:driver",
+      "to": "table:appUser",
+      "kind": "fk",
+      "meta": {}
+    },
+    {
+      "from": "table:rides",
+      "to": "table:appUser",
+      "kind": "fk",
+      "meta": {}
+    },
+    {
+      "from": "table:rideStop",
+      "to": "table:sharedRide",
+      "kind": "fk",
+      "meta": {}
+    },
+    {
+      "from": "table:vehicle",
+      "to": "table:driver",
+      "kind": "fk",
+      "meta": {}
+    }
+  ]
+}

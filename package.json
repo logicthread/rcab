@@ -24,7 +24,9 @@
     "prod:test": "pnpm prod:up && pnpm prod:smoke && pnpm obs:smoke; rc=$?; pnpm prod:down; exit $rc",
     "setup:uptime-kuma": "tsx scripts/setup-uptime-kuma.ts",
     "system:probe": "node scripts/system-probe.mjs",
-    "test:probe": "vitest run --config vitest.probe.config.mjs"
+    "test:probe": "vitest run --config vitest.probe.config.mjs",
+    "code:graph": "node scripts/codegraph/build.mjs",
+    "code:graph:check": "node scripts/codegraph/drift-check.mjs"
   },
   "devDependencies": {
     "@typescript-eslint/eslint-plugin": "^8.32.1",

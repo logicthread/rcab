@@ -22,6 +22,10 @@ WORKING.md
 # System probe report (machine-local, never committed)
 system-probe-report.json
 
+# Code graph staleness flag (machine-local; graph.json/graph.md ARE committed)
+codegraph/.stale
+codegraph/memory-ingest.json
+
 # --- Future code (monorepo) — ignored ahead of time so accidental builds don't pollute commits
 
 # Node / pnpm / turbo

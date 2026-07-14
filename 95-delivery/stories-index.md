@@ -33,6 +33,7 @@ audience: both
 | RCAB-E1.S7 | [[story-rcab-e1-s7-db-bootstrap]] — Postgres + Redis + OSRM containers, migration runner | ■ |
 | RCAB-E1.S8 | [[story-rcab-e1-s8-health-endpoints]] — `/v1/health/live`, `/v1/health/ready` | ■ |
 | RCAB-E1.S9 | [[story-rcab-e1-s9-system-probe]] — `pnpm system:probe` (host capability + load estimate) | ■ |
+| RCAB-E1.S10 | [[story-rcab-e1-s10-code-graph]] — code knowledge graph for agent memory (`pnpm code:graph` + `/code-graph`) | ▶ |
 
 ## E2 — Auth & Identity → Demo 1 · "I am a real user"
 *Firebase phone OTP, JWT issue/refresh, Google linking.* See [[epic-e2-auth]].
