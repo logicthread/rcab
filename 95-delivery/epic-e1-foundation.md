@@ -35,7 +35,8 @@ Completing every story in this epic ⇒ Demo 0 passes.
 | RCAB-E1.S9 | [[story-rcab-e1-s9-system-probe]] — host probe + load estimator | ■ |
 | RCAB-E1.S10 | [[story-rcab-e1-s10-code-graph]] — code knowledge graph for agent memory | ■ |
 | RCAB-E1.S11 | [[story-rcab-e1-s11-int-teardown-fix]] — fix flaky integration teardown | ■ |
-| RCAB-E1.S12 | [[story-rcab-e1-s12-concurrency-tests]] — concurrency test suite for race-prone paths | ▶ |
+| RCAB-E1.S12 | [[story-rcab-e1-s12-concurrency-tests]] — concurrency test suite for race-prone paths | ■ |
+| RCAB-E1.S13 | [[story-rcab-e1-s13-e2e-load-wiring]] — wire e2e + load CI scripts, first Playwright spec | ▶ |
 
 ## Demo 0 headline (verbatim from [[delivery-roadmap]])
 
