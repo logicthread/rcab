@@ -33,8 +33,9 @@ Completing every story in this epic ⇒ Demo 0 passes.
 | RCAB-E1.S7 | [[story-rcab-e1-s7-db-bootstrap]] — Postgres + Redis + OSRM + migrations | ■ |
 | RCAB-E1.S8 | [[story-rcab-e1-s8-health-endpoints]] — /v1/health/live + /ready | ■ |
 | RCAB-E1.S9 | [[story-rcab-e1-s9-system-probe]] — host probe + load estimator | ■ |
-| RCAB-E1.S10 | [[story-rcab-e1-s10-code-graph]] — code knowledge graph for agent memory | ▶ |
-| RCAB-E1.S11 | [[story-rcab-e1-s11-int-teardown-fix]] — fix flaky integration teardown | ▶ |
+| RCAB-E1.S10 | [[story-rcab-e1-s10-code-graph]] — code knowledge graph for agent memory | ■ |
+| RCAB-E1.S11 | [[story-rcab-e1-s11-int-teardown-fix]] — fix flaky integration teardown | ■ |
+| RCAB-E1.S12 | [[story-rcab-e1-s12-concurrency-tests]] — concurrency test suite for race-prone paths | ▶ |
 
 ## Demo 0 headline (verbatim from [[delivery-roadmap]])
 

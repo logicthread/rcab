@@ -70,4 +70,68 @@ describe.skipIf(skip)('RidesRepository — idempotency (real Postgres)', () => {
     );
     expect(rows[0].n).toBe(1);
   });
+
+  // Concurrency: two requests with the SAME idempotency key genuinely in flight
+  // at once (not the sequential replay above). The unique constraint +
+  // onConflictDoNothing must still collapse them to a single row. RCAB-E1.S12.
+  it('concurrent double-submit of one idempotency key → exactly one row, one created', async () => {
+    const key = `idem-${randomUUID()}`;
+
+    const [a, b] = await Promise.all([repo.create(params(key)), repo.create(params(key))]);
+
+    // Exactly one insert wins; the other resolves to the same row via the
+    // on-conflict fallback.
+    expect([a.created, b.created].filter(Boolean)).toHaveLength(1);
+    expect(a.row.id).toBe(b.row.id);
+
+    const { rows } = await pool.query<{ n: number }>(
+      'SELECT count(*)::int AS n FROM rides WHERE idempotency_key = $1',
+      [key],
+    );
+    expect(rows[0].n).toBe(1);
+  });
+
+  // Concurrency: a client and the bound driver hit cancel at the same instant on
+  // an `accepted` ride. `cancel()` runs SELECT … FOR UPDATE inside a transaction,
+  // so on a real connection pool the two serialize — exactly one applies and the
+  // loser sees a non-cancellable state. Requires real separate connections (this
+  // spec uses `pg.Pool`, unlike the single-Client dispatch-pool spec). RCAB-E1.S12.
+  it('concurrent client-cancel + driver-cancel → exactly one applies, state coherent', async () => {
+    const { row } = await repo.create(params(`idem-${randomUUID()}`));
+    const driverId = randomUUID();
+    await repo.claimSolo(row.id, driverId, new Date()); // → accepted, both parties bound
+
+    const [client, driver] = await Promise.all([
+      repo.cancel({
+        rideId: row.id,
+        actor: 'client',
+        actorId: passengerId,
+        isNoShow: false,
+        reason: 'client bailed',
+        noShowWaitMs: 300_000,
+      }),
+      repo.cancel({
+        rideId: row.id,
+        actor: 'driver',
+        actorId: driverId,
+        isNoShow: false,
+        reason: 'driver bailed',
+        noShowWaitMs: 300_000,
+      }),
+    ]);
+
+    // Exactly one cancel wins; the loser sees `cancelled` (not cancellable) →
+    // invalid_transition. No torn write.
+    expect([client.ok, driver.ok].filter(Boolean)).toHaveLength(1);
+    const loser = client.ok ? driver : client;
+    expect(loser.ok).toBe(false);
+    if (!loser.ok) expect(loser.reason).toBe('invalid_transition');
+
+    const { rows } = await pool.query<{ status: string; cancelled_by: string }>(
+      'SELECT status, cancelled_by FROM rides WHERE id = $1',
+      [row.id],
+    );
+    expect(rows[0].status).toBe('cancelled');
+    expect(['client', 'driver']).toContain(rows[0].cancelled_by);
+  });
 });
