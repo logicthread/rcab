@@ -98,8 +98,8 @@ audience: both
 |---|---|---|
 | RCAB-E6.S1 | [[story-rcab-e6-s1-bullmq-runner]] — BullMQ runner + Redis configuration | ■ |
 | RCAB-E6.S2 | `type=scheduled` flow at quote + request | · |
-| RCAB-E6.S3 | [[story-rcab-e6-s3-wake-worker]] — wake-up worker → reuse normal dispatch path | ▶ |
-| RCAB-E6.S4 | Cancellation before/after wake | · |
+| RCAB-E6.S3 | [[story-rcab-e6-s3-wake-worker]] — wake-up worker → reuse normal dispatch path | ■ |
+| RCAB-E6.S4 | [[story-rcab-e6-s4-cancel-scheduled]] — cancellation before/after wake | ▶ |
 
 ## E7 — Rating & dashboards → Demo 6 · "Dashboards & ratings"
 *Two-sided rating store + aggregation; history + earnings dashboards.* See [[epic-e7-rating-dashboards]].

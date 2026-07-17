@@ -538,6 +538,14 @@ export class RidesController {
           });
       }
     }
+    // A cancelled scheduled ride drops its pending wake job so it never fires
+    // (free cancellation before wake — RCAB-E6.S4). Safe/no-op after the ride
+    // has already woken (the job is gone), and dispatchSolo guards
+    // status='requested' anyway, so a race can't dispatch a cancelled ride.
+    if (result.row.type === 'scheduled') {
+      await this.scheduled.cancelWake(rideId);
+    }
+
     return {
       rideId: result.row.id,
       status: result.row.status,

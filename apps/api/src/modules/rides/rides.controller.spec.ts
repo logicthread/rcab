@@ -653,6 +653,26 @@ describe('RidesController.cancel', () => {
     });
   });
 
+  it('drops the pending wake job when a SCHEDULED ride is cancelled (RCAB-E6.S4)', async () => {
+    const cancel = vi.fn().mockResolvedValue({
+      ok: true,
+      row: soloRideRow({ status: 'cancelled', cancelledBy: 'client', type: 'scheduled' }),
+    });
+    const { ctrl, scheduled } = makeController({ cancel });
+    await ctrl.cancel(clientReq as never, RIDE_ID, {});
+    expect(scheduled.cancelWake).toHaveBeenCalledWith(RIDE_ID);
+  });
+
+  it('does NOT touch the wake queue when a NORMAL ride is cancelled', async () => {
+    const cancel = vi.fn().mockResolvedValue({
+      ok: true,
+      row: soloRideRow({ status: 'cancelled', cancelledBy: 'client', type: 'normal' }),
+    });
+    const { ctrl, scheduled } = makeController({ cancel });
+    await ctrl.cancel(clientReq as never, RIDE_ID, {});
+    expect(scheduled.cancelWake).not.toHaveBeenCalled();
+  });
+
   it('200 on a driver no-show (event=mark_no_show), passing isNoShow + reason', async () => {
     const cancel = vi.fn().mockResolvedValue({
       ok: true,
