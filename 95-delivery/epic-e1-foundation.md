@@ -37,7 +37,7 @@ Completing every story in this epic ⇒ Demo 0 passes.
 | RCAB-E1.S11 | [[story-rcab-e1-s11-int-teardown-fix]] — fix flaky integration teardown | ■ |
 | RCAB-E1.S12 | [[story-rcab-e1-s12-concurrency-tests]] — concurrency test suite for race-prone paths | ■ |
 | RCAB-E1.S13 | [[story-rcab-e1-s13-e2e-load-wiring]] — wire e2e + load CI scripts, first Playwright spec | ■ |
-| RCAB-E1.S14 | [[story-rcab-e1-s14-verify-gate]] — verification gate (coverage floor + `pnpm verify`) | ▶ |
+| RCAB-E1.S14 | [[story-rcab-e1-s14-verify-gate]] — verification gate (coverage floor + `pnpm verify`) | ■ |
 
 ## Demo 0 headline (verbatim from [[delivery-roadmap]])
 

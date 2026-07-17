@@ -1,14 +1,14 @@
 # rcab code graph
 
-Generated 2026-06-15T21:08:07+05:30 @ d0c8a482100f65c3ddf322f634f90a7ac34d5c61. **Do not hand-edit** — run `pnpm code:graph`.
+Generated 2026-07-15T01:39:35+05:30 @ bce738ce0ec6bbf331c5be505ab8f366443bcc18. **Do not hand-edit** — run `pnpm code:graph`.
 
-Nodes: 239 (138 file, 16 module, 54 symbol, 22 route, 9 table). Edges: 377 (266 imports, 29 di-import, 32 di-provides, 22 route, 22 riverpod-provides, 6 fk).
+Nodes: 245 (141 file, 17 module, 56 symbol, 22 route, 9 table). Edges: 384 (270 imports, 30 di-import, 34 di-provides, 22 route, 22 riverpod-provides, 6 fk).
 
 > Known v1 limit: import edges are syntactic (per-file), so barrel re-exports may under-resolve.
 
-## NestJS modules (16)
+## NestJS modules (17)
 
-- **AppModule** `apps/api/src/app.module.ts` → AuthModule, DispatchModule, DriversModule, DrizzleModule, FirebaseModule, GoogleModule, HealthModule, RatingModule, RealtimeModule, RedisModule, RideLifecycleModule, RidesModule, VehiclesModule
+- **AppModule** `apps/api/src/app.module.ts` → AuthModule, DispatchModule, DriversModule, DrizzleModule, FirebaseModule, GoogleModule, HealthModule, RatingModule, RealtimeModule, RedisModule, RideLifecycleModule, RidesModule, ScheduledModule, VehiclesModule
 - **AuthModule** `apps/api/src/modules/auth/auth.module.ts`
 - **DispatchModule** `apps/api/src/modules/dispatch/dispatch.module.ts` → MatchingModule, RealtimeModule, RidesModule
 - **DriversModule** `apps/api/src/modules/drivers/drivers.module.ts` → AuthModule, RealtimeModule
@@ -23,6 +23,7 @@ Nodes: 239 (138 file, 16 module, 54 symbol, 22 route, 9 table). Edges: 377 (266 
 - **RedisModule** `apps/api/src/infra/redis/redis.module.ts`
 - **RideLifecycleModule** `apps/api/src/modules/ride-lifecycle/ride-lifecycle.module.ts` → MatchingModule, RealtimeModule
 - **RidesModule** `apps/api/src/modules/rides/rides.module.ts` → AuthModule, MatchingModule, PricingModule, RealtimeModule
+- **ScheduledModule** `apps/api/src/modules/scheduled/scheduled.module.ts`
 - **VehiclesModule** `apps/api/src/modules/vehicles/vehicles.module.ts` → AuthModule
 
 ## HTTP routes (22)
