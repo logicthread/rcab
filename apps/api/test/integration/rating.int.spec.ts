@@ -1,3 +1,4 @@
+import { uniquePhone } from '@rcab/test-fixtures';
 import { Pool } from 'pg';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { randomUUID } from 'node:crypto';
@@ -30,9 +31,7 @@ describe.skipIf(skip)('RatingService.rate — two-sided capture (real Postgres)'
 
     // rides.passenger_id references app_user — seed a client to satisfy the FK.
     passengerId = randomUUID();
-    const phone = `+91${Math.floor(Math.random() * 1e10)
-      .toString()
-      .padStart(10, '0')}`;
+    const phone = uniquePhone();
     await pool.query(
       `INSERT INTO app_user (id, firebase_uid, phone_e164, role) VALUES ($1, $2, $3, 'client')`,
       [passengerId, `fb-${passengerId}`, phone],

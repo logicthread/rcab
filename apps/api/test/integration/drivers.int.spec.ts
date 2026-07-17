@@ -1,3 +1,4 @@
+import { uniquePhone, uniqueRegNo } from '@rcab/test-fixtures';
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import { Test, type TestingModule } from '@nestjs/testing';
 import type { INestApplication } from '@nestjs/common';
@@ -52,8 +53,8 @@ async function seedDriverWithVehicle(): Promise<{ userId: string; vehicleId: str
   const userId = randomUUID();
   const vehicleId = randomUUID();
   const firebaseUid = randomUUID();
-  const phone = `+1203555${Math.floor(Math.random() * 9000) + 1000}`;
-  const regNo = `KA-${Math.floor(Math.random() * 99)}-INT-${Math.floor(Math.random() * 9999)}`;
+  const phone = uniquePhone();
+  const regNo = uniqueRegNo();
 
   const client = await pool.connect();
   try {
@@ -148,7 +149,7 @@ describe.skipIf(skip)('drivers online/offline round-trip', () => {
   it('POST /v1/drivers/online with no selected vehicle → 400 no_vehicle_selected', async () => {
     const userId = randomUUID();
     const firebaseUid = randomUUID();
-    const phone = `+1203444${Math.floor(Math.random() * 9000) + 1000}`;
+    const phone = uniquePhone();
 
     const client = await pool.connect();
     try {
@@ -179,7 +180,7 @@ describe.skipIf(skip)('drivers online/offline round-trip', () => {
   it('client JWT cannot call driver endpoints → 403', async () => {
     const userId = randomUUID();
     const firebaseUid = randomUUID();
-    const phone = `+1203333${Math.floor(Math.random() * 9000) + 1000}`;
+    const phone = uniquePhone();
 
     const client = await pool.connect();
     try {

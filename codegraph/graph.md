@@ -1,8 +1,8 @@
 # rcab code graph
 
-Generated 2026-07-17T07:27:02+05:30 @ 8196588442d853db6bd888b3591c1549c4cb82b8. **Do not hand-edit** — run `pnpm code:graph`.
+Generated 2026-07-17T08:59:24+05:30 @ bb0f24b2dfeb832673fc4065d5fcd1340aeee76e. **Do not hand-edit** — run `pnpm code:graph`.
 
-Nodes: 245 (141 file, 17 module, 56 symbol, 22 route, 9 table). Edges: 387 (272 imports, 31 di-import, 34 di-provides, 22 route, 22 riverpod-provides, 6 fk).
+Nodes: 246 (142 file, 17 module, 56 symbol, 22 route, 9 table). Edges: 388 (273 imports, 31 di-import, 34 di-provides, 22 route, 22 riverpod-provides, 6 fk).
 
 > Known v1 limit: import edges are syntactic (per-file), so barrel re-exports may under-resolve.
 

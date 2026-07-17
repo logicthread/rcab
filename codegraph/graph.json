@@ -1,19 +1,19 @@
 {
   "version": 1,
-  "generatedAt": "2026-07-17T07:27:02+05:30",
-  "gitSha": "8196588442d853db6bd888b3591c1549c4cb82b8",
+  "generatedAt": "2026-07-17T08:59:24+05:30",
+  "gitSha": "bb0f24b2dfeb832673fc4065d5fcd1340aeee76e",
   "counts": {
-    "nodes": 245,
-    "edges": 387,
+    "nodes": 246,
+    "edges": 388,
     "byNodeKind": {
-      "file": 141,
+      "file": 142,
       "module": 17,
       "symbol": 56,
       "route": 22,
       "table": 9
     },
     "byEdgeKind": {
-      "imports": 272,
+      "imports": 273,
       "di-import": 31,
       "di-provides": 34,
       "route": 22,
@@ -1952,6 +1952,14 @@
       "kind": "file",
       "path": "packages/test-fixtures/src/seeds.ts",
       "name": "seeds.ts",
+      "app": "test-fixtures"
+    },
+    {
+      "meta": {},
+      "id": "packages/test-fixtures/src/unique.ts",
+      "kind": "file",
+      "path": "packages/test-fixtures/src/unique.ts",
+      "name": "unique.ts",
       "app": "test-fixtures"
     },
     {
@@ -4288,6 +4296,14 @@
       "to": "apps/api/src/modules/scheduled/scheduled.service.ts#ScheduledDispatchService",
       "kind": "di-provides",
       "meta": {}
+    },
+    {
+      "from": "apps/api/src/modules/scheduled/scheduled.processor.ts",
+      "to": "apps/api/src/modules/dispatch/dispatch.service.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../dispatch/dispatch.service"
+      }
     },
     {
       "from": "apps/api/src/modules/scheduled/scheduled.processor.ts",
