@@ -17,6 +17,8 @@ function completedRide(overrides: Partial<RideRow> = {}): RideRow {
     destLng: 0,
     fareCents: 18500,
     status: 'completed',
+    type: 'normal',
+    scheduledFor: null,
     idempotencyKey: 'idem-1',
     driverId: DRIVER_ID,
     acceptedAt: new Date(),

@@ -64,6 +64,8 @@ function soloRide(overrides: Partial<RideRow> = {}): RideRow {
     destLng: 91.7898,
     fareCents: 18500,
     status: 'requested',
+    type: 'normal',
+    scheduledFor: null,
     idempotencyKey: 'idem-1',
     driverId: null,
     acceptedAt: null,

@@ -1,8 +1,8 @@
 # rcab code graph
 
-Generated 2026-07-15T01:39:35+05:30 @ bce738ce0ec6bbf331c5be505ab8f366443bcc18. **Do not hand-edit** — run `pnpm code:graph`.
+Generated 2026-07-17T07:27:02+05:30 @ 8196588442d853db6bd888b3591c1549c4cb82b8. **Do not hand-edit** — run `pnpm code:graph`.
 
-Nodes: 245 (141 file, 17 module, 56 symbol, 22 route, 9 table). Edges: 384 (270 imports, 30 di-import, 34 di-provides, 22 route, 22 riverpod-provides, 6 fk).
+Nodes: 245 (141 file, 17 module, 56 symbol, 22 route, 9 table). Edges: 387 (272 imports, 31 di-import, 34 di-provides, 22 route, 22 riverpod-provides, 6 fk).
 
 > Known v1 limit: import edges are syntactic (per-file), so barrel re-exports may under-resolve.
 
@@ -22,7 +22,7 @@ Nodes: 245 (141 file, 17 module, 56 symbol, 22 route, 9 table). Edges: 384 (270 
 - **RealtimeModule** `apps/api/src/modules/realtime/realtime.module.ts` → AuthModule
 - **RedisModule** `apps/api/src/infra/redis/redis.module.ts`
 - **RideLifecycleModule** `apps/api/src/modules/ride-lifecycle/ride-lifecycle.module.ts` → MatchingModule, RealtimeModule
-- **RidesModule** `apps/api/src/modules/rides/rides.module.ts` → AuthModule, MatchingModule, PricingModule, RealtimeModule
+- **RidesModule** `apps/api/src/modules/rides/rides.module.ts` → AuthModule, MatchingModule, PricingModule, RealtimeModule, ScheduledModule
 - **ScheduledModule** `apps/api/src/modules/scheduled/scheduled.module.ts`
 - **VehiclesModule** `apps/api/src/modules/vehicles/vehicles.module.ts` → AuthModule
 

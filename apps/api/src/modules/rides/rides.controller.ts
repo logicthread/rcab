@@ -37,6 +37,12 @@ import { RidesRepository, type RideRow } from './rides.repository';
 import { RideStateMachine } from './ride-state-machine.service';
 import { RealtimeBus } from '../realtime/realtime.bus';
 import { RIDE_REQUESTED_EVENT, type RideRequestedEventPayload } from '../dispatch/dispatch.service';
+import { ScheduledDispatchService } from '../scheduled/scheduled.service';
+
+// Scheduled bookings must fall in a 15 min – 24 h future window (RCAB-E6.S2 /
+// [[features-scheduled-booking]]).
+const SCHEDULED_MIN_LEAD_MS = 15 * 60 * 1000;
+const SCHEDULED_MAX_LEAD_MS = 24 * 60 * 60 * 1000;
 
 export interface CreateRideResponse {
   sharedRideId: string;
@@ -122,6 +128,7 @@ export class RidesController {
     private readonly stateMachine: RideStateMachine,
     private readonly bus: RealtimeBus,
     private readonly events: EventEmitter2,
+    private readonly scheduled: ScheduledDispatchService,
     @Inject(REDIS) private readonly redis: Redis,
   ) {}
 
@@ -131,12 +138,9 @@ export class RidesController {
     @Body() dto: QuoteRideDto,
   ): Promise<QuoteResponse> {
     this.assertClient(req.user);
-    if (dto.type === RideType.Scheduled) {
-      throw new NotImplementedException({
-        code: 'not_implemented',
-        message: `type='${dto.type}' is not implemented in Phase-0 yet (see RCAB-E6)`,
-      });
-    }
+    // A scheduled quote is priced exactly like a normal one (fare + route +
+    // signed token); the future pickup time is supplied later, at request
+    // (RCAB-E6.S2). So scheduled falls through the normal quote path here.
 
     const route = {
       originLat: dto.originLat,
@@ -195,6 +199,9 @@ export class RidesController {
 
     if (dto.type === RideType.Normal) {
       return this.createNormal(req.user.sub, dto, idempotencyKey);
+    }
+    if (dto.type === RideType.Scheduled) {
+      return this.createScheduled(req.user.sub, dto, idempotencyKey);
     }
     if (dto.type !== RideType.Shared) {
       throw new NotImplementedException({
@@ -292,6 +299,93 @@ export class RidesController {
       this.events.emit(RIDE_REQUESTED_EVENT, {
         rideId: row.id,
       } satisfies RideRequestedEventPayload);
+    }
+
+    return soloResponse(row);
+  }
+
+  /**
+   * Scheduled (future) booking request. Same idempotent + quote-locked flow as
+   * `createNormal`, but the ride is persisted `type='scheduled'` with a future
+   * `scheduled_for` (15 min – 24 h out) and a BullMQ wake job is enqueued
+   * (~10 min before pickup, RCAB-E6.S1) INSTEAD of dispatching now. The wake
+   * worker (RCAB-E6.S3) runs the normal dispatch path when it fires.
+   */
+  private async createScheduled(
+    passengerId: string,
+    dto: CreateRideDto,
+    idempotencyKey: string | undefined,
+  ): Promise<SoloRideResponse> {
+    if (!idempotencyKey) {
+      throw new BadRequestException({
+        code: 'idempotency_key_required',
+        message: 'Idempotency-Key header is required',
+      });
+    }
+    if (!dto.quoteToken) {
+      throw new BadRequestException({ code: 'invalid_quote', message: 'quoteToken is required' });
+    }
+    if (!dto.scheduledFor) {
+      throw new BadRequestException({
+        code: 'scheduled_for_required',
+        message: 'scheduledFor is required for a scheduled ride',
+      });
+    }
+    const scheduledFor = new Date(dto.scheduledFor);
+    const leadMs = scheduledFor.getTime() - Date.now();
+    if (
+      Number.isNaN(scheduledFor.getTime()) ||
+      leadMs < SCHEDULED_MIN_LEAD_MS ||
+      leadMs > SCHEDULED_MAX_LEAD_MS
+    ) {
+      throw new BadRequestException({
+        code: 'scheduled_for_out_of_window',
+        message: 'scheduledFor must be between 15 minutes and 24 hours from now',
+      });
+    }
+
+    // Fast replay: a key we've already seen returns the original ride.
+    const cachedRideId = await this.redis.get(idemKey(idempotencyKey));
+    if (cachedRideId) {
+      const existing = await this.ridesRepo.findById(cachedRideId);
+      if (existing) return soloResponse(existing);
+    }
+
+    let claims: QuoteClaims;
+    try {
+      claims = this.quoteToken.verify(dto.quoteToken);
+    } catch (err) {
+      const expired = err instanceof Error && err.name === 'TokenExpiredError';
+      throw new BadRequestException({
+        code: expired ? 'quote_expired' : 'invalid_quote',
+        message: expired ? 'Quote expired — please re-quote' : 'Invalid quote token',
+      });
+    }
+    if (!coordsMatch(claims, dto)) {
+      throw new BadRequestException({
+        code: 'quote_mismatch',
+        message: 'Quote does not match the requested route',
+      });
+    }
+
+    const { row, created } = await this.ridesRepo.create({
+      passengerId,
+      originLat: dto.originLat,
+      originLng: dto.originLng,
+      destLat: dto.destLat,
+      destLng: dto.destLng,
+      fareCents: claims.soloFareCents,
+      idempotencyKey,
+      type: 'scheduled',
+      scheduledFor,
+    });
+    await this.redis.set(idemKey(idempotencyKey), row.id, 'EX', 86_400);
+
+    // A freshly-created scheduled ride enqueues a delayed wake instead of
+    // dispatching now (a replay must not double-schedule).
+    if (created) {
+      await this.bus.joinRide(passengerId, row.id);
+      await this.scheduled.scheduleWake(row.id, scheduledFor);
     }
 
     return soloResponse(row);

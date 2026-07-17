@@ -134,4 +134,25 @@ describe.skipIf(skip)('RidesRepository — idempotency (real Postgres)', () => {
     expect(rows[0].status).toBe('cancelled');
     expect(['client', 'driver']).toContain(rows[0].cancelled_by);
   });
+
+  // RCAB-E6.S2: scheduled rides persist type + scheduled_for (migration 0011).
+  it('persists a scheduled ride with type=scheduled and scheduled_for', async () => {
+    const when = new Date(Date.now() + 3 * 60 * 60 * 1000);
+    const { row, created } = await repo.create({
+      ...params(`idem-${randomUUID()}`),
+      type: 'scheduled',
+      scheduledFor: when,
+    });
+
+    expect(created).toBe(true);
+    expect(row.type).toBe('scheduled');
+    expect(row.scheduledFor?.getTime()).toBe(when.getTime());
+
+    const { rows } = await pool.query<{ type: string; scheduled_for: Date }>(
+      'SELECT type, scheduled_for FROM rides WHERE id = $1',
+      [row.id],
+    );
+    expect(rows[0].type).toBe('scheduled');
+    expect(new Date(rows[0].scheduled_for).getTime()).toBe(when.getTime());
+  });
 });

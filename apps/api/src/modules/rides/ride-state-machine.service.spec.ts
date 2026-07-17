@@ -16,6 +16,8 @@ function makeRow(status: string, overrides: Partial<RideRow> = {}): RideRow {
     destLng: 91.75,
     fareCents: 18500,
     status,
+    type: 'normal',
+    scheduledFor: null,
     idempotencyKey: 'k-1',
     driverId: 'd-1',
     acceptedAt: new Date('2026-05-30T10:00:00.000Z'),
