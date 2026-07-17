@@ -1,3 +1,4 @@
+import { uniquePhone } from '@rcab/test-fixtures';
 import { Client } from 'pg';
 import Redis from 'ioredis';
 import { Queue } from 'bullmq';
@@ -19,7 +20,13 @@ import {
   POOL_CLOSED_EVENT,
   type PoolClosedEventPayload,
 } from '../../src/modules/matching/pool-lifecycle.service';
-import { DispatchService, DISPATCH_QUEUE } from '../../src/modules/dispatch/dispatch.service';
+import {
+  DispatchService,
+  DISPATCH_QUEUE,
+  RIDE_REQUESTED_EVENT,
+} from '../../src/modules/dispatch/dispatch.service';
+import { ScheduledDispatchProcessor } from '../../src/modules/scheduled/scheduled.processor';
+import { SCHEDULED_WAKE_JOB } from '../../src/modules/scheduled/scheduled.service';
 import type {
   SharedRideOfferPayload,
   SoloRideOfferPayload,
@@ -277,9 +284,7 @@ describe.skipIf(skip)('DispatchService — integration (Postgres + Redis + BullM
       [
         passengerId,
         `fb-solo-${passengerId}`,
-        `+9199${Math.floor(Math.random() * 1e8)
-          .toString()
-          .padStart(8, '0')}`,
+        uniquePhone(),
       ],
     );
     const { row } = await ridesRepo.create({
@@ -323,9 +328,7 @@ describe.skipIf(skip)('DispatchService — integration (Postgres + Redis + BullM
       [
         passengerId,
         `fb-solo-${passengerId}`,
-        `+9199${Math.floor(Math.random() * 1e8)
-          .toString()
-          .padStart(8, '0')}`,
+        uniquePhone(),
       ],
     );
     const { row } = await ridesRepo.create({
@@ -370,9 +373,7 @@ describe.skipIf(skip)('DispatchService — integration (Postgres + Redis + BullM
       [
         passengerId,
         `fb-solo-${passengerId}`,
-        `+9199${Math.floor(Math.random() * 1e8)
-          .toString()
-          .padStart(8, '0')}`,
+        uniquePhone(),
       ],
     );
     const { row } = await ridesRepo.create({
@@ -441,5 +442,54 @@ describe.skipIf(skip)('DispatchService — integration (Postgres + Redis + BullM
       [pool.rideId],
     );
     expect(rows[0].members).toHaveLength(1 + available);
+  });
+
+  it('scheduled wake → ride.requested → dispatchSolo, end-to-end (RCAB-E6.S3)', async () => {
+    bus.toDriver.mockClear();
+
+    // Wire the event → dispatch handler that @OnEvent would register under DI.
+    const emitter = (dispatch as unknown as { events: EventEmitter2 }).events;
+    const handler = (p: { rideId: string }): void => void dispatch.onRideRequested(p);
+    emitter.on(RIDE_REQUESTED_EVENT, handler);
+
+    const driverId = randomUUID();
+    await redis.geoadd('active_drivers', 91.7362, 26.1446, driverId);
+
+    const passengerId = randomUUID();
+    await pgClient.query(
+      `INSERT INTO app_user (id, firebase_uid, phone_e164, role) VALUES ($1, $2, $3, 'client')`,
+      [
+        passengerId,
+        `fb-solo-${passengerId}`,
+        uniquePhone(),
+      ],
+    );
+    // A scheduled ride sits in `requested` until its wake fires (no dispatch yet).
+    const { row } = await ridesRepo.create({
+      passengerId,
+      originLat: 26.1445,
+      originLng: 91.7362,
+      destLat: 26.1758,
+      destLng: 91.7898,
+      fareCents: 18500,
+      idempotencyKey: `idem-${randomUUID()}`,
+      type: 'scheduled',
+      scheduledFor: new Date(Date.now() + 2 * 60 * 60 * 1000),
+    });
+
+    // Fire the wake job through the real processor.
+    const proc = new ScheduledDispatchProcessor(emitter);
+    await proc.process({ name: SCHEDULED_WAKE_JOB, data: { rideId: row.id } } as never);
+    // @OnEvent({ async: true }) → dispatchSolo runs on a later tick.
+    await new Promise((r) => setTimeout(r, 150));
+
+    expect(bus.toDriver).toHaveBeenCalledWith(
+      driverId,
+      'ride_offer',
+      expect.objectContaining({ rideId: row.id }),
+    );
+
+    emitter.off(RIDE_REQUESTED_EVENT, handler);
+    await redis.zrem('active_drivers', driverId);
   });
 });

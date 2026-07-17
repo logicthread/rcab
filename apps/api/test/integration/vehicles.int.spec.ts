@@ -1,3 +1,4 @@
+import { uniquePhone, uniqueRegNo } from '@rcab/test-fixtures';
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import { Test, type TestingModule } from '@nestjs/testing';
 import type { INestApplication } from '@nestjs/common';
@@ -49,7 +50,7 @@ afterAll(async () => {
 async function createDriverAndJwt(): Promise<{ userId: string; jwt: string }> {
   const userId = randomUUID();
   const firebaseUid = randomUUID();
-  const phone = `+1202555${Math.floor(Math.random() * 9000) + 1000}`;
+  const phone = uniquePhone();
 
   const client = await pool.connect();
   try {
@@ -115,7 +116,7 @@ describe.skipIf(skip)('vehicles round-trip', () => {
 
   it('POST /v1/vehicles with duplicate reg_no for same driver → 409 vehicle_reg_exists', async () => {
     const { jwt } = await createDriverAndJwt();
-    const regNo = `KA-02-CD-${Math.floor(Math.random() * 9000) + 1000}`;
+    const regNo = uniqueRegNo();
     const server = app.getHttpServer();
     const body = { type: 'auto', reg_no: regNo, make: 'Honda', model: 'Activa', color: 'Red', seats: 2 };
 
@@ -136,7 +137,7 @@ describe.skipIf(skip)('vehicles round-trip', () => {
     const createRes = await supertest(server)
       .post('/v1/vehicles')
       .set('Authorization', `Bearer ${driverA.jwt}`)
-      .send({ type: 'bike', reg_no: `KA-03-EF-${Math.floor(Math.random() * 9000) + 1000}`, make: 'Hero', model: 'Splendor', color: 'Blue', seats: 1 });
+      .send({ type: 'bike', reg_no: uniqueRegNo(), make: 'Hero', model: 'Splendor', color: 'Blue', seats: 1 });
     const vehicleId = createRes.body.id;
 
     // Driver B tries to claim it
@@ -151,7 +152,7 @@ describe.skipIf(skip)('vehicles round-trip', () => {
   it('client JWT cannot access vehicle endpoints → 403', async () => {
     const userId = randomUUID();
     const firebaseUid = randomUUID();
-    const phone = `+1202444${Math.floor(Math.random() * 9000) + 1000}`;
+    const phone = uniquePhone();
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
