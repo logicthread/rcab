@@ -26,6 +26,7 @@ audience: both
 | `rating` | Two-sided rating insert + invariants | — | **Insert built RCAB-E4.S9** (`POST /v1/rides/:id/ratings`, `RatingService`, `RatingRepository`); aggregation + denorm is E7 |
 | `realtime` | Socket.IO gateway + bus, room conventions | `RealtimeBus` | [[module-realtime]] · `RealtimeGateway` internal |
 | `health` | Liveness / readiness probes | — | `HealthController` (`/v1/health/live`, `/ready`) |
+| `scheduled` | Scheduled-booking wake queue (BullMQ delayed jobs, E6) | `ScheduledDispatchService` | wakes a future ride ~10 min before pickup → normal dispatch (S3); queue `bull:scheduled-dispatch:*` |
 
 Cross-cutting infra (not feature modules) lives under `apps/api/src/infra/`: `DrizzleModule` (Postgres), `RedisModule`, `FirebaseModule`, `GoogleModule`.
 
