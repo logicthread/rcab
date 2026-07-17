@@ -12,6 +12,8 @@ export interface RideRow {
   destLng: number;
   fareCents: number;
   status: string;
+  type: string;
+  scheduledFor: Date | null;
   idempotencyKey: string;
   driverId: string | null;
   acceptedAt: Date | null;
@@ -86,6 +88,8 @@ function toRow(r: typeof rides.$inferSelect): RideRow {
     destLng: Number(r.destLng),
     fareCents: Number(r.fareCents),
     status: r.status,
+    type: r.type,
+    scheduledFor: r.scheduledFor,
     idempotencyKey: r.idempotencyKey,
     driverId: r.driverId,
     acceptedAt: r.acceptedAt,
@@ -116,6 +120,8 @@ export class RidesRepository {
     destLng: number;
     fareCents: number;
     idempotencyKey: string;
+    type?: string;
+    scheduledFor?: Date | null;
   }): Promise<{ row: RideRow; created: boolean }> {
     const inserted = await this.db
       .insert(rides)
@@ -127,6 +133,8 @@ export class RidesRepository {
         destLng: params.destLng,
         fareCents: params.fareCents,
         status: 'requested',
+        type: params.type ?? 'normal',
+        scheduledFor: params.scheduledFor ?? null,
         idempotencyKey: params.idempotencyKey,
       })
       .onConflictDoNothing({ target: rides.idempotencyKey })

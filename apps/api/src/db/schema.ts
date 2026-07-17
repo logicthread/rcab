@@ -177,6 +177,10 @@ export const rides = pgTable(
     destLng: doublePrecision('dest_lng').notNull(),
     fareCents: integer('fare_cents').notNull(),
     status: text('status').notNull().default('requested'),
+    // RCAB-E6.S2: 'scheduled' rides carry a future scheduled_for and are woken
+    // ~10 min before pickup (BullMQ). 'normal'/'shared' dispatch immediately.
+    type: text('type').notNull().default('normal'),
+    scheduledFor: timestamp('scheduled_for', { withTimezone: true }),
     idempotencyKey: text('idempotency_key').notNull().unique(),
     driverId: uuid('driver_id'),
     acceptedAt: timestamp('accepted_at', { withTimezone: true }),
@@ -203,6 +207,7 @@ export const rides = pgTable(
       'rides_cancelled_by_check',
       sql`${t.cancelledBy} IS NULL OR ${t.cancelledBy} IN ('client','driver')`,
     ),
+    check('rides_type_check', sql`${t.type} IN ('normal','shared','scheduled')`),
   ],
 );
 

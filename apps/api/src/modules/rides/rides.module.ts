@@ -3,6 +3,7 @@ import { AuthModule } from '../auth/auth.module';
 import { MatchingModule } from '../matching/matching.module';
 import { PricingModule } from '../pricing/pricing.module';
 import { RealtimeModule } from '../realtime/realtime.module';
+import { ScheduledModule } from '../scheduled/scheduled.module';
 import { RidesController } from './rides.controller';
 import { QuoteTokenService } from './quote-token.service';
 import { RidesRepository } from './rides.repository';
@@ -10,7 +11,7 @@ import { RideStateMachine } from './ride-state-machine.service';
 import { RidesRealtimeListener } from './rides-realtime.listener';
 
 @Module({
-  imports: [AuthModule, MatchingModule, PricingModule, RealtimeModule],
+  imports: [AuthModule, MatchingModule, PricingModule, RealtimeModule, ScheduledModule],
   controllers: [RidesController],
   providers: [QuoteTokenService, RidesRepository, RideStateMachine, RidesRealtimeListener],
   exports: [RidesRepository],

@@ -18,6 +18,8 @@ function rideRow(overrides: Partial<RideRow> = {}): RideRow {
     destLng: 91.8,
     fareCents: 12_000,
     status: 'accepted',
+    type: 'normal',
+    scheduledFor: null,
     idempotencyKey: 'idem-1',
     driverId: DRIVER_ID,
     acceptedAt: new Date(),

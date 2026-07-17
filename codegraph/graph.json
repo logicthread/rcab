@@ -1,10 +1,10 @@
 {
   "version": 1,
-  "generatedAt": "2026-07-15T01:39:35+05:30",
-  "gitSha": "bce738ce0ec6bbf331c5be505ab8f366443bcc18",
+  "generatedAt": "2026-07-17T07:27:02+05:30",
+  "gitSha": "8196588442d853db6bd888b3591c1549c4cb82b8",
   "counts": {
     "nodes": 245,
-    "edges": 384,
+    "edges": 387,
     "byNodeKind": {
       "file": 141,
       "module": 17,
@@ -13,8 +13,8 @@
       "table": 9
     },
     "byEdgeKind": {
-      "imports": 270,
-      "di-import": 30,
+      "imports": 272,
+      "di-import": 31,
       "di-provides": 34,
       "route": 22,
       "riverpod-provides": 22,
@@ -1093,7 +1093,8 @@
           "AuthModule",
           "MatchingModule",
           "PricingModule",
-          "RealtimeModule"
+          "RealtimeModule",
+          "ScheduledModule"
         ],
         "providers": [
           "QuoteTokenService",
@@ -2350,6 +2351,8 @@
           "destLng",
           "fareCents",
           "status",
+          "type",
+          "scheduledFor",
           "idempotencyKey",
           "driverId",
           "acceptedAt",
@@ -4047,6 +4050,14 @@
       }
     },
     {
+      "from": "apps/api/src/modules/rides/rides.controller.ts",
+      "to": "apps/api/src/modules/scheduled/scheduled.service.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../scheduled/scheduled.service"
+      }
+    },
+    {
       "from": "apps/api/src/modules/rides/rides.controller.ts#RidesController",
       "to": "route:GET /v1/rides/:id",
       "kind": "route",
@@ -4167,6 +4178,14 @@
       }
     },
     {
+      "from": "apps/api/src/modules/rides/rides.module.ts",
+      "to": "apps/api/src/modules/scheduled/scheduled.module.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../scheduled/scheduled.module"
+      }
+    },
+    {
       "from": "apps/api/src/modules/rides/rides.module.ts#RidesModule",
       "to": "apps/api/src/modules/auth/auth.module.ts#AuthModule",
       "kind": "di-import",
@@ -4218,6 +4237,12 @@
       "from": "apps/api/src/modules/rides/rides.module.ts#RidesModule",
       "to": "apps/api/src/modules/rides/rides.repository.ts#RidesRepository",
       "kind": "di-provides",
+      "meta": {}
+    },
+    {
+      "from": "apps/api/src/modules/rides/rides.module.ts#RidesModule",
+      "to": "apps/api/src/modules/scheduled/scheduled.module.ts#ScheduledModule",
+      "kind": "di-import",
       "meta": {}
     },
     {

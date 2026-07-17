@@ -1,4 +1,12 @@
-import { IsEnum, IsLatitude, IsLongitude, IsNumber, IsOptional, IsString } from 'class-validator';
+import {
+  IsEnum,
+  IsISO8601,
+  IsLatitude,
+  IsLongitude,
+  IsNumber,
+  IsOptional,
+  IsString,
+} from 'class-validator';
 
 export enum RideType {
   Normal = 'normal',
@@ -31,4 +39,10 @@ export class CreateRideDto {
   @IsOptional()
   @IsString()
   quoteToken?: string;
+
+  // Required for type=scheduled (RCAB-E6.S2): ISO-8601 pickup time. Must fall in
+  // the 15 min – 24 h window (enforced in the controller). Ignored otherwise.
+  @IsOptional()
+  @IsISO8601()
+  scheduledFor?: string;
 }
