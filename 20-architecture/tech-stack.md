@@ -31,8 +31,8 @@ audience: both
 | Container runtime | docker + docker-compose | [[ADR-0009-single-vps-phase-0]] |
 | Reverse proxy + TLS | nginx + certbot | — |
 | Hosting | Single VPS | [[ADR-0009-single-vps-phase-0]] |
-| Testing | Jest (api), Playwright (web e2e), Flutter integration tests, k6 (load) | [[testing-strategy]] |
-| CI | GitHub Actions | [[ci-cd]] |
+| Testing | Vitest (api, unit + Testcontainers int), Playwright (web e2e), Flutter integration tests, k6 (load) | [[testing-strategy]] |
+| CI | Dockerized Jenkins (`Jenkinsfile`, `Jenkinsfile.nightly`) | [[ci-cd]] |
 | Observability | pino logs → Loki, Prometheus, Grafana, Uptime Kuma | [[observability]] |
 
 ## See also
