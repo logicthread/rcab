@@ -1,0 +1,832 @@
+<title>rcab Demo Runbook</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap">
+<style>
+  :root{
+    --ground:#F5F8F7; --surface:#FFFFFF; --surface-2:#EDF2F0;
+    --ink:#12211F; --ink-2:#4A5D59; --ink-3:#778A86;
+    --line:#D6E0DD; --line-2:#BFCDC9;
+    --accent:#0F6E62; --accent-soft:#E2EFEB;
+    --signal:#B25F16; --signal-soft:#FAEDE0;
+    --pass:#2C7139; --pass-soft:#E6F1E7;
+    --gap:#94382C; --gap-soft:#F7E8E5;
+    --shadow:0 1px 2px rgba(18,33,31,.06), 0 8px 24px -16px rgba(18,33,31,.28);
+    --measure:68ch;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --ground:#0D1513; --surface:#141F1D; --surface-2:#1B2725;
+      --ink:#E7EEEB; --ink-2:#A6B6B2; --ink-3:#7A8C88;
+      --line:#26332F; --line-2:#35453F;
+      --accent:#63CCB6; --accent-soft:#16302B;
+      --signal:#E5A45D; --signal-soft:#312415;
+      --pass:#76C286; --pass-soft:#17291B;
+      --gap:#E08B7B; --gap-soft:#2E1A17;
+      --shadow:0 1px 2px rgba(0,0,0,.4), 0 10px 28px -18px rgba(0,0,0,.7);
+    }
+  }
+  :root[data-theme="dark"]{
+    --ground:#0D1513; --surface:#141F1D; --surface-2:#1B2725;
+    --ink:#E7EEEB; --ink-2:#A6B6B2; --ink-3:#7A8C88;
+    --line:#26332F; --line-2:#35453F;
+    --accent:#63CCB6; --accent-soft:#16302B;
+    --signal:#E5A45D; --signal-soft:#312415;
+    --pass:#76C286; --pass-soft:#17291B;
+    --gap:#E08B7B; --gap-soft:#2E1A17;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 10px 28px -18px rgba(0,0,0,.7);
+  }
+
+  *{box-sizing:border-box}
+  body{
+    background:var(--ground); color:var(--ink);
+    font-family:"Source Serif 4",Georgia,"Times New Roman",serif;
+    font-size:16.5px; line-height:1.62;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1180px; margin:0 auto; padding-inline:20px; padding-block:0 72px}
+  @media (min-width:1040px){ .wrap{display:grid; grid-template-columns:200px minmax(0,1fr); gap:56px; align-items:start} }
+
+  h1,h2,h3,h4,.eyebrow,.num,th,.pill,.btn,nav a{
+    font-family:"IBM Plex Sans Condensed","Helvetica Neue",Arial,sans-serif;
+  }
+  code,kbd,pre,.mono,.key{font-family:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace}
+
+  /* ---------- masthead ---------- */
+  header.mast{grid-column:1/-1; border-bottom:2px solid var(--ink); padding-block:44px 22px; margin-bottom:38px}
+  .eyebrow{
+    font-size:11.5px; font-weight:600; letter-spacing:.14em; text-transform:uppercase;
+    color:var(--accent); margin:0 0 14px;
+  }
+  h1{
+    font-size:clamp(38px,7vw,64px); line-height:.98; font-weight:700; letter-spacing:-.018em;
+    margin:0 0 18px; text-wrap:balance;
+  }
+  .standfirst{max-width:62ch; font-size:19px; color:var(--ink-2); margin:0 0 26px}
+  .mast-meta{
+    display:flex; flex-wrap:wrap; gap:8px 26px; font-size:12.5px; letter-spacing:.03em;
+    color:var(--ink-3); font-family:"IBM Plex Mono",monospace; text-transform:uppercase;
+  }
+  .mast-meta b{color:var(--ink-2); font-weight:500}
+
+  /* ---------- rail ---------- */
+  nav.rail{display:none}
+  @media (min-width:1040px){
+    nav.rail{display:block; position:sticky; top:24px; font-size:13px}
+    nav.rail ol{list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:2px}
+    nav.rail a{
+      display:block; padding:5px 10px; color:var(--ink-2); text-decoration:none;
+      border-left:2px solid var(--line); letter-spacing:.01em;
+    }
+    nav.rail a:hover{color:var(--accent); border-left-color:var(--accent); background:var(--accent-soft)}
+    nav.rail .rail-h{
+      font-size:10.5px; letter-spacing:.14em; text-transform:uppercase; color:var(--ink-3);
+      margin:18px 0 6px 10px; font-family:"IBM Plex Sans Condensed",sans-serif; font-weight:600;
+    }
+    nav.rail .rail-h:first-child{margin-top:0}
+  }
+  main{min-width:0}
+
+  /* ---------- sections ---------- */
+  section{margin-bottom:56px; scroll-margin-top:20px}
+  h2{
+    font-size:13px; font-weight:600; letter-spacing:.15em; text-transform:uppercase;
+    color:var(--ink); margin:0 0 6px; display:flex; align-items:baseline; gap:12px;
+  }
+  h2::after{content:""; flex:1; height:1px; background:var(--line-2)}
+  .sec-lede{max-width:var(--measure); color:var(--ink-2); font-size:16px; margin:0 0 26px}
+  h3{font-size:22px; font-weight:600; letter-spacing:-.01em; margin:30px 0 8px; text-wrap:balance}
+  h4{font-size:12px; font-weight:600; letter-spacing:.12em; text-transform:uppercase; color:var(--ink-3); margin:20px 0 7px}
+  p{max-width:var(--measure); margin:0 0 14px}
+  a{color:var(--accent); text-decoration-thickness:1px; text-underline-offset:2px}
+
+  /* ---------- status board ---------- */
+  .board{border:1px solid var(--line); background:var(--surface); border-radius:3px; overflow:hidden}
+  .board-row{
+    display:grid; grid-template-columns:34px 1fr auto; gap:14px; align-items:center;
+    padding:11px 16px; border-bottom:1px solid var(--line); font-size:15px;
+  }
+  .board-row:last-child{border-bottom:0}
+  .board-row .d{font-family:"IBM Plex Mono",monospace; font-size:13px; color:var(--ink-3); font-variant-numeric:tabular-nums}
+  .board-row .t{min-width:0}
+  .board-row .t b{font-family:"IBM Plex Sans Condensed",sans-serif; font-weight:600; letter-spacing:.005em}
+  .board-row .t span{display:block; font-size:13.5px; color:var(--ink-3); line-height:1.4}
+  .pill{
+    font-size:10.5px; font-weight:600; letter-spacing:.09em; text-transform:uppercase;
+    padding:3px 9px; border-radius:2px; white-space:nowrap;
+  }
+  .pill.ok{background:var(--pass-soft); color:var(--pass)}
+  .pill.owed{background:var(--signal-soft); color:var(--signal)}
+  .pill.todo{background:var(--surface-2); color:var(--ink-3)}
+  .pill.none{background:var(--gap-soft); color:var(--gap)}
+
+  /* ---------- notes ---------- */
+  .note{
+    border-left:3px solid var(--accent); background:var(--accent-soft);
+    padding:13px 16px; margin:0 0 16px; max-width:var(--measure); border-radius:0 2px 2px 0;
+  }
+  .note.warn{border-left-color:var(--signal); background:var(--signal-soft)}
+  .note.gap{border-left-color:var(--gap); background:var(--gap-soft)}
+  .note p{margin:0; max-width:none; font-size:15.5px}
+  .note p+p{margin-top:8px}
+  .note .nh{
+    display:block; font-family:"IBM Plex Sans Condensed",sans-serif; font-weight:600;
+    font-size:11.5px; letter-spacing:.11em; text-transform:uppercase; margin-bottom:4px;
+  }
+  .note .nh{color:var(--accent)} .note.warn .nh{color:var(--signal)} .note.gap .nh{color:var(--gap)}
+
+  /* ---------- code ---------- */
+  pre{
+    background:var(--surface); border:1px solid var(--line); border-radius:3px;
+    padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.66; margin:0 0 16px;
+    color:var(--ink);
+  }
+  pre .c{color:var(--ink-3)}
+  code{font-size:.9em; background:var(--surface-2); padding:1px 5px; border-radius:2px; color:var(--ink)}
+  pre code{background:none; padding:0; font-size:1em}
+
+  /* ---------- tables ---------- */
+  .tw{overflow-x:auto; margin:0 0 18px; border:1px solid var(--line); border-radius:3px; background:var(--surface)}
+  table{border-collapse:collapse; width:100%; font-size:14px; font-variant-numeric:tabular-nums}
+  th{
+    text-align:left; font-size:10.5px; font-weight:600; letter-spacing:.1em; text-transform:uppercase;
+    color:var(--ink-3); padding:9px 14px; border-bottom:1px solid var(--line-2); white-space:nowrap;
+    background:var(--surface-2);
+  }
+  td{padding:8px 14px; border-bottom:1px solid var(--line); vertical-align:top; color:var(--ink-2)}
+  tr:last-child td{border-bottom:0}
+  td:first-child{color:var(--ink)}
+  td code{white-space:nowrap}
+
+  /* ---------- the route: demos ---------- */
+  .route{position:relative; padding-left:0}
+  @media (min-width:640px){
+    .route{padding-left:46px}
+    .route::before{
+      content:""; position:absolute; left:15px; top:14px; bottom:34px; width:2px;
+      background:linear-gradient(var(--accent), var(--line-2)); border-radius:2px;
+    }
+  }
+  .demo{position:relative; margin-bottom:34px; background:var(--surface); border:1px solid var(--line);
+        border-radius:3px; padding:20px 22px; box-shadow:var(--shadow)}
+  .demo > .num{
+    display:inline-flex; align-items:center; justify-content:center;
+    width:32px; height:32px; border-radius:50%; background:var(--accent); color:var(--ground);
+    font-weight:700; font-size:15px; margin-bottom:10px;
+  }
+  :root[data-theme="dark"] .demo > .num, :root:not([data-theme="light"]) .demo > .num{color:#0D1513}
+  @media (min-width:640px){
+    .demo > .num{position:absolute; left:-46px; top:20px; margin:0; border:3px solid var(--ground)}
+  }
+  .demo h3{margin-top:0}
+  .demo .epic{
+    font-family:"IBM Plex Mono",monospace; font-size:12px; color:var(--ink-3);
+    letter-spacing:.02em; margin:0 0 10px;
+  }
+  .proves{font-size:15.5px; color:var(--ink-2); margin:0 0 14px; max-width:var(--measure)}
+  .proves b{color:var(--ink); font-family:"IBM Plex Sans Condensed",sans-serif; font-weight:600;
+            font-size:11.5px; letter-spacing:.1em; text-transform:uppercase; display:block}
+  ol.steps{margin:0 0 16px; padding-left:22px; max-width:var(--measure)}
+  ol.steps li{margin-bottom:9px}
+  ol.steps li::marker{font-family:"IBM Plex Mono",monospace; font-size:.85em; color:var(--ink-3)}
+  ul.plain{margin:0 0 14px; padding-left:20px; max-width:var(--measure)}
+  ul.plain li{margin-bottom:6px}
+
+  /* ---------- checks ---------- */
+  .checks{border-top:1px solid var(--line); margin-top:16px; padding-top:14px}
+  .checks h4{margin-top:0}
+  .check{display:flex; gap:10px; align-items:flex-start; padding:5px 0; font-size:15px; cursor:pointer}
+  .check input{
+    appearance:none; width:17px; height:17px; flex:0 0 17px; margin-top:4px;
+    border:1.5px solid var(--line-2); border-radius:2px; background:var(--surface); cursor:pointer;
+  }
+  .check input:checked{
+    background-color:var(--pass); border-color:var(--pass);
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.5 8.6l2.7 2.7 6-6.6' fill='none' stroke='%23fff' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    background-size:13px 13px; background-repeat:no-repeat; background-position:center;
+  }
+  .check input:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
+  .check input:checked + span{color:var(--ink-3); text-decoration:line-through; text-decoration-color:var(--line-2)}
+  .progress{
+    font-family:"IBM Plex Mono",monospace; font-size:12px; color:var(--ink-3);
+    font-variant-numeric:tabular-nums; letter-spacing:.02em;
+  }
+  .reset{
+    font-family:"IBM Plex Sans Condensed",sans-serif; font-size:11px; font-weight:600;
+    letter-spacing:.09em; text-transform:uppercase; color:var(--ink-3); background:none;
+    border:1px solid var(--line-2); border-radius:2px; padding:4px 10px; cursor:pointer;
+  }
+  .reset:hover{color:var(--gap); border-color:var(--gap)}
+  .tally{
+    display:flex; flex-wrap:wrap; gap:12px 18px; align-items:center; justify-content:space-between;
+    border:1px solid var(--line); background:var(--surface-2); border-radius:3px;
+    padding:11px 16px; margin:0 0 22px;
+  }
+
+  /* ---------- state machine ---------- */
+  .fsm{display:flex; flex-wrap:wrap; gap:7px; align-items:center; margin:0 0 12px; font-size:12.5px}
+  .st{
+    font-family:"IBM Plex Mono",monospace; padding:4px 9px; border-radius:2px;
+    border:1px solid var(--line-2); background:var(--surface); color:var(--ink); white-space:nowrap;
+  }
+  .st.term{border-color:var(--pass); color:var(--pass); background:var(--pass-soft)}
+  .st.bad{border-color:var(--gap); color:var(--gap); background:var(--gap-soft)}
+  .arw{color:var(--ink-3); font-family:"IBM Plex Mono",monospace}
+
+  /* ---------- definition grid ---------- */
+  dl.trap{margin:0 0 18px; display:grid; gap:0}
+  dl.trap div{
+    display:grid; grid-template-columns:1fr; gap:2px; padding:13px 0; border-bottom:1px solid var(--line);
+  }
+  @media (min-width:700px){ dl.trap div{grid-template-columns:200px 1fr; gap:24px} }
+  dl.trap dt{
+    font-family:"IBM Plex Sans Condensed",sans-serif; font-weight:600; font-size:14.5px;
+    color:var(--ink); letter-spacing:.005em;
+  }
+  dl.trap dd{margin:0; color:var(--ink-2); font-size:15.5px}
+  dl.trap dd code{white-space:nowrap}
+
+  footer{
+    grid-column:1/-1; border-top:2px solid var(--ink); margin-top:20px; padding-top:20px;
+    font-size:13.5px; color:var(--ink-3); max-width:var(--measure);
+  }
+  footer p{max-width:none}
+  @media (prefers-reduced-motion:reduce){ *{animation:none!important; transition:none!important} }
+</style>
+
+<div class="wrap">
+
+  <header class="mast">
+    <p class="eyebrow">Phase 0 · single VPS · Guwahati routing graph</p>
+    <h1>rcab Demo Runbook</h1>
+    <p class="standfirst">Everything built so far, and exactly how to prove it works by hand. Demos 0 through 5 in dependency order, the automated suites behind them, and an honest list of what is <em>not</em> built yet.</p>
+    <div class="mast-meta">
+      <span>Compiled <b>2026-09-29</b></span>
+      <span>Code state <b>main @ 7d5e2cc</b></span>
+      <span>Epics shipped <b>E1–E6</b></span>
+      <span>Audience <b>testers + new devs</b></span>
+    </div>
+  </header>
+
+  <nav class="rail" aria-label="On this page">
+    <p class="rail-h">Orientation</p>
+    <ol>
+      <li><a href="#standing">Where it stands</a></li>
+      <li><a href="#traps">Read this first</a></li>
+      <li><a href="#bringup">Bring-up</a></li>
+    </ol>
+    <p class="rail-h">The demo route</p>
+    <ol>
+      <li><a href="#d0">0 · Hello, stack</a></li>
+      <li><a href="#d1">1 · A real user</a></li>
+      <li><a href="#d2">2 · Driver online</a></li>
+      <li><a href="#d3">3 · Normal ride</a></li>
+      <li><a href="#d4">4 · Shared ride</a></li>
+      <li><a href="#d5">5 · Scheduled ride</a></li>
+    </ol>
+    <p class="rail-h">Behind the demos</p>
+    <ol>
+      <li><a href="#suites">Automated suites</a></li>
+      <li><a href="#reference">System reference</a></li>
+      <li><a href="#inspect">Inspection kit</a></li>
+      <li><a href="#gaps">Not built yet</a></li>
+    </ol>
+  </nav>
+
+  <main>
+
+    <!-- ============ WHERE IT STANDS ============ -->
+    <section id="standing">
+      <h2>Where it stands</h2>
+      <p class="sec-lede">Production is reached one runnable demo at a time. Each demo is a hard waypoint — docker up, tests green, developer walks it, signs off. A demo is not done because the code merged; it is done when a human has walked it.</p>
+
+      <div class="board">
+        <div class="board-row"><span class="d">D0</span><span class="t"><b>Hello, stack</b><span>Every container up, health reachable, suites green · E1</span></span><span class="pill ok">walked ✓</span></div>
+        <div class="board-row"><span class="d">D1</span><span class="t"><b>I am a real user</b><span>Phone OTP → JWT → refresh → logout, web · E2</span></span><span class="pill ok">walked ✓</span></div>
+        <div class="board-row"><span class="d">D2</span><span class="t"><b>The driver is online</b><span>Driver app, vehicle, go online, Redis geo index · E3</span></span><span class="pill owed">code done · walk owed</span></div>
+        <div class="board-row"><span class="d">D3</span><span class="t"><b>Book a normal ride</b><span>Quote → dispatch → accept → complete → rate · E4</span></span><span class="pill owed">code done · walk owed</span></div>
+        <div class="board-row"><span class="d">D4</span><span class="t"><b>Shared works</b><span>Two overlapping requests pool into one ride · E5</span></span><span class="pill owed">code done · walk owed</span></div>
+        <div class="board-row"><span class="d">D5</span><span class="t"><b>Scheduled works</b><span>T+30 booking wakes at T−10 and dispatches · E6</span></span><span class="pill owed">code done · walk owed</span></div>
+        <div class="board-row"><span class="d">D6</span><span class="t"><b>Dashboards &amp; ratings</b><span>Rating aggregation, history, earnings · E7</span></span><span class="pill none">not built</span></div>
+        <div class="board-row"><span class="d">D7</span><span class="t"><b>Production-grade</b><span>Alerts firing, backups round-tripping, load budget · E8</span></span><span class="pill none">not built</span></div>
+        <div class="board-row"><span class="d">D8</span><span class="t"><b>Real drivers, real city</b><span>Closed pilot, 10–20 drivers, one week · E9</span></span><span class="pill none">not built</span></div>
+      </div>
+
+      <div class="note warn" style="margin-top:18px">
+        <p><span class="nh">The gap this runbook exists to close</span>
+        Demos 0 and 1 were walked by hand on 2026-06-15 and produced eight real bug fixes. Demos 2–5 have shipped code, merged PRs and green integration tests, but <b>no human has walked them end to end</b>. Until someone does, "E1–E6 done" means "the tests we wrote pass", not "the product works".</p>
+      </div>
+    </section>
+
+    <!-- ============ TRAPS ============ -->
+    <section id="traps">
+      <h2>Read this first</h2>
+      <p class="sec-lede">Six facts about this stack that cost hours if you learn them the hard way. Every one has burned a prior session.</p>
+
+      <dl class="trap">
+        <div>
+          <dt>Ports are not the obvious ones</dt>
+          <dd>Web is <code>:3002</code>, Grafana is <code>:3001</code> — they are easy to swap in your head. Postgres publishes <code>:55432</code>, not 5432, because 5432 is usually a locally-installed Postgres.</dd>
+        </div>
+        <div>
+          <dt>OSRM has no host port</dt>
+          <dd>Neither do Loki or Alertmanager. They live only on <code>rcab_dev_net</code>. <code>localhost:5000</code> and <code>localhost:3100</code> refuse the connection — that is correct behaviour, not a broken container. Reach OSRM from inside: <code>docker compose … exec -T api sh -c 'curl http://osrm:5000/…'</code>.</dd>
+        </div>
+        <div>
+          <dt>Driver presence expires in 60 seconds</dt>
+          <dd>The API auto-offline sweep runs every 15 s and drops any driver whose <code>driver:state:&lt;id&gt;.last_seen</code> is older than 60 s. A seeded driver that never heartbeats vanishes from <code>active_drivers</code> about a minute later. Hold them online with <code>./scripts/seed-dev.sh --keepalive</code>.</dd>
+        </div>
+        <div>
+          <dt>Migrations are never applied automatically</dt>
+          <dd>Not on <code>dev:up</code>, not on container restart. Eleven hand-authored SQL files in <code>apps/api/migrations/</code> (<code>0001</code>…<code>0011_rides_scheduled.sql</code>) applied in order by <code>src/migrate.ts</code>, which tracks what it has run in <code>_rcab_migrations</code>. Forgetting this looks like "the scheduled columns don't exist".</dd>
+        </div>
+        <div>
+          <dt>All coordinates must be near Guwahati</dt>
+          <dd>The dev OSRM graph is NE-India only, centred around <code>26.1445, 91.7362</code>. A pickup outside it returns no route, so quotes fail and dispatch never starts. Set your emulator GPS inside the region too.</dd>
+        </div>
+        <div>
+          <dt>Seeded users cannot sign in</dt>
+          <dd><code>seed-dev.sh</code> upserts fixture drivers, clients and vehicles and puts drivers in the geo index — good for watching dispatch fan out. But their <code>firebase_uid</code>s are synthetic, so they cannot complete phone OTP and they never answer an offer. <b>Accepting a ride still needs a real driver on the Flutter app.</b></dd>
+        </div>
+      </dl>
+
+      <div class="note">
+        <p><span class="nh">Skipping SMS during a walk</span>
+        Add test phone numbers with fixed codes in the Firebase console (Authentication → Sign-in method → Phone → Test numbers). The prior pass used <code>+919999999999</code> / <code>123456</code>. For curl-only checks, <code>FIREBASE_PHONE_TEST_TOKEN</code> in <code>.env.dev</code> is a pre-minted ID token.</p>
+      </div>
+
+      <h4>Prerequisites</h4>
+      <ul class="plain">
+        <li>Docker Desktop running · pnpm 10 (<code>packageManager</code> pins 10.33.4) · Node ≥20</li>
+        <li>Flutter 3.16 plus an Android emulator or device — only for Demos 2–5</li>
+        <li>Postgres credentials are <code>rcab</code> / <code>rcab</code>, database <code>rcab</code></li>
+        <li>A Firebase project with phone auth enabled, and <code>apps/web/.env.local</code> holding the four <code>NEXT_PUBLIC_FIREBASE_*</code> keys (gitignored, no template committed yet — see <a href="#gaps">Not built yet</a>)</li>
+      </ul>
+    </section>
+
+    <!-- ============ BRING-UP ============ -->
+    <section id="bringup">
+      <h2>Bring-up</h2>
+      <p class="sec-lede">Four commands to a running stack, one to prove it, one to load the schema. First run builds the OSRM routing graph and takes several minutes.</p>
+
+      <h4>1 · Start everything</h4>
+<pre><code>pnpm dev:up      <span class="c"># compose up -d --build; creates .env.dev on first run; includes obs profile</span>
+pnpm dev:smoke   <span class="c"># polls api / until postgres + redis report connected → 200</span>
+pnpm dev:logs    <span class="c"># follow</span>
+pnpm dev:down    <span class="c"># stop + remove. add -v to wipe volumes for a clean slate</span></code></pre>
+      <p>The <code>:slim</code> variants (<code>dev:up:slim</code>, <code>dev:down:slim</code>) skip the observability containers when you do not need Grafana.</p>
+
+      <h4>2 · Verify each service by hand</h4>
+<pre><code>curl -s localhost:3000/v1/health/live  | jq   <span class="c"># {"ok":true}</span>
+curl -s localhost:3000/v1/health/ready | jq   <span class="c"># postgres/redis/osrm all ok</span>
+curl -s localhost:3000/metrics | head         <span class="c"># prometheus text format</span>
+
+<span class="c"># OSRM is network-internal — go through the api container:</span>
+docker compose --env-file .env.dev -f infra/docker/docker-compose.dev.yml exec -T api \
+  sh -c 'curl -s "http://osrm:5000/route/v1/driving/91.7362,26.1445;91.7898,26.1758"' | jq .code
+<span class="c"># → "Ok"</span>
+
+open http://localhost:3002   <span class="c"># web app</span>
+open http://localhost:3001   <span class="c"># Grafana (admin/admin)</span>
+open http://localhost:3003   <span class="c"># Uptime-Kuma</span></code></pre>
+      <p>Or one shot: <code>/smoke-check</code>.</p>
+
+      <h4>3 · Apply migrations — once per fresh database</h4>
+<pre><code>docker compose --env-file .env.dev -f infra/docker/docker-compose.dev.yml \
+  exec api npx tsx src/migrate.ts
+<span class="c"># expect: [migrator] applied 00xx_*.sql … [migrator] done</span>
+
+<span class="c"># confirm the scheduled columns landed:</span>
+docker compose --env-file .env.dev -f infra/docker/docker-compose.dev.yml exec -T postgres \
+  psql -U rcab -d rcab -c "\d rides" | grep -E 'type|scheduled_for'</code></pre>
+      <p>Or <code>/db-migrate</code>, which previews the pending SQL before applying it.</p>
+
+      <h4>4 · Fixture data</h4>
+<pre><code>./scripts/seed-dev.sh --reset --drivers 5 --keepalive
+<span class="c"># upserts drivers/clients/vehicles, puts drivers in the Guwahati geo index,</span>
+<span class="c"># and heartbeats them so the 60 s sweep doesn't drop them</span></code></pre>
+
+      <h4>5 · Driver app — outside compose</h4>
+<pre><code>cd apps/driver-app
+flutter pub get
+flutter run   <span class="c"># point its API config at your laptop's LAN IP, never localhost</span></code></pre>
+
+      <div class="note warn">
+        <p><span class="nh">Grafana renders empty until traffic exists</span>
+        <code>http_request_duration_seconds_count</code>, <code>rcab_dispatch_*</code> and <code>rcab_active_drivers</code> have zero series until something exercises the API. To wake the Overview dashboard before a demo:
+        <code>for i in $(seq 1 200); do curl -s localhost:3000/v1/health/live &gt;/dev/null; done</code></p>
+      </div>
+    </section>
+
+    <!-- ============ THE ROUTE ============ -->
+    <section id="route">
+      <h2>The demo route</h2>
+      <p class="sec-lede">Numbered because the order is real: each demo needs the one before it standing up. Demo 3 cannot be walked without a signed-in client from Demo 1 and an online driver from Demo 2. Tick the pass criteria as you go — progress is saved in this browser only.</p>
+
+      <div class="tally">
+        <span class="progress" id="tally">0 of 0 checks complete</span>
+        <button class="reset" id="reset" type="button">Clear my ticks</button>
+      </div>
+
+      <div class="route">
+
+        <!-- D0 -->
+        <article class="demo" id="d0">
+          <span class="num">0</span>
+          <p class="epic">Epic E1 — Foundation</p>
+          <h3>Hello, stack</h3>
+          <p class="proves"><b>Proves</b>Every container comes up, health is reachable from outside, and both test suites pass.</p>
+          <ol class="steps">
+            <li><code>pnpm dev:up &amp;&amp; pnpm dev:smoke</code> → green for every service.</li>
+            <li>The four verification calls above all succeed: live <code>ok</code>, readiness <code>ok</code> for postgres/redis/osrm, metrics text, OSRM <code>code: "Ok"</code>.</li>
+            <li>Grafana on <code>:3001</code> renders a populated panel (generate traffic first). Uptime-Kuma on <code>:3003</code> shows a green monitor.</li>
+            <li><code>pnpm test</code> and <code>pnpm test:int</code> both exit 0 — or the whole gate, <code>pnpm verify</code>.</li>
+            <li><code>docker compose … ps</code> shows every container healthy.</li>
+          </ol>
+          <div class="note warn">
+            <p><span class="nh">Common misses</span>OSRM <code>code != Ok</code> means the graph is still extracting — check <code>docker compose … logs osrm-extract</code>. A stale Postgres volume from an older schema needs <code>pnpm dev:down -v</code>.</p>
+          </div>
+          <div class="checks">
+            <h4>Pass criteria</h4>
+            <label class="check"><input type="checkbox" id="c0-1"><span>Readiness returns ok for postgres, redis and osrm</span></label>
+            <label class="check"><input type="checkbox" id="c0-2"><span>OSRM answers <code>code: "Ok"</code> from inside the network</span></label>
+            <label class="check"><input type="checkbox" id="c0-3"><span>Grafana panels show real series after traffic</span></label>
+            <label class="check"><input type="checkbox" id="c0-4"><span><code>pnpm verify</code> exits 0</span></label>
+          </div>
+        </article>
+
+        <!-- D1 -->
+        <article class="demo" id="d1">
+          <span class="num">1</span>
+          <p class="epic">Epic E2 — Auth &amp; identity · web</p>
+          <h3>I am a real user</h3>
+          <p class="proves"><b>Proves</b>Phone-OTP signup, first-party JWT issuance, silent refresh, and logout revocation.</p>
+          <ol class="steps">
+            <li>Open <code>http://localhost:3002/signin</code>.</li>
+            <li>Enter a Firebase test phone number, let the invisible reCAPTCHA resolve, <b>Send OTP</b>.</li>
+            <li>Enter the fixed test code → <b>Verify</b> → you land on <code>/book</code> signed in as a client.</li>
+            <li>DevTools → Application → Cookies: <code>rcab_refresh</code> is <code>HttpOnly</code> and <code>SameSite</code>.</li>
+            <li>Check the row landed exactly once:
+<pre><code>docker compose … exec -T postgres psql -U rcab -d rcab -c \
+  "SELECT id, phone_e164, role FROM app_user ORDER BY created_at DESC LIMIT 5;"</code></pre></li>
+            <li>Hard-refresh → still signed in (that is the refresh path). <b>Sign out</b> → cookie cleared, and a stale access token now returns 401.</li>
+          </ol>
+          <h4>Curl-only variant</h4>
+<pre><code>curl -s localhost:3000/v1/auth/firebase-exchange -H 'Content-Type: application/json' \
+  -d "{\"id_token\":\"$FIREBASE_PHONE_TEST_TOKEN\"}" | jq
+<span class="c"># → {access_token, user}. Reuse that token as Authorization: Bearer … below.</span></code></pre>
+          <div class="checks">
+            <h4>Pass criteria</h4>
+            <label class="check"><input type="checkbox" id="c1-1"><span>One <code>app_user</code> row per phone — re-signing in does not duplicate it</span></label>
+            <label class="check"><input type="checkbox" id="c1-2"><span>Refresh cookie is HttpOnly + SameSite (visually confirmed in DevTools)</span></label>
+            <label class="check"><input type="checkbox" id="c1-3"><span>Hard refresh keeps the session alive</span></label>
+            <label class="check"><input type="checkbox" id="c1-4"><span>Sign-out revokes the refresh token — a later refresh returns 401</span></label>
+          </div>
+        </article>
+
+        <!-- D2 -->
+        <article class="demo" id="d2">
+          <span class="num">2</span>
+          <p class="epic">Epic E3 — Driver presence · Flutter app</p>
+          <h3>The driver is online</h3>
+          <p class="proves"><b>Proves</b>A driver signs in, registers a vehicle, goes online, and streams location into the Redis geo index.</p>
+          <ol class="steps">
+            <li>Launch the driver app. Sign in with a <b>driver</b> test phone number.</li>
+            <li>Register a vehicle — type, registration number, seats → <code>POST /v1/vehicles</code>.</li>
+            <li>Toggle <b>Online</b> → <code>POST /v1/drivers/online</code>. A foreground-service notification appears.</li>
+            <li>The app streams <code>driver:location</code> over the websocket. Confirm presence:
+<pre><code>docker compose … exec -T redis redis-cli ZRANGE active_drivers 0 -1 WITHSCORES
+docker compose … exec -T redis redis-cli HGETALL driver:state:&lt;driver-user-id&gt;</code></pre>
+            Or <code>/redis-inspect</code>. Move the emulator GPS — scores update at roughly 1 Hz behind a 3 s geo throttle.</li>
+            <li>Toggle <b>Offline</b> → the driver leaves <code>active_drivers</code>.</li>
+          </ol>
+          <div class="note warn">
+            <p><span class="nh">Common miss</span>Emulator GPS parked outside the Guwahati graph area. The driver appears in Redis but no ride will ever route to them.</p>
+          </div>
+          <div class="checks">
+            <h4>Pass criteria</h4>
+            <label class="check"><input type="checkbox" id="c2-1"><span>Driver appears in <code>active_drivers</code> while online</span></label>
+            <label class="check"><input type="checkbox" id="c2-2"><span><code>driver:state:&lt;id&gt;</code> hash reflects availability and <code>last_seen</code></span></label>
+            <label class="check"><input type="checkbox" id="c2-3"><span>Geo score moves when the device moves</span></label>
+            <label class="check"><input type="checkbox" id="c2-4"><span>Going offline removes them from the index</span></label>
+          </div>
+        </article>
+
+        <!-- D3 -->
+        <article class="demo" id="d3">
+          <span class="num">3</span>
+          <p class="epic">Epic E4 — Normal booking · web + driver app</p>
+          <h3>Book a normal ride</h3>
+          <p class="proves"><b>Proves</b>The whole spine: quote → request → top-K dispatch → accept → drive the state machine → complete → rate.</p>
+          <p><b>Setup:</b> a client signed in on web (Demo 1) <em>and</em> a driver online near the pickup (Demo 2), both inside the Guwahati graph.</p>
+          <ol class="steps">
+            <li><b>Web</b> <code>/book</code>: pick pickup and drop on the Leaflet map. A live quote shows fare and ETA (<code>POST /v1/rides/quote</code>).</li>
+            <li><b>Book</b> → <code>POST /v1/rides</code> with <code>type=normal</code> and an <code>Idempotency-Key</code>. The ride persists as <code>requested</code>, then dispatch fans out.</li>
+            <li><b>Driver app</b> shows a ringing offer card (<code>ride_offer</code>) with a countdown → <b>Accept</b> (<code>ride_offer_response{accept:true}</code>). Ride → <code>accepted</code>; web flips to live tracking.</li>
+            <li>Driver drives the machine via <code>POST /v1/rides/:id/state</code>: en_route → arrived → start → complete. Web shows the driver marker moving (<code>driver_location</code>, 1 Hz) and the banner updating (<code>ride_state_changed</code>).</li>
+            <li>On <code>completed</code>, both sides get a rating prompt → submit stars (<code>POST /v1/rides/:id/ratings</code>).</li>
+          </ol>
+          <h4>Watch it while it runs</h4>
+<pre><code>docker compose … exec -T postgres psql -U rcab -d rcab -c \
+  "SELECT id,status,type,driver_id,fare_cents FROM rides ORDER BY created_at DESC LIMIT 3;"
+/redis-inspect   <span class="c"># claim:ride:*, offer:*, bull:dispatch:* during dispatch</span></code></pre>
+          <p><b>No-driver path:</b> with nobody online, dispatch exhausts wave 2 and the ride lands on <code>no_driver</code> with the client notified.</p>
+          <div class="checks">
+            <h4>Pass criteria</h4>
+            <label class="check"><input type="checkbox" id="c3-1"><span>Quote returns a fare and a signed quote token</span></label>
+            <label class="check"><input type="checkbox" id="c3-2"><span>Exactly one driver wins the claim — losers get <code>ride_offer_revoked</code></span></label>
+            <label class="check"><input type="checkbox" id="c3-3"><span>Ride reaches <code>completed</code> through every intermediate state</span></label>
+            <label class="check"><input type="checkbox" id="c3-4"><span>A <code>ratings</code> row exists per direction</span></label>
+            <label class="check"><input type="checkbox" id="c3-5"><span>With no driver online, the ride ends <code>no_driver</code> and the client is told</span></label>
+          </div>
+        </article>
+
+        <!-- D4 -->
+        <article class="demo" id="d4">
+          <span class="num">4</span>
+          <p class="epic">Epic E5 — Shared booking</p>
+          <h3>Shared works</h3>
+          <p class="proves"><b>Proves</b>Two clients on overlapping corridors pool into a single ride with an ordered multi-stop sequence and per-seat pricing.</p>
+          <p><b>Setup:</b> two or more clients, at least one online driver, routes that genuinely overlap in Guwahati.</p>
+          <ol class="steps">
+            <li>Client A books with <b>Share</b> selected (<code>POST /v1/rides</code>, <code>type=shared</code>) → opens a pool.</li>
+            <li>Client B books a similar route. Matching scores it against A's open pool on route similarity over cached OSRM polylines and slots B in — <code>pool:update</code> fans out and the seat count ticks. Inspect with <code>/pool-inspect</code>.</li>
+            <li>The pool closes (seats full, or timeout) → shared dispatch offers the driver the multi-stop sequence, readable at <code>GET /v1/rides/:id/stops</code>.</li>
+            <li>Driver confirms stops in order (<code>stop:pickup_confirmed</code> / <code>stop:drop_confirmed</code>). The UI must refuse a drop before its matching pickup.</li>
+            <li>Compare fares: each passenger's shared fare is below their solo fare.</li>
+          </ol>
+          <div class="checks">
+            <h4>Pass criteria</h4>
+            <label class="check"><input type="checkbox" id="c4-1"><span>Both clients end up on one shared ride</span></label>
+            <label class="check"><input type="checkbox" id="c4-2"><span>Seat count never exceeds <code>max_seats</code></span></label>
+            <label class="check"><input type="checkbox" id="c4-3"><span>Stops complete in sequence — out-of-order drop is rejected</span></label>
+            <label class="check"><input type="checkbox" id="c4-4"><span>Per-seat fare is lower than the solo fare for the same trip</span></label>
+          </div>
+        </article>
+
+        <!-- D5 -->
+        <article class="demo" id="d5">
+          <span class="num">5</span>
+          <p class="epic">Epic E6 — Scheduled booking · sign-off owed</p>
+          <h3>Scheduled works</h3>
+          <p class="proves"><b>Proves</b>A future booking sits idle, wakes ten minutes before pickup, and then runs the ordinary dispatch path. Cancelling before the wake is free and drops the job.</p>
+          <ol class="steps">
+            <li>Quote as normal (<code>POST /v1/rides/quote</code>, <code>type=scheduled</code>).</li>
+            <li>Request with a <code>scheduledFor</code> between 15 minutes and 24 hours out:
+<pre><code>curl -s localhost:3000/v1/rides -X POST -H "Authorization: Bearer $ACCESS" \
+  -H 'Content-Type: application/json' -H "Idempotency-Key: $(uuidgen)" \
+  -d '{"type":"scheduled","originLat":26.1445,"originLng":91.7362,
+       "destLat":26.1758,"destLng":91.7898,"quoteToken":"&lt;from quote&gt;",
+       "scheduledFor":"&lt;ISO, 20 min from now&gt;"}' | jq</code></pre>
+            The ride persists <code>requested</code> with <code>type=scheduled</code> and <b>no dispatch happens</b>. A delayed job is queued:
+<pre><code>docker compose … exec -T redis redis-cli KEYS 'bull:scheduled-dispatch:*'</code></pre></li>
+            <li><b>Wake:</b> at <code>scheduledFor − 10 min</code> the job fires, emits <code>ride.requested</code>, and the identical Demo 3 dispatch path runs. To demo quickly, set <code>scheduledFor</code> about 16 minutes out, or lower <code>SCHEDULED_WAKE_LEAD_MS</code> in <code>.env.dev</code> and restart the api.</li>
+            <li><b>Cancel before wake</b> (<code>POST /v1/rides/:id/cancel</code>) → the ride becomes <code>cancelled</code> and the delayed job is dropped. Confirm the <code>bull:scheduled-dispatch:*</code> key is gone.</li>
+            <li><b>Window guard:</b> a <code>scheduledFor</code> under 15 minutes or over 24 hours returns <code>400 scheduled_for_out_of_window</code>.</li>
+          </ol>
+          <div class="checks">
+            <h4>Pass criteria</h4>
+            <label class="check"><input type="checkbox" id="c5-1"><span>Scheduled ride does not dispatch at request time</span></label>
+            <label class="check"><input type="checkbox" id="c5-2"><span>A delayed job exists on <code>bull:scheduled-dispatch</code></span></label>
+            <label class="check"><input type="checkbox" id="c5-3"><span>Wake runs the normal path through to <code>completed</code></span></label>
+            <label class="check"><input type="checkbox" id="c5-4"><span>Pre-wake cancel removes the delayed job</span></label>
+            <label class="check"><input type="checkbox" id="c5-5"><span>Out-of-window request is rejected with the documented error code</span></label>
+          </div>
+        </article>
+
+      </div>
+    </section>
+
+    <!-- ============ SUITES ============ -->
+    <section id="suites">
+      <h2>Automated suites</h2>
+      <p class="sec-lede">The manual walks above exist because these suites cannot see a UI. Everything here runs without a human, and <code>pnpm verify</code> is the gate a story must pass before it closes.</p>
+
+      <div class="tw">
+        <table>
+          <thead><tr><th>Suite</th><th>Command</th><th>Spec files</th><th>Notes</th></tr></thead>
+          <tbody>
+            <tr><td>API unit</td><td><code>pnpm --filter @rcab/api test</code></td><td>25</td><td>Vitest. Infra is mocked here, only here.</td></tr>
+            <tr><td>API integration</td><td><code>pnpm test:int</code></td><td>18</td><td>Real Postgres + Redis via Testcontainers — never mocked. Includes claim races, pool over-seat, idempotency, cancel <code>FOR UPDATE</code>, and the scheduled wake end to end.</td></tr>
+            <tr><td>Web unit</td><td><code>pnpm --filter @rcab/web test</code></td><td>10</td><td>Vitest.</td></tr>
+            <tr><td>Web e2e</td><td><code>pnpm test:e2e</code></td><td>1</td><td>Playwright against a running stack — <code>apps/web/e2e/signin.e2e.spec.ts</code>. Or <code>/playwright-run --video</code> to record a demo.</td></tr>
+            <tr><td>Driver app</td><td><code>flutter test</code> in <code>apps/driver-app</code></td><td>21</td><td>Outside the pnpm workspace. Use <code>/flutter-test [unit|widget|integration]</code>.</td></tr>
+            <tr><td>Load</td><td><code>pnpm test:load</code></td><td>1</td><td>k6, <code>infra/load/probe.js</code>. Compare against the Phase-0 budget with <code>/k6-load</code>.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h4>The gate</h4>
+<pre><code>pnpm verify
+<span class="c"># = pnpm lint && pnpm --filter @rcab/api run test:cov && pnpm test:int</span></code></pre>
+      <p>Coverage floors are enforced by the api Vitest config: statements and lines 75, branches 85, functions 70. <code>RCAB_SKIP_INT=1</code> skips the container suites when Docker is unavailable — it is a convenience for offline work, never a way to call a story green.</p>
+      <p>CI is Jenkins: <code>Jenkinsfile</code> per push, <code>Jenkinsfile.nightly</code> for e2e and load.</p>
+
+      <div class="note">
+        <p><span class="nh">Last recorded full pass</span>285 unit tests green; integration green across 21 consecutive runs with zero <code>Connection is closed.</code> teardown errors, after RCAB-E1.S11 root-caused two independent ioredis shutdown sources. Spec counts have grown since that record — re-run rather than quoting it.</p>
+      </div>
+    </section>
+
+    <!-- ============ REFERENCE ============ -->
+    <section id="reference">
+      <h2>System reference</h2>
+      <p class="sec-lede">What a new developer needs on one screen: where things listen, what the ride can be, and which store owns which piece of state.</p>
+
+      <h3>Services and ports</h3>
+      <div class="tw">
+        <table>
+          <thead><tr><th>Service</th><th>Image</th><th>Host port</th><th>Role</th></tr></thead>
+          <tbody>
+            <tr><td>api</td><td>built from <code>apps/api</code></td><td><code>3000</code></td><td>NestJS 10 — HTTP <code>/v1/*</code> plus Socket.IO on the same port</td></tr>
+            <tr><td>web</td><td>built from <code>apps/web</code></td><td><code>3002</code></td><td>Next.js 14 client (listens on 3000 inside, mapped out to 3002)</td></tr>
+            <tr><td>postgres</td><td><code>postgis/postgis:16</code></td><td><code>55432</code></td><td>Durable state. 5432 inside the container</td></tr>
+            <tr><td>redis</td><td><code>redis:7-alpine</code></td><td><code>6379</code></td><td>Geo presence, claim locks, BullMQ, Socket.IO adapter</td></tr>
+            <tr><td>osrm</td><td><code>osrm/osrm-backend</code></td><td>none</td><td>Routing. Dev graph is NE-India / Guwahati</td></tr>
+            <tr><td>grafana</td><td><code>grafana/grafana:11</code></td><td><code>3001</code></td><td>Dashboards (profile <code>obs</code>)</td></tr>
+            <tr><td>prometheus</td><td><code>prom/prometheus</code></td><td><code>9090</code></td><td>Scrapes the api <code>/metrics</code> (profile <code>obs</code>)</td></tr>
+            <tr><td>uptime-kuma</td><td><code>louislam/uptime-kuma</code></td><td><code>3003</code></td><td>Synthetic health monitor (profile <code>obs</code>)</td></tr>
+            <tr><td>loki · promtail · alertmanager</td><td>grafana / prom</td><td>none</td><td>Logs and alert routing — not fully wired until E8</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>The Flutter driver app runs on a device outside compose and must target the laptop's LAN IP.</p>
+
+      <h3>Ride state machine</h3>
+      <div class="fsm">
+        <span class="st">requested</span><span class="arw">→</span>
+        <span class="st">dispatching</span><span class="arw">→</span>
+        <span class="st">accepted</span><span class="arw">→</span>
+        <span class="st">en_route</span><span class="arw">→</span>
+        <span class="st">arrived</span><span class="arw">→</span>
+        <span class="st">in_progress</span><span class="arw">→</span>
+        <span class="st term">completed</span>
+      </div>
+      <div class="fsm">
+        <span class="arw">from dispatching, if every wave is exhausted →</span><span class="st bad">no_driver</span>
+      </div>
+      <div class="fsm">
+        <span class="arw">from any pre-complete state →</span><span class="st bad">cancelled</span><span class="arw">·</span><span class="st bad">no_show</span>
+      </div>
+      <p>The driver drives forward transitions through <code>POST /v1/rides/:id/state</code>, guarded by <code>SELECT … FOR UPDATE</code>. Cancellation is role-aware, and Phase-0 charges no cancellation fee.</p>
+
+      <h3>Where state lives</h3>
+      <p>Nine Postgres tables hold anything durable. Anything in-flight — offers, claims, pools, queues, presence — lives in Redis and disappears with it.</p>
+      <div class="tw">
+        <table>
+          <thead><tr><th>Store</th><th>Key or table</th><th>Holds</th></tr></thead>
+          <tbody>
+            <tr><td>Postgres</td><td><code>app_user</code> · <code>client</code> · <code>driver</code> · <code>vehicle</code></td><td>Identity and profiles. One user row per phone; role is client or driver</td></tr>
+            <tr><td>Postgres</td><td><code>rides</code></td><td>Solo, shared and scheduled rides — <code>status</code>, <code>type</code>, <code>scheduled_for</code>, fare, unique <code>idempotency_key</code>, lifecycle timestamps</td></tr>
+            <tr><td>Postgres</td><td><code>shared_rides</code> · <code>ride_stops</code></td><td>Pool seat counts, members, and the ordered stop sequence</td></tr>
+            <tr><td>Postgres</td><td><code>ratings</code></td><td>Two-sided stars, unique per direction. <b>Capture only</b> — aggregation is E7</td></tr>
+            <tr><td>Postgres</td><td><code>auth_refresh_token</code></td><td>Refresh tokens. Revocation is <code>revoked_at</code> here — <em>not</em> in Redis</td></tr>
+            <tr><td>Redis</td><td><code>active_drivers</code> (GEO ZSET)</td><td>Online driver positions — the dispatch candidate source</td></tr>
+            <tr><td>Redis</td><td><code>driver:state:&lt;id&gt;</code> (HASH)</td><td>Availability, <code>current_ride_id</code>, <code>last_seen</code></td></tr>
+            <tr><td>Redis</td><td><code>claim:ride:&lt;id&gt;</code></td><td><code>SET NX</code> lock that makes first-accept-wins atomic</td></tr>
+            <tr><td>Redis</td><td><code>offer:list:*</code> · <code>offer:type:*</code> · <code>ride:&lt;id&gt;:offered</code></td><td>Outstanding dispatch offers</td></tr>
+            <tr><td>Redis</td><td><code>pool:&lt;rideId&gt;</code> + <code>:seats</code></td><td>Shared pool state; seat allocation is an atomic Lua script</td></tr>
+            <tr><td>Redis</td><td><code>idem:rides:&lt;key&gt;</code></td><td>Idempotency key → ride id, 24 h</td></tr>
+            <tr><td>Redis</td><td><code>bull:dispatch:*</code> · <code>bull:matching:*</code> · <code>bull:scheduled-dispatch:*</code></td><td>Wave timeouts, hard-fail, pool expiry, scheduled wake jobs</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>API surface</h3>
+      <p>22 routes, all under <code>/v1</code> except <code>/</code> and <code>/metrics</code>. Auth is a first-party JWT via <code>Authorization: Bearer</code>, except the public health and auth-entry routes; <code>POST /v1/auth/refresh</code> is additionally CSRF-guarded by an Origin check. <b>Dispatch has no HTTP surface</b> — it is entirely event and queue driven, which is why you inspect it through Redis rather than curl.</p>
+      <div class="tw">
+        <table>
+          <thead><tr><th>Group</th><th>Routes</th></tr></thead>
+          <tbody>
+            <tr><td>Health</td><td><code>GET /</code> · <code>/v1/health/live</code> · <code>/v1/health/ready</code> · <code>/metrics</code></td></tr>
+            <tr><td>Auth</td><td><code>POST /v1/auth/firebase-exchange</code> · <code>/refresh</code> · <code>/logout</code> · <code>/google/login</code> · <code>/google/link</code></td></tr>
+            <tr><td>Vehicles</td><td><code>POST /v1/vehicles</code> · <code>GET /v1/vehicles</code> · <code>PATCH /v1/vehicles/:id</code></td></tr>
+            <tr><td>Drivers</td><td><code>POST /v1/drivers/online</code> · <code>/offline</code> · <code>PATCH /v1/drivers/me/vehicle</code></td></tr>
+            <tr><td>Rides</td><td><code>POST /v1/rides/quote</code> · <code>POST /v1/rides</code> · <code>GET /v1/rides/:id</code> · <code>GET /v1/rides/:id/stops</code> · <code>POST /v1/rides/:id/state</code> · <code>POST /v1/rides/:id/cancel</code></td></tr>
+            <tr><td>Rating</td><td><code>POST /v1/rides/:id/ratings</code></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Realtime events</h3>
+      <p>Socket.IO shares the API port. Rooms are <code>user:&lt;id&gt;</code>, <code>driver:&lt;id&gt;</code>, <code>ride:&lt;id&gt;</code>, <code>pool:&lt;id&gt;</code>.</p>
+      <div class="tw">
+        <table>
+          <thead><tr><th>Direction</th><th>Event</th><th>Meaning</th></tr></thead>
+          <tbody>
+            <tr><td>driver →</td><td><code>driver:location</code></td><td>Geo update, 3 s throttle, fanned to the ride room at 1 Hz</td></tr>
+            <tr><td>driver →</td><td><code>ride_offer_response</code></td><td>Accept or decline an offer</td></tr>
+            <tr><td>driver →</td><td><code>stop:pickup_confirmed</code> · <code>stop:drop_confirmed</code></td><td>Shared-ride stop progress</td></tr>
+            <tr><td>either →</td><td><code>ride:subscribe</code></td><td>Join a ride room after an ownership check</td></tr>
+            <tr><td>→ driver</td><td><code>ride_offer</code> · <code>ride_offer_accepted</code> · <code>ride_offer_revoked</code></td><td>The offer, and the claim result — winner or race-loser</td></tr>
+            <tr><td>→ client</td><td><code>ride_no_driver</code></td><td>Every dispatch wave exhausted</td></tr>
+            <tr><td>→ ride room</td><td><code>ride_state_changed</code> · <code>driver_location</code></td><td>Lifecycle transitions and the live driver marker</td></tr>
+            <tr><td>→ pool room</td><td><code>pool:update</code></td><td>Seat count or pool status changed</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Config worth knowing</h3>
+      <p><code>.env.dev</code> is created by <code>pnpm dev:up</code>. Validate yours with <code>/env-validate</code>. The variables that change demo behaviour: <code>SCHEDULED_WAKE_LEAD_MS</code> (how far ahead a scheduled ride wakes), <code>MATCHING_POOL_TIMEOUT_MS</code> (how long a shared pool stays open), <code>SCHEDULED_DISPATCH_CONCURRENCY</code>, <code>OSM_PBF_URL</code> (the OSRM region), <code>FIREBASE_PHONE_TEST_TOKEN</code>, and <code>JWT_SECRET</code>.</p>
+    </section>
+
+    <!-- ============ INSPECT ============ -->
+    <section id="inspect">
+      <h2>Inspection kit</h2>
+      <p class="sec-lede">Project skills exist so you do not have to remember compose invocations mid-demo. Prefer them over ad-hoc grepping.</p>
+      <div class="tw">
+        <table>
+          <thead><tr><th>Skill</th><th>Answers</th></tr></thead>
+          <tbody>
+            <tr><td><code>/smoke-check</code></td><td>Per-service health table — containers, endpoints, latency</td></tr>
+            <tr><td><code>/redis-inspect</code></td><td>Driver geo index, dispatch offers and claims, BullMQ queues</td></tr>
+            <tr><td><code>/pool-inspect</code></td><td>Open shared pools, seat counts, expiry timers, queue depth</td></tr>
+            <tr><td><code>/osrm-check</code></td><td>Whether the routing graph loaded and can return a route. Run before any Demo 3–5 walk</td></tr>
+            <tr><td><code>/db-migrate status</code></td><td>Which migrations have been applied, with a dry-run preview</td></tr>
+            <tr><td><code>/seed-db</code></td><td>Fixture drivers, clients, vehicles — scenarios <code>default</code>, <code>shared-ride</code>, <code>load-test</code></td></tr>
+            <tr><td><code>/code-graph</code></td><td>Who imports a file, what a module depends on, where a route lives, what tables exist — instead of grepping source</td></tr>
+            <tr><td><code>/docker-stats</code></td><td>Per-container CPU and memory against the Phase-0 VPS budget</td></tr>
+            <tr><td><code>/coverage</code></td><td>API and Flutter coverage with the quality gates applied</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <h4>Watching a ride evolve</h4>
+<pre><code>docker compose … exec -T postgres psql -U rcab -d rcab -c \
+  "SELECT id,status,type,scheduled_for,driver_id FROM rides ORDER BY created_at DESC LIMIT 5;"</code></pre>
+    </section>
+
+    <!-- ============ GAPS ============ -->
+    <section id="gaps">
+      <h2>Not built yet</h2>
+      <p class="sec-lede">None of the following are bugs. They are unstarted epics and known follow-ups — listed so a tester does not file them and a new developer knows where the edge is.</p>
+
+      <h4>Unstarted epics</h4>
+      <div class="tw">
+        <table>
+          <thead><tr><th>Epic</th><th>What is missing</th></tr></thead>
+          <tbody>
+            <tr><td>E7 · Ratings &amp; dashboards</td><td>Stars are captured but never aggregated. No weighted-recency means, no cold-start "New" display, no moderation view, no client ride-history page, no driver earnings data</td></tr>
+            <tr><td>E8 · Production hardening</td><td>Grafana dashboards are scaffolding, not filled queries. Alertmanager is not wired to a destination. No backup restore has been drilled. No TLS/HSTS/CSP audit. Load budget never confirmed on the target VPS class</td></tr>
+            <tr><td>E9 · Pilot rollout</td><td>No onboarding runbook, no go/no-go checklist, no pilot</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h4>Open follow-ups from the last manual pass</h4>
+      <ul class="plain">
+        <li><b>No <code>apps/web/.env.example</code>.</b> The four <code>NEXT_PUBLIC_FIREBASE_*</code> keys are undocumented, so a fresh clone cannot sign in until someone pastes a Firebase config by hand.</li>
+        <li><b>The api dev transform drops decorator metadata.</b> <code>tsx</code> uses esbuild, which does not emit <code>design:paramtypes</code>, so NestJS silently injects <code>undefined</code> into implicit constructor params. The auth controller and service work around it with explicit <code>@Inject</code>. A real fix means swc with <code>decoratorMetadata</code>, or <code>tsc --watch</code>. <b>If you see <code>Cannot read properties of undefined (reading '&lt;method&gt;')</code> in a new provider, this is why.</b></li>
+        <li><b><code>pnpm dev:up</code> does not detect lockfile drift</b> against the anonymous <code>node_modules</code> volumes. A newly added web dependency can be missing inside a running container even though the host installed it.</li>
+        <li><b>Rare integration flake, roughly 1 in 18 runs</b>, unrelated to the fixed teardown issue — suspected <code>Math.random()</code> collisions on <code>phone_e164</code> / <code>reg_no</code> in the seed helpers hitting unique constraints.</li>
+        <li><b><code>seedPilotCity</code> in <code>@rcab/test-fixtures</code> is an empty stub.</b></li>
+      </ul>
+
+      <div class="note gap">
+        <p><span class="nh">Scope boundary</span>Phase 0 is one VPS and one <code>docker-compose</code>, per ADR-0009. Multi-host, Kubernetes and managed cloud services are out of scope — if a task seems to need them, that is an impact-analysis trigger, not a design decision to make on the spot.</p>
+      </div>
+    </section>
+
+    <footer>
+      <p><b>Provenance.</b> Compiled from <code>docs/manual-testing/RUN-GUIDE.md</code>, <code>docs/ARCHITECTURE.md</code>, <code>docs/manual-testing/findings-2026-06-15.md</code>, <code>95-delivery/delivery-roadmap.md</code> and <code>95-delivery/stories-index.md</code>, with counts verified against the tree at <code>main @ 7d5e2cc</code>.</p>
+      <p><b>Keeping it true.</b> <code>95-delivery/stories-index.md</code> is the only source of truth for story status — this page is a snapshot. When you walk a demo, record findings as a dated file in <code>docs/manual-testing/</code> the way the 2026-06-15 pass did, and re-generate this page rather than editing status in two places.</p>
+      <p>Tick marks on this page are stored in your own browser and are not shared with other readers.</p>
+    </footer>
+
+  </main>
+</div>
+
+<script>
+  (function () {
+    var KEY = 'rcab-runbook-checks-v1';
+    var boxes = Array.prototype.slice.call(document.querySelectorAll('.check input[type=checkbox]'));
+    var tally = document.getElementById('tally');
+    var reset = document.getElementById('reset');
+
+    function read() {
+      try { return JSON.parse(localStorage.getItem(KEY) || '{}') || {}; }
+      catch (e) { return {}; }
+    }
+    function write(state) {
+      try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) { /* private mode: ticks stay in-page */ }
+    }
+    function paint() {
+      var done = boxes.filter(function (b) { return b.checked; }).length;
+      tally.textContent = done + ' of ' + boxes.length + ' checks complete';
+    }
+
+    var state = read();
+    boxes.forEach(function (b) {
+      if (state[b.id]) { b.checked = true; }
+      b.addEventListener('change', function () {
+        var s = read();
+        if (b.checked) { s[b.id] = 1; } else { delete s[b.id]; }
+        write(s);
+        paint();
+      });
+    });
+    reset.addEventListener('click', function () {
+      boxes.forEach(function (b) { b.checked = false; });
+      write({});
+      paint();
+    });
+    paint();
+  })();
+</script>
