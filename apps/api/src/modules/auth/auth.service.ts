@@ -1,28 +1,68 @@
-import { Injectable, UnauthorizedException, ConflictException, Inject } from '@nestjs/common';
+import {
+  Injectable,
+  UnauthorizedException,
+  ConflictException,
+  ForbiddenException,
+  Inject,
+} from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { randomUUID } from 'node:crypto';
-import type { Pool } from 'pg';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import type { Pool, PoolClient } from 'pg';
 import { PG_POOL } from '../../infra/db/drizzle.module';
 import { FirebaseAdminService } from '../../infra/firebase/firebase-admin.service';
 import { GoogleVerifierService } from '../../infra/google/google-verifier.service';
+import { ACCESS_TOKEN_TTL_SECONDS, signAccessToken } from '../../common/guards/access-token';
 
 const PHONE_E164_RE = /^\+[1-9]\d{7,14}$/;
 const REFRESH_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const REFRESH_TOKEN_BYTES = 32;
 
-export interface RefreshRow {
-  user_id: string;
-  role: string;
-  phone_e164: string;
-  expires_at: Date;
-  revoked_at: Date | null;
-}
+/** app_user.status values that may not obtain or renew a session (F12). */
+export const BLOCKED_USER_STATUSES: readonly string[] = ['suspended', 'deleted'];
+
+export type AuthMethod = 'phone' | 'google';
 
 export interface TokenResponse {
   access_token: string;
   token_type: 'bearer';
-  expires_in: 900;
+  expires_in: typeof ACCESS_TOKEN_TTL_SECONDS;
   refresh_token: string;
   user: { id: string; role: string; phone_e164: string };
+}
+
+interface SessionUser {
+  id: string;
+  role: string;
+  phone_e164: string;
+  status: string;
+}
+
+interface ConsumedRefreshRow {
+  user_id: string;
+  family_id: string;
+  auth_method: AuthMethod;
+  role: string;
+  phone_e164: string;
+  status: string;
+}
+
+type Queryable = Pick<Pool | PoolClient, 'query'>;
+
+/**
+ * Refresh tokens are 256-bit random values; only their SHA-256 digest is
+ * stored (F12), so a database read never yields a usable credential. A plain
+ * (unkeyed) digest is sufficient because the input is high-entropy.
+ */
+export function hashRefreshToken(token: string): string {
+  return createHash('sha256').update(token, 'utf8').digest('hex');
+}
+
+function generateRefreshToken(): string {
+  return randomBytes(REFRESH_TOKEN_BYTES).toString('base64url');
+}
+
+function invalidRefresh(message: string): UnauthorizedException {
+  return new UnauthorizedException({ code: 'invalid_refresh_token', message });
 }
 
 @Injectable()
@@ -62,64 +102,63 @@ export class AuthService {
     }
 
     const user = await this.findOrCreateUser(decoded.uid, phone);
-
-    const accessToken = this.jwt.sign({
-      sub: user.id,
-      role: user.role,
-      auth_method: 'phone',
-    });
-
-    const refreshToken = randomUUID();
-    const expiresAt = new Date(Date.now() + REFRESH_TTL_MS);
-    await this.pool.query(
-      'INSERT INTO auth_refresh_token (token, user_id, expires_at) VALUES ($1, $2, $3)',
-      [refreshToken, user.id, expiresAt],
-    );
-
-    return {
-      access_token: accessToken,
-      token_type: 'bearer',
-      expires_in: 900,
-      refresh_token: refreshToken,
-      user: { id: user.id, role: user.role, phone_e164: user.phone_e164 },
-    };
+    this.assertAccountActive(user.status);
+    return this.issueSession(this.pool, user, 'phone', randomUUID());
   }
 
+  /**
+   * Single-use rotation (F12). The validity check and the consumption are one
+   * conditional UPDATE inside the transaction, so of N concurrent requests
+   * presenting the same token exactly one can consume it. Presenting a token
+   * that was already consumed or revoked is treated as replay and revokes the
+   * token's whole session family.
+   */
   async refresh(refreshToken: string): Promise<TokenResponse> {
-    const result = await this.pool.query<RefreshRow & { phone_e164: string }>(
-      `SELECT art.user_id, art.expires_at, art.revoked_at, au.role, au.phone_e164
-       FROM auth_refresh_token art
-       JOIN app_user au ON au.id = art.user_id
-       WHERE art.token = $1`,
-      [refreshToken],
-    );
-
-    if (result.rows.length === 0) {
-      throw new UnauthorizedException({ code: 'invalid_refresh_token', message: 'Refresh token not found' });
-    }
-
-    const row = result.rows[0];
-    if (row.revoked_at !== null) {
-      throw new UnauthorizedException({ code: 'invalid_refresh_token', message: 'Refresh token has been revoked' });
-    }
-    if (new Date(row.expires_at) < new Date()) {
-      throw new UnauthorizedException({ code: 'invalid_refresh_token', message: 'Refresh token has expired' });
-    }
-
-    const newRefreshToken = randomUUID();
-    const expiresAt = new Date(Date.now() + REFRESH_TTL_MS);
-
+    const tokenHash = hashRefreshToken(refreshToken);
     const client = await this.pool.connect();
+    let outcome: TokenResponse | UnauthorizedException;
     try {
       await client.query('BEGIN');
-      await client.query(
-        'UPDATE auth_refresh_token SET revoked_at = now() WHERE token = $1',
-        [refreshToken],
+      const consumed = await client.query<ConsumedRefreshRow>(
+        `UPDATE auth_refresh_token art
+            SET revoked_at = now()
+           FROM app_user au
+          WHERE art.token_hash = $1
+            AND art.revoked_at IS NULL
+            AND art.expires_at > now()
+            AND au.id = art.user_id
+        RETURNING art.user_id, art.family_id, art.auth_method, au.role, au.phone_e164, au.status`,
+        [tokenHash],
       );
-      await client.query(
-        'INSERT INTO auth_refresh_token (token, user_id, expires_at) VALUES ($1, $2, $3)',
-        [newRefreshToken, row.user_id, expiresAt],
-      );
+
+      if (consumed.rows.length === 0) {
+        // Unknown, expired, or already used. A known token that is already
+        // revoked is a replay: revoke whatever is still live in its family.
+        await client.query(
+          `UPDATE auth_refresh_token SET revoked_at = now()
+            WHERE revoked_at IS NULL
+              AND family_id = (SELECT family_id FROM auth_refresh_token
+                                WHERE token_hash = $1 AND revoked_at IS NOT NULL)`,
+          [tokenHash],
+        );
+        outcome = invalidRefresh('Refresh token is invalid, expired, or already used');
+      } else {
+        const row = consumed.rows[0];
+        if (BLOCKED_USER_STATUSES.includes(row.status)) {
+          await client.query(
+            'UPDATE auth_refresh_token SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL',
+            [row.user_id],
+          );
+          outcome = new UnauthorizedException({ code: 'account_disabled', message: 'Account is not active' });
+        } else {
+          outcome = await this.issueSession(
+            client,
+            { id: row.user_id, role: row.role, phone_e164: row.phone_e164, status: row.status },
+            row.auth_method,
+            row.family_id,
+          );
+        }
+      }
       await client.query('COMMIT');
     } catch (err) {
       await client.query('ROLLBACK');
@@ -128,21 +167,14 @@ export class AuthService {
       client.release();
     }
 
-    const accessToken = this.jwt.sign({ sub: row.user_id, role: row.role, auth_method: 'phone' });
-
-    return {
-      access_token: accessToken,
-      token_type: 'bearer',
-      expires_in: 900,
-      refresh_token: newRefreshToken,
-      user: { id: row.user_id, role: row.role, phone_e164: row.phone_e164 },
-    };
+    if (outcome instanceof UnauthorizedException) throw outcome;
+    return outcome;
   }
 
   async revoke(refreshToken: string, userId: string): Promise<void> {
     await this.pool.query(
-      'UPDATE auth_refresh_token SET revoked_at = now() WHERE token = $1 AND user_id = $2 AND revoked_at IS NULL',
-      [refreshToken, userId],
+      'UPDATE auth_refresh_token SET revoked_at = now() WHERE token_hash = $1 AND user_id = $2 AND revoked_at IS NULL',
+      [hashRefreshToken(refreshToken), userId],
     );
   }
 
@@ -168,8 +200,8 @@ export class AuthService {
   async loginWithGoogle(googleIdToken: string): Promise<TokenResponse> {
     const { sub } = await this.google.verifyIdToken(googleIdToken);
 
-    const result = await this.pool.query<{ id: string; role: string; phone_e164: string }>(
-      'SELECT id, role, phone_e164 FROM app_user WHERE google_sub = $1',
+    const result = await this.pool.query<SessionUser>(
+      'SELECT id, role, phone_e164, status FROM app_user WHERE google_sub = $1',
       [sub],
     );
 
@@ -178,30 +210,43 @@ export class AuthService {
     }
 
     const user = result.rows[0];
-    const accessToken = this.jwt.sign({ sub: user.id, role: user.role, auth_method: 'google' });
+    this.assertAccountActive(user.status);
+    return this.issueSession(this.pool, user, 'google', randomUUID());
+  }
 
-    const refreshToken = randomUUID();
+  private assertAccountActive(status: string): void {
+    if (BLOCKED_USER_STATUSES.includes(status)) {
+      throw new ForbiddenException({ code: 'account_disabled', message: 'Account is not active' });
+    }
+  }
+
+  /** Mints an access token and stores the digest of a fresh refresh token in `familyId`. */
+  private async issueSession(
+    db: Queryable,
+    user: SessionUser,
+    authMethod: AuthMethod,
+    familyId: string,
+  ): Promise<TokenResponse> {
+    const refreshToken = generateRefreshToken();
     const expiresAt = new Date(Date.now() + REFRESH_TTL_MS);
-    await this.pool.query(
-      'INSERT INTO auth_refresh_token (token, user_id, expires_at) VALUES ($1, $2, $3)',
-      [refreshToken, user.id, expiresAt],
+    await db.query(
+      `INSERT INTO auth_refresh_token (token_hash, family_id, user_id, auth_method, expires_at)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [hashRefreshToken(refreshToken), familyId, user.id, authMethod, expiresAt],
     );
 
     return {
-      access_token: accessToken,
+      access_token: signAccessToken(this.jwt, { sub: user.id, role: user.role, auth_method: authMethod }),
       token_type: 'bearer',
-      expires_in: 900,
+      expires_in: ACCESS_TOKEN_TTL_SECONDS,
       refresh_token: refreshToken,
       user: { id: user.id, role: user.role, phone_e164: user.phone_e164 },
     };
   }
 
-  private async findOrCreateUser(
-    firebaseUid: string,
-    phone: string,
-  ): Promise<{ id: string; role: string; phone_e164: string }> {
-    const existing = await this.pool.query<{ id: string; role: string; phone_e164: string }>(
-      'SELECT id, role, phone_e164 FROM app_user WHERE firebase_uid = $1',
+  private async findOrCreateUser(firebaseUid: string, phone: string): Promise<SessionUser> {
+    const existing = await this.pool.query<SessionUser>(
+      'SELECT id, role, phone_e164, status FROM app_user WHERE firebase_uid = $1',
       [firebaseUid],
     );
     if (existing.rows.length > 0) return existing.rows[0];
@@ -216,7 +261,7 @@ export class AuthService {
       );
       await client.query('INSERT INTO client (user_id) VALUES ($1)', [userId]);
       await client.query('COMMIT');
-      return { id: userId, role: 'client', phone_e164: phone };
+      return { id: userId, role: 'client', phone_e164: phone, status: 'active' };
     } catch (err) {
       await client.query('ROLLBACK');
       throw err;

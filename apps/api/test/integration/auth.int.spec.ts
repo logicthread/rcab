@@ -10,7 +10,9 @@ import type { INestApplication } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ThrottlerGuard } from '@nestjs/throttler';
 import { Pool } from 'pg';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
 import cookieParser from 'cookie-parser';
 import supertest from 'supertest';
 import { AppModule } from '../../src/app.module';
@@ -21,6 +23,30 @@ import { GoogleVerifierService } from '../../src/infra/google/google-verifier.se
 import type { auth } from 'firebase-admin';
 
 const skip = process.env.RCAB_INT_SKIPPED === '1';
+
+const REFRESH_TOKEN_RE = /^[A-Za-z0-9_-]{43}$/; // 32 random bytes, base64url
+const MIGRATIONS_DIR = join(__dirname, '../../migrations');
+const nativeContract = JSON.parse(
+  readFileSync(join(__dirname, '../fixtures/native-auth-contract.json'), 'utf8'),
+) as { endpoints: Record<'firebase_exchange' | 'refresh', { response: { body: unknown } }> };
+
+function sha256(value: string): string {
+  return createHash('sha256').update(value, 'utf8').digest('hex');
+}
+
+/** Recursively maps a JSON value to its shape (keys + primitive types). */
+function shapeOf(value: unknown): unknown {
+  if (value === null) return 'null';
+  if (Array.isArray(value)) return value.map(shapeOf);
+  if (typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([k, v]) => [k, shapeOf(v)]),
+    );
+  }
+  return typeof value;
+}
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -135,7 +161,7 @@ describe.skipIf(skip)('happy paths', () => {
     expect(res.body.user.phone_e164).toBe('+12025551001');
 
     const rt = extractCookieToken(res.headers as Record<string, string | string[]>);
-    expect(rt).toMatch(/^[0-9a-f-]{36}$/);
+    expect(rt).toMatch(REFRESH_TOKEN_RE);
 
     const userRows = await pool.query<{ phone_e164: string }>(
       'SELECT phone_e164 FROM app_user WHERE firebase_uid = $1', [uid],
@@ -143,10 +169,12 @@ describe.skipIf(skip)('happy paths', () => {
     expect(userRows.rows).toHaveLength(1);
     expect(userRows.rows[0].phone_e164).toBe('+12025551001');
 
-    const tokenRows = await pool.query(
-      'SELECT user_id FROM auth_refresh_token WHERE token = $1', [rt],
+    // Only the digest is stored (F12).
+    const tokenRows = await pool.query<Record<string, unknown>>(
+      'SELECT * FROM auth_refresh_token WHERE token_hash = $1', [sha256(rt)],
     );
     expect(tokenRows.rows).toHaveLength(1);
+    expect(Object.values(tokenRows.rows[0])).not.toContain(rt);
   });
 
   it('returning user exchange returns existing row without creating a duplicate', async () => {
@@ -463,7 +491,7 @@ describe.skipIf(skip)('negative — JWT auth guard', () => {
     const jwtService = moduleRef.get(JwtService);
     // Sign with exp in the past (expiresIn: -1 = expired 1 second ago)
     const expiredToken = jwtService.sign(
-      { sub: user.id, role: user.role, auth_method: 'phone' },
+      { sub: user.id, role: user.role, auth_method: 'phone', typ: 'access' },
       { expiresIn: -1 },
     );
 
@@ -567,6 +595,283 @@ describe.skipIf(skip)('cookie + CSRF', () => {
   });
 });
 
+// ─── native (mobile) contract — F02 ───────────────────────────────────────────
+
+let phoneSeq = 0;
+function uniquePhone(): string {
+  phoneSeq += 1;
+  return `+1303${String(Math.floor(Math.random() * 1e4)).padStart(4, '0')}${String(phoneSeq).padStart(3, '0')}`;
+}
+
+async function nativeLogin(): Promise<{ access_token: string; refresh_token: string; user: { id: string } }> {
+  const uid = randomUUID();
+  mockFirebase.verifyIdToken.mockResolvedValue(makeFirebaseToken({ uid, sub: uid, phone_number: uniquePhone() }));
+  const res = await supertest(app.getHttpServer())
+    .post('/v1/auth/native/firebase-exchange')
+    .send({ id_token: 'fb-token' });
+  expect(res.status).toBe(200);
+  return res.body;
+}
+
+describe.skipIf(skip)('native contract (F02)', () => {
+  it('exchange → 200 with refresh_token in JSON, no cookie, shape matches the fixture', async () => {
+    const uid = randomUUID();
+    mockFirebase.verifyIdToken.mockResolvedValue(makeFirebaseToken({ uid, sub: uid, phone_number: uniquePhone() }));
+
+    const res = await supertest(app.getHttpServer())
+      .post('/v1/auth/native/firebase-exchange')
+      .send({ id_token: 'fb-token' });
+
+    expect(res.status).toBe(200);
+    expect(shapeOf(res.body)).toEqual(shapeOf(nativeContract.endpoints.firebase_exchange.response.body));
+    expect(res.body.refresh_token).toMatch(REFRESH_TOKEN_RE);
+    expect(res.headers['set-cookie']).toBeUndefined();
+  });
+
+  it('access token from the native exchange authorizes protected routes', async () => {
+    const { access_token } = await nativeLogin();
+    mockGoogle.verifyIdToken.mockResolvedValue(makeGooglePayload());
+    const res = await supertest(app.getHttpServer())
+      .post('/v1/auth/google/link')
+      .set('Authorization', `Bearer ${access_token}`)
+      .send({ google_id_token: 'g-token' });
+    expect(res.status).toBe(200);
+  });
+
+  it('refresh → 200 rotates the token; the old one is single-use', async () => {
+    const login = await nativeLogin();
+
+    const refreshed = await supertest(app.getHttpServer())
+      .post('/v1/auth/native/refresh')
+      .send({ refresh_token: login.refresh_token });
+    expect(refreshed.status).toBe(200);
+    expect(shapeOf(refreshed.body)).toEqual(shapeOf(nativeContract.endpoints.refresh.response.body));
+    expect(refreshed.body.refresh_token).not.toBe(login.refresh_token);
+    expect(refreshed.headers['set-cookie']).toBeUndefined();
+
+    const replay = await supertest(app.getHttpServer())
+      .post('/v1/auth/native/refresh')
+      .send({ refresh_token: login.refresh_token });
+    expect(replay.status).toBe(401);
+    expect(replay.body.error.code).toBe('invalid_refresh_token');
+  });
+
+  it('logout → 204 revokes the token; refresh then 401', async () => {
+    const login = await nativeLogin();
+
+    const logout = await supertest(app.getHttpServer())
+      .post('/v1/auth/native/logout')
+      .set('Authorization', `Bearer ${login.access_token}`)
+      .send({ refresh_token: login.refresh_token });
+    expect(logout.status).toBe(204);
+
+    const after = await supertest(app.getHttpServer())
+      .post('/v1/auth/native/refresh')
+      .send({ refresh_token: login.refresh_token });
+    expect(after.status).toBe(401);
+  });
+
+  it('refresh never reads the cookie (400 without a body token)', async () => {
+    const res = await supertest(app.getHttpServer())
+      .post('/v1/auth/native/refresh')
+      .set('Cookie', 'refresh_token=whatever')
+      .send({});
+    expect(res.status).toBe(400);
+  });
+});
+
+// ─── rotation safety — F12 ────────────────────────────────────────────────────
+
+describe.skipIf(skip)('refresh rotation (F12)', () => {
+  it('concurrent refreshes of one token: exactly one succeeds and only one replacement is minted', async () => {
+    const login = await nativeLogin();
+    const familyRows = await pool.query<{ family_id: string }>(
+      'SELECT family_id FROM auth_refresh_token WHERE token_hash = $1',
+      [sha256(login.refresh_token)],
+    );
+    const familyId = familyRows.rows[0].family_id;
+
+    const results = await Promise.all(
+      Array.from({ length: 8 }, () =>
+        supertest(app.getHttpServer()).post('/v1/auth/native/refresh').send({ refresh_token: login.refresh_token }),
+      ),
+    );
+
+    const statuses = results.map((r) => r.status).sort();
+    expect(statuses.filter((s) => s === 200)).toHaveLength(1);
+    expect(statuses.filter((s) => s === 401)).toHaveLength(7);
+
+    const minted = await pool.query('SELECT 1 FROM auth_refresh_token WHERE family_id = $1', [familyId]);
+    expect(minted.rows).toHaveLength(2); // the original + exactly one child
+  });
+
+  it('reusing a consumed token revokes the whole family, including its live successor', async () => {
+    const login = await nativeLogin();
+    const rotated = await supertest(app.getHttpServer())
+      .post('/v1/auth/native/refresh')
+      .send({ refresh_token: login.refresh_token });
+    expect(rotated.status).toBe(200);
+
+    const replay = await supertest(app.getHttpServer())
+      .post('/v1/auth/native/refresh')
+      .send({ refresh_token: login.refresh_token });
+    expect(replay.status).toBe(401);
+
+    const successor = await supertest(app.getHttpServer())
+      .post('/v1/auth/native/refresh')
+      .send({ refresh_token: rotated.body.refresh_token });
+    expect(successor.status).toBe(401);
+    expect(successor.body.error.code).toBe('invalid_refresh_token');
+  });
+
+  it('replay does not touch the same user’s other sessions', async () => {
+    const uid = randomUUID();
+    const phone = uniquePhone();
+    mockFirebase.verifyIdToken.mockResolvedValue(makeFirebaseToken({ uid, sub: uid, phone_number: phone }));
+    const deviceA = (await supertest(app.getHttpServer()).post('/v1/auth/native/firebase-exchange').send({ id_token: 'a' })).body;
+    const deviceB = (await supertest(app.getHttpServer()).post('/v1/auth/native/firebase-exchange').send({ id_token: 'b' })).body;
+
+    await supertest(app.getHttpServer()).post('/v1/auth/native/refresh').send({ refresh_token: deviceA.refresh_token });
+    await supertest(app.getHttpServer()).post('/v1/auth/native/refresh').send({ refresh_token: deviceA.refresh_token });
+
+    const b = await supertest(app.getHttpServer()).post('/v1/auth/native/refresh').send({ refresh_token: deviceB.refresh_token });
+    expect(b.status).toBe(200);
+  });
+
+  it('an expired refresh token is rejected', async () => {
+    const login = await nativeLogin();
+    await pool.query(
+      "UPDATE auth_refresh_token SET expires_at = now() - interval '1 second' WHERE token_hash = $1",
+      [sha256(login.refresh_token)],
+    );
+    const res = await supertest(app.getHttpServer())
+      .post('/v1/auth/native/refresh')
+      .send({ refresh_token: login.refresh_token });
+    expect(res.status).toBe(401);
+    expect(res.body.error.code).toBe('invalid_refresh_token');
+  });
+
+  it('refresh keeps the google auth method of a google session', async () => {
+    const login = await nativeLogin();
+    const googleSub = randomUUID();
+    mockGoogle.verifyIdToken.mockResolvedValue(makeGooglePayload(googleSub));
+    await supertest(app.getHttpServer())
+      .post('/v1/auth/google/link')
+      .set('Authorization', `Bearer ${login.access_token}`)
+      .send({ google_id_token: 'g' });
+    const agent = supertest.agent(app.getHttpServer());
+    const g = await agent.post('/v1/auth/google/login').send({ google_id_token: 'g' });
+    expect(g.status).toBe(201);
+
+    const refreshed = await agent.post('/v1/auth/refresh').send({});
+    expect(refreshed.status).toBe(201);
+    const claims = moduleRef.get(JwtService).decode(refreshed.body.access_token) as { auth_method: string };
+    expect(claims.auth_method).toBe('google');
+  });
+});
+
+// ─── account status — F12 ─────────────────────────────────────────────────────
+
+describe.skipIf(skip)('suspended / deleted accounts (F12)', () => {
+  it.each(['suspended', 'deleted'])('%s: refresh → 401 account_disabled and every session is revoked', async (status) => {
+    const login = await nativeLogin();
+    await pool.query('UPDATE app_user SET status = $1 WHERE id = $2', [status, login.user.id]);
+
+    const res = await supertest(app.getHttpServer())
+      .post('/v1/auth/native/refresh')
+      .send({ refresh_token: login.refresh_token });
+    expect(res.status).toBe(401);
+    expect(res.body.error.code).toBe('account_disabled');
+
+    const live = await pool.query(
+      'SELECT 1 FROM auth_refresh_token WHERE user_id = $1 AND revoked_at IS NULL',
+      [login.user.id],
+    );
+    expect(live.rows).toHaveLength(0);
+  });
+
+  it.each(['suspended', 'deleted'])('%s: phone exchange (web and native) → 403 account_disabled', async (status) => {
+    const uid = randomUUID();
+    mockFirebase.verifyIdToken.mockResolvedValue(makeFirebaseToken({ uid, sub: uid, phone_number: uniquePhone() }));
+    const first = await supertest(app.getHttpServer()).post('/v1/auth/native/firebase-exchange').send({ id_token: 'x' });
+    await pool.query('UPDATE app_user SET status = $1 WHERE id = $2', [status, first.body.user.id]);
+
+    for (const path of ['/v1/auth/native/firebase-exchange', '/v1/auth/firebase-exchange']) {
+      const res = await supertest(app.getHttpServer()).post(path).send({ id_token: 'x' });
+      expect(res.status).toBe(403);
+      expect(res.body.error.code).toBe('account_disabled');
+      expect(res.headers['set-cookie']).toBeUndefined();
+    }
+  });
+
+  it('suspended: google login → 403 account_disabled', async () => {
+    const login = await nativeLogin();
+    const googleSub = randomUUID();
+    mockGoogle.verifyIdToken.mockResolvedValue(makeGooglePayload(googleSub));
+    await supertest(app.getHttpServer())
+      .post('/v1/auth/google/link')
+      .set('Authorization', `Bearer ${login.access_token}`)
+      .send({ google_id_token: 'g' });
+    await pool.query("UPDATE app_user SET status = 'suspended' WHERE id = $1", [login.user.id]);
+
+    const res = await supertest(app.getHttpServer()).post('/v1/auth/google/login').send({ google_id_token: 'g' });
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe('account_disabled');
+  });
+});
+
+// ─── migration 0012 — F12 ─────────────────────────────────────────────────────
+
+describe.skipIf(skip)('migration 0012_refresh_token_hash', () => {
+  it('hashes legacy plaintext tokens in place, drops the plaintext column and rejects non-digests', async () => {
+    const dbName = `mig0012_${randomUUID().replace(/-/g, '')}`;
+    await pool.query(`CREATE DATABASE ${dbName}`);
+    const url = new URL(process.env.TEST_POSTGRES_URI!);
+    url.pathname = `/${dbName}`;
+    const scratch = new Pool({ connectionString: url.toString() });
+    try {
+      await scratch.query('CREATE EXTENSION IF NOT EXISTS "uuid-ossp"');
+      await scratch.query('CREATE EXTENSION IF NOT EXISTS postgis');
+      const files = readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql')).sort();
+      for (const file of files.filter((f) => f < '0012')) {
+        await scratch.query(readFileSync(join(MIGRATIONS_DIR, file), 'utf8'));
+      }
+
+      const userId = randomUUID();
+      const legacyToken = randomUUID();
+      await scratch.query(
+        "INSERT INTO app_user (id, firebase_uid, phone_e164, role) VALUES ($1, $2, '+12025550000', 'client')",
+        [userId, randomUUID()],
+      );
+      await scratch.query(
+        "INSERT INTO auth_refresh_token (token, user_id, expires_at) VALUES ($1, $2, now() + interval '1 day')",
+        [legacyToken, userId],
+      );
+
+      const sql0012 = readFileSync(join(MIGRATIONS_DIR, '0012_refresh_token_hash.sql'), 'utf8');
+      await scratch.query(sql0012);
+      await scratch.query(sql0012); // re-runnable
+
+      const rows = await scratch.query<Record<string, unknown>>('SELECT * FROM auth_refresh_token');
+      expect(rows.rows).toHaveLength(1);
+      expect(rows.rows[0]).not.toHaveProperty('token');
+      expect(rows.rows[0].token_hash).toBe(sha256(legacyToken));
+      expect(rows.rows[0].family_id).toEqual(expect.any(String));
+      expect(rows.rows[0].auth_method).toBe('phone');
+
+      await expect(
+        scratch.query(
+          "INSERT INTO auth_refresh_token (token_hash, family_id, user_id, expires_at) VALUES ('plaintext', gen_random_uuid(), $1, now())",
+          [userId],
+        ),
+      ).rejects.toThrow(/auth_refresh_token_hash_check/);
+    } finally {
+      await scratch.end();
+      await pool.query(`DROP DATABASE IF EXISTS ${dbName}`);
+    }
+  }, 60_000);
+});
+
 // ─── rate limiting ────────────────────────────────────────────────────────────
 
 describe.skipIf(skip)('rate limiting', () => {
@@ -615,6 +920,20 @@ describe.skipIf(skip)('rate limiting', () => {
     const throttled = await supertest(server)
       .post('/v1/auth/firebase-exchange')
       .send({ id_token: 'token-10' });
+    expect(throttled.status).toBe(429);
+  });
+
+  it('throttles the native firebase-exchange the same way', async () => {
+    const server = throttleApp.getHttpServer();
+    for (let i = 0; i < 10; i++) {
+      const res = await supertest(server)
+        .post('/v1/auth/native/firebase-exchange')
+        .send({ id_token: `native-token-${i}` });
+      expect(res.status).toBe(200);
+    }
+    const throttled = await supertest(server)
+      .post('/v1/auth/native/firebase-exchange')
+      .send({ id_token: 'native-token-10' });
     expect(throttled.status).toBe(429);
   });
 });

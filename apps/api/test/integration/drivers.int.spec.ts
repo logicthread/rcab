@@ -80,7 +80,7 @@ async function seedDriverWithVehicle(): Promise<{ userId: string; vehicleId: str
   }
 
   const jwtService = moduleRef.get(JwtService);
-  const jwt = jwtService.sign({ sub: userId, role: 'driver', auth_method: 'phone' });
+  const jwt = jwtService.sign({ sub: userId, role: 'driver', auth_method: 'phone', typ: 'access' });
   return { userId, vehicleId, jwt };
 }
 
@@ -166,7 +166,7 @@ describe.skipIf(skip)('drivers online/offline round-trip', () => {
     }
 
     const jwtService = moduleRef.get(JwtService);
-    const jwt = jwtService.sign({ sub: userId, role: 'driver', auth_method: 'phone' });
+    const jwt = jwtService.sign({ sub: userId, role: 'driver', auth_method: 'phone', typ: 'access' });
 
     const res = await supertest(app.getHttpServer())
       .post('/v1/drivers/online')
@@ -196,7 +196,7 @@ describe.skipIf(skip)('drivers online/offline round-trip', () => {
     }
 
     const jwtService = moduleRef.get(JwtService);
-    const jwt = jwtService.sign({ sub: userId, role: 'client', auth_method: 'phone' });
+    const jwt = jwtService.sign({ sub: userId, role: 'client', auth_method: 'phone', typ: 'access' });
 
     const res = await supertest(app.getHttpServer())
       .post('/v1/drivers/online')

@@ -3,17 +3,18 @@ import { NestFactory } from '@nestjs/core';
 import cookieParser from 'cookie-parser';
 import { AppModule } from './app.module';
 import { logger } from './logger';
+import { resolveBrowserOrigins } from './common/guards/auth-config';
 
 const PORT = Number(process.env.PORT ?? 3000);
 
 async function bootstrap(): Promise<void> {
+  // Validated before anything starts: outside development/test a missing,
+  // wildcard or non-https origin list aborts startup (F11). Same list as CsrfGuard.
+  const corsOrigins = resolveBrowserOrigins();
+
   const app = await NestFactory.create(AppModule, { bufferLogs: true, logger: false });
   app.use(cookieParser());
 
-  const corsOrigins = (process.env.CORS_ORIGINS ?? 'http://localhost:3002,http://localhost:3001')
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean);
   app.enableCors({
     origin: corsOrigins,
     credentials: true,
