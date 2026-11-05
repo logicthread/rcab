@@ -168,7 +168,10 @@ function harness(stores?: { rides: FakeRidesStore; idem: FakeIdempotencyStore })
     })),
   };
   const quoteToken = { sign: vi.fn(), verify: vi.fn().mockReturnValue(CLAIMS) };
-  const events = { emit: vi.fn() };
+  // R07: the dispatch/wake intent is an outbox row written by RidesRepository.create
+  // in the ride's own transaction (covered by the integration specs); the controller
+  // only nudges the relay after a NEW booking commits and never publishes itself.
+  const relay = { kick: vi.fn() };
   const scheduled = { scheduleWake: vi.fn().mockResolvedValue({}), cancelWake: vi.fn() };
   const ctrl = new RidesController(
     matching as never,
@@ -180,11 +183,11 @@ function harness(stores?: { rides: FakeRidesStore; idem: FakeIdempotencyStore })
     Object.assign(rides, { findRecentPoolMembership: membership }) as never,
     {} as never,
     { joinRide: vi.fn().mockResolvedValue(undefined) } as never,
-    events as never,
+    relay as never,
     scheduled as never,
     idem as never,
   );
-  return { ctrl, rides, idem, matching, quoteToken, events, scheduled };
+  return { ctrl, rides, idem, matching, quoteToken, relay, scheduled };
 }
 
 const as = (sub: string) => ({ user: { sub, role: 'client' } as JwtPayload }) as never;
@@ -218,7 +221,7 @@ describe('ride create idempotency — account scope (F07)', () => {
     expect(b.rideId).not.toBe(a.rideId);
     expect(b.passengerId).toBe(BOB);
     expect(h.rides.rowCount()).toBe(2);
-    expect(h.events.emit).toHaveBeenCalledTimes(2);
+    expect(h.relay.kick).toHaveBeenCalledTimes(2);
     expect(h.rides.findByIdempotencyScope).toHaveBeenCalledWith(
       BOB,
       'ride.create.solo',
@@ -232,7 +235,8 @@ describe('ride create idempotency — account scope (F07)', () => {
     const solo = (await h.ctrl.create(as(ALICE), normal(), 'k1')) as { rideId: string };
     const sched = (await h.ctrl.create(as(ALICE), scheduledDto(when), 'k1')) as { rideId: string };
     expect(sched.rideId).not.toBe(solo.rideId);
-    expect(h.scheduled.scheduleWake).toHaveBeenCalledTimes(1);
+    expect(h.relay.kick).toHaveBeenCalledTimes(2);
+    expect(h.scheduled.scheduleWake).not.toHaveBeenCalled();
   });
 
   it('same account + key + different intent → 422 idempotency_key_conflict, no mutation', async () => {
@@ -243,7 +247,7 @@ describe('ride create idempotency — account scope (F07)', () => {
       response: { code: 'idempotency_key_conflict' },
     });
     expect(h.rides.create).toHaveBeenCalledTimes(1);
-    expect(h.events.emit).toHaveBeenCalledTimes(1);
+    expect(h.relay.kick).toHaveBeenCalledTimes(1);
   });
 
   it('same key + same route + a re-quoted token replays the original ride (no second booking)', async () => {
@@ -263,7 +267,7 @@ describe('ride create idempotency — account scope (F07)', () => {
     };
     expect(retry.rideId).toBe(r1.rideId);
     expect(h.rides.rowCount()).toBe(1);
-    expect(h.events.emit).toHaveBeenCalledTimes(1);
+    expect(h.relay.kick).toHaveBeenCalledTimes(1);
   });
 
   it("a concurrent loser with a different intent gets 422, not the winner's ride", async () => {
@@ -279,7 +283,7 @@ describe('ride create idempotency — account scope (F07)', () => {
     await expect(h.ctrl.create(as(ALICE), normal(), 'k1')).rejects.toMatchObject({
       response: { code: 'idempotency_key_conflict' },
     });
-    expect(h.events.emit).not.toHaveBeenCalled();
+    expect(h.relay.kick).not.toHaveBeenCalled();
   });
 
   it('replays from the durable record after a restart (no cache), even once the quote expired', async () => {
@@ -294,7 +298,7 @@ describe('ride create idempotency — account scope (F07)', () => {
     const replay = (await restarted.ctrl.create(as(ALICE), normal(), 'k1')) as { rideId: string };
 
     expect(replay.rideId).toBe(original.rideId);
-    expect(restarted.events.emit).not.toHaveBeenCalled();
+    expect(restarted.relay.kick).not.toHaveBeenCalled();
     expect(first.rides.rowCount()).toBe(1);
   });
 
@@ -330,7 +334,8 @@ describe('ride create idempotency — account scope (F07)', () => {
         rideId: string;
       };
       expect(replay.rideId).toBe(original.rideId);
-      expect(h.scheduled.scheduleWake).toHaveBeenCalledTimes(1);
+      expect(h.relay.kick).toHaveBeenCalledTimes(1);
+      expect(h.scheduled.scheduleWake).not.toHaveBeenCalled();
     });
 
     it('same key + same slot + a re-quoted token replays the scheduled booking', async () => {
@@ -345,7 +350,8 @@ describe('ride create idempotency — account scope (F07)', () => {
         'k1',
       )) as { rideId: string };
       expect(retry.rideId).toBe(first.rideId);
-      expect(h.scheduled.scheduleWake).toHaveBeenCalledTimes(1);
+      expect(h.relay.kick).toHaveBeenCalledTimes(1);
+      expect(h.scheduled.scheduleWake).not.toHaveBeenCalled();
     });
 
     it('a different scheduledFor under the same key is a conflict', async () => {

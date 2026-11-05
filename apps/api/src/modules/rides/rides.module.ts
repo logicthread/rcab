@@ -4,6 +4,7 @@ import { MatchingModule } from '../matching/matching.module';
 import { PricingModule } from '../pricing/pricing.module';
 import { RealtimeModule } from '../realtime/realtime.module';
 import { ScheduledModule } from '../scheduled/scheduled.module';
+import { OutboxModule } from '../outbox/outbox.module';
 import { RidesController } from './rides.controller';
 import { QuoteTokenService } from './quote-token.service';
 import { RidesRepository } from './rides.repository';
@@ -12,7 +13,7 @@ import { RideStateMachine } from './ride-state-machine.service';
 import { RidesRealtimeListener } from './rides-realtime.listener';
 
 @Module({
-  imports: [AuthModule, MatchingModule, PricingModule, RealtimeModule, ScheduledModule],
+  imports: [AuthModule, MatchingModule, PricingModule, RealtimeModule, ScheduledModule, OutboxModule],
   controllers: [RidesController],
   providers: [
     QuoteTokenService,

@@ -5,7 +5,6 @@ import { MatchingModule } from '../matching/matching.module';
 import { RealtimeModule } from '../realtime/realtime.module';
 import { RidesModule } from '../rides/rides.module';
 import { DispatchService, DISPATCH_QUEUE } from './dispatch.service';
-import { DispatchProcessor } from './dispatch.processor';
 
 @Module({
   imports: [
@@ -15,7 +14,9 @@ import { DispatchProcessor } from './dispatch.processor';
     RidesModule,
     BullModule.registerQueue({ name: DISPATCH_QUEUE }),
   ],
-  providers: [DispatchService, DispatchProcessor],
+  // DispatchProcessor (+ DispatchStartService) live in DispatchRunnerModule: the
+  // processor calls the start service, which needs the rides/outbox modules.
+  providers: [DispatchService],
   exports: [DispatchService],
 })
 export class DispatchModule {}

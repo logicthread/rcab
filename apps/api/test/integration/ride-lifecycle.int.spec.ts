@@ -37,6 +37,7 @@ describe.skipIf(skip)(
     let dispatchQueue: Queue;
     let lifecycle: PoolLifecycleService;
     let dispatch: DispatchService;
+    let sharedRepoRef: SharedRideRepository;
     let rideLifecycle: RideLifecycleService;
     let bus: {
       toDriver: ReturnType<typeof vi.fn>;
@@ -57,6 +58,7 @@ describe.skipIf(skip)(
       };
       const db = drizzle(pgPool as never, { schema });
       const sharedRepo = new SharedRideRepository(db as never);
+      sharedRepoRef = sharedRepo;
       const stopsRepo = new RideStopRepository(db as never);
       const ridesRepo = new RidesRepository(db as never);
 
@@ -142,7 +144,8 @@ describe.skipIf(skip)(
       //    then close the pool to trigger dispatch.
       await redis.geoadd('active_drivers', 88.3641, 22.5728, driverId);
       await lifecycle.closePool(opened.rideId, 'closed_full');
-      await dispatch.dispatchPool(opened.rideId);
+      // R07: dispatchPool moved to DispatchStartService; run wave 1 as it does.
+      await dispatch.runWave((await sharedRepoRef.findById(opened.rideId))!, 1);
 
       // 3. Driver accepts → claim succeeds → ride_stops seeded.
       const claim = await dispatch.claimPool(opened.rideId, driverId);
@@ -239,7 +242,7 @@ describe.skipIf(skip)(
       });
       await redis.geoadd('active_drivers', 88.3671, 22.5761, driverId);
       await lifecycle.closePool(pool.rideId, 'closed_full');
-      await dispatch.dispatchPool(pool.rideId);
+      await dispatch.runWave((await sharedRepoRef.findById(pool.rideId))!, 1);
       await dispatch.claimPool(pool.rideId, driverId);
 
       // Try to confirm dropoff before pickup.
@@ -268,7 +271,7 @@ describe.skipIf(skip)(
       });
       await redis.geoadd('active_drivers', 88.3681, 22.5781, driverId);
       await lifecycle.closePool(pool.rideId, 'closed_full');
-      await dispatch.dispatchPool(pool.rideId);
+      await dispatch.runWave((await sharedRepoRef.findById(pool.rideId))!, 1);
       await dispatch.claimPool(pool.rideId, driverId);
 
       const r = await rideLifecycle.confirmStop({

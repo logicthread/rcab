@@ -130,7 +130,7 @@ function makeController(
     complete: vi.fn().mockResolvedValue(undefined),
     release: vi.fn().mockResolvedValue(undefined),
   };
-  const events = { emit: vi.fn() };
+  const relay = { kick: vi.fn() };
   const scheduled = {
     scheduleWake: opts.scheduleWake ?? vi.fn().mockResolvedValue({ jobId: 'j', delayMs: 0 }),
     cancelWake: vi.fn().mockResolvedValue(true),
@@ -145,7 +145,7 @@ function makeController(
     ridesRepo as never,
     stateMachine as never,
     bus as never,
-    events as never,
+    relay as never,
     scheduled as never,
     idempotency as never,
   );
@@ -160,7 +160,7 @@ function makeController(
     stateMachine,
     bus,
     idempotency,
-    events,
+    relay,
     matching,
     scheduled,
   };
@@ -321,7 +321,7 @@ describe('RidesController.create — normal (solo) path', () => {
 
   it('creates a requested ride with the fare locked from the quote token', async () => {
     const ridesCreate = vi.fn().mockResolvedValue({ row: row(), created: true });
-    const { ctrl, events, bus } = makeController({
+    const { ctrl, relay, bus } = makeController({
       verify: vi.fn().mockReturnValue(claims),
       ridesCreate,
     });
@@ -343,8 +343,9 @@ describe('RidesController.create — normal (solo) path', () => {
     );
     // The booking client joins the ride room so it receives ride_state_changed.
     expect(bus.joinRide).toHaveBeenCalledWith('c-1', 'ride-9');
-    // A freshly-created ride triggers dispatch.
-    expect(events.emit).toHaveBeenCalledWith('ride.requested', { rideId: 'ride-9' });
+    // Dispatch is an outbox row committed with the ride; the controller only
+    // nudges the relay (it no longer emits an in-memory event, F08).
+    expect(relay.kick).toHaveBeenCalledTimes(1);
   });
 
   it('replays the caller\'s own ride from the durable record without inserting again', async () => {
@@ -353,13 +354,13 @@ describe('RidesController.create — normal (solo) path', () => {
       row: row(),
       requestFingerprint: requestFingerprint(IdempotencyOperation.Solo, dto),
     });
-    const { ctrl, events } = makeController({ ridesFindByScope, ridesCreate });
+    const { ctrl, relay } = makeController({ ridesFindByScope, ridesCreate });
     const res = await ctrl.create(clientReq as never, dto, 'idem-1');
     expect((res as { rideId: string }).rideId).toBe('ride-9');
     expect(ridesFindByScope).toHaveBeenCalledWith('c-1', 'ride.create.solo', 'idem-1');
     expect(ridesCreate).not.toHaveBeenCalled();
     // A replay must not re-dispatch.
-    expect(events.emit).not.toHaveBeenCalled();
+    expect(relay.kick).not.toHaveBeenCalled();
   });
 
   it('returns the same ride for a concurrent duplicate that lost the insert race (DB backstop)', async () => {
@@ -368,7 +369,7 @@ describe('RidesController.create — normal (solo) path', () => {
       created: false,
       requestFingerprint: requestFingerprint(IdempotencyOperation.Solo, dto),
     });
-    const { ctrl, events } = makeController({
+    const { ctrl, relay } = makeController({
       verify: vi.fn().mockReturnValue(claims),
       ridesCreate,
     });
@@ -376,7 +377,7 @@ describe('RidesController.create — normal (solo) path', () => {
     expect((res as { rideId: string }).rideId).toBe('ride-9');
     expect(ridesCreate).toHaveBeenCalledTimes(1);
     // Duplicate key (already existed) → no re-dispatch.
-    expect(events.emit).not.toHaveBeenCalled();
+    expect(relay.kick).not.toHaveBeenCalled();
   });
 
   it('400 when the Idempotency-Key header is missing', async () => {
@@ -477,7 +478,7 @@ describe('RidesController.create — scheduled path (RCAB-E6.S2)', () => {
     const ridesCreate = vi
       .fn()
       .mockResolvedValue({ row: soloRideRow({ type: 'scheduled' }), created: true });
-    const { ctrl, events, scheduled, bus } = makeController({
+    const { ctrl, relay, scheduled, bus } = makeController({
       verify: vi.fn().mockReturnValue(claims),
       ridesCreate,
     });
@@ -488,10 +489,12 @@ describe('RidesController.create — scheduled path (RCAB-E6.S2)', () => {
     expect(ridesCreate).toHaveBeenCalledWith(
       expect.objectContaining({ type: 'scheduled', scheduledFor: new Date(when) }),
     );
-    expect(scheduled.scheduleWake).toHaveBeenCalledWith('ride-9', new Date(when));
+    // The wake is an outbox row written inside ridesRepo.create (same txn as the
+    // ride); the controller publishes nothing itself.
+    expect(scheduled.scheduleWake).not.toHaveBeenCalled();
+    expect(relay.kick).toHaveBeenCalledTimes(1);
     expect(bus.joinRide).toHaveBeenCalledWith('c-1', 'ride-9');
-    // Scheduled rides must NOT dispatch now.
-    expect(events.emit).not.toHaveBeenCalled();
+
   });
 
   it('a replay does not re-schedule the wake', async () => {

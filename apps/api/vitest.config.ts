@@ -22,6 +22,9 @@ export default defineConfig({
     env: {
       RCAB_DISABLE_BULL_AUTORUN: '1',
       RCAB_DISABLE_WS_ADAPTER: '1',
+      // The outbox relay + dispatch reconciler poll Postgres/Redis on timers from
+      // app boot; the offline unit smoke has neither (R07).
+      RCAB_DISABLE_OUTBOX_RELAY: '1',
     },
     coverage: {
       provider: 'v8',

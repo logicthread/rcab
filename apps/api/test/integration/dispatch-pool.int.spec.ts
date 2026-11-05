@@ -17,16 +17,8 @@ import { RidesRepository } from '../../src/modules/rides/rides.repository';
 import {
   PoolLifecycleService,
   MATCHING_QUEUE,
-  POOL_CLOSED_EVENT,
-  type PoolClosedEventPayload,
 } from '../../src/modules/matching/pool-lifecycle.service';
-import {
-  DispatchService,
-  DISPATCH_QUEUE,
-  RIDE_REQUESTED_EVENT,
-} from '../../src/modules/dispatch/dispatch.service';
-import { ScheduledDispatchProcessor } from '../../src/modules/scheduled/scheduled.processor';
-import { SCHEDULED_WAKE_JOB } from '../../src/modules/scheduled/scheduled.service';
+import { DispatchService, DISPATCH_QUEUE } from '../../src/modules/dispatch/dispatch.service';
 import type {
   SharedRideOfferPayload,
   SoloRideOfferPayload,
@@ -52,6 +44,7 @@ describe.skipIf(skip)('DispatchService — integration (Postgres + Redis + BullM
   let lifecycle: PoolLifecycleService;
   let dispatch: DispatchService;
   let ridesRepo: RidesRepository;
+  let repo: SharedRideRepository;
   let bus: {
     toDriver: ReturnType<typeof vi.fn>;
     toUser: ReturnType<typeof vi.fn>;
@@ -70,7 +63,7 @@ describe.skipIf(skip)('DispatchService — integration (Postgres + Redis + BullM
       query: (text: string, values?: unknown[]) => pgClient.query(text, values as never),
     };
     const db = drizzle(pgPool as never, { schema });
-    const repo = new SharedRideRepository(db as never);
+    repo = new SharedRideRepository(db as never);
     const stopsRepo = new RideStopRepository(db as never);
     ridesRepo = new RidesRepository(db as never);
 
@@ -145,7 +138,8 @@ describe.skipIf(skip)('DispatchService — integration (Postgres + Redis + BullM
     // close it cleanly so dispatch can pick it up
     await lifecycle.closePool(pool.rideId, 'closed_full');
 
-    await dispatch.dispatchPool(pool.rideId);
+    // R07: dispatchPool moved to DispatchStartService; run wave 1 as it does.
+    await dispatch.runWave((await repo.findById(pool.rideId))!, 1);
 
     expect(bus.toDriver).toHaveBeenCalledTimes(1);
     const [actualDriverId, eventName, payload] = bus.toDriver.mock.calls[0] as [
@@ -229,49 +223,6 @@ describe.skipIf(skip)('DispatchService — integration (Postgres + Redis + BullM
     expect(hash.state).toBe('aborted');
   });
 
-  it('pool.closed event triggers dispatchPool via the registered listener', async () => {
-    bus.toDriver.mockClear();
-
-    // @OnEvent metadata is only wired up when Nest builds the provider via DI.
-    // We instantiate DispatchService directly here, so subscribe its handler
-    // manually for this test only.
-    const events = (
-      lifecycle as unknown as {
-        events: { on: (e: string, f: (p: PoolClosedEventPayload) => void) => void };
-      }
-    ).events;
-    const handler = (payload: PoolClosedEventPayload): void => {
-      void dispatch.onPoolClosed(payload);
-    };
-    events.on(POOL_CLOSED_EVENT, handler);
-
-    const driverId = randomUUID();
-    await redis.geoadd('active_drivers', 88.368, 22.578, driverId);
-
-    const pool = await lifecycle.openPool({
-      passengerId: 'p-opener',
-      originLat: 22.578,
-      originLng: 88.368,
-      destLat: 22.585,
-      destLng: 88.374,
-      maxSeats: 2,
-      detourBudgetM: 800,
-    });
-    // close via lifecycle → emits pool.closed → DispatchService.onPoolClosed fires
-    await lifecycle.closePool(pool.rideId, 'closed_full');
-
-    // Event-loop tick; @OnEvent({ async: true }) is fire-and-forget.
-    await new Promise((r) => setTimeout(r, 100));
-
-    expect(bus.toDriver).toHaveBeenCalledWith(
-      driverId,
-      'ride_offer',
-      expect.objectContaining({ sharedRideId: pool.rideId }),
-    );
-
-    await redis.zrem('active_drivers', driverId);
-  });
-
   it('dispatchSolo fans out a solo ride_offer (offer:type=solo) + schedules timers', async () => {
     bus.toDriver.mockClear();
 
@@ -297,7 +248,7 @@ describe.skipIf(skip)('DispatchService — integration (Postgres + Redis + BullM
       idempotencyKey: `idem-${randomUUID()}`,
     });
 
-    await dispatch.dispatchSolo(row.id);
+    await dispatch.runSoloWave((await ridesRepo.findById(row.id))!, 1);
 
     expect(bus.toDriver).toHaveBeenCalledTimes(1);
     const [actualDriver, eventName, payload] = bus.toDriver.mock.calls[0] as [
@@ -442,54 +393,5 @@ describe.skipIf(skip)('DispatchService — integration (Postgres + Redis + BullM
       [pool.rideId],
     );
     expect(rows[0].members).toHaveLength(1 + available);
-  });
-
-  it('scheduled wake → ride.requested → dispatchSolo, end-to-end (RCAB-E6.S3)', async () => {
-    bus.toDriver.mockClear();
-
-    // Wire the event → dispatch handler that @OnEvent would register under DI.
-    const emitter = (dispatch as unknown as { events: EventEmitter2 }).events;
-    const handler = (p: { rideId: string }): void => void dispatch.onRideRequested(p);
-    emitter.on(RIDE_REQUESTED_EVENT, handler);
-
-    const driverId = randomUUID();
-    await redis.geoadd('active_drivers', 91.7362, 26.1446, driverId);
-
-    const passengerId = randomUUID();
-    await pgClient.query(
-      `INSERT INTO app_user (id, firebase_uid, phone_e164, role) VALUES ($1, $2, $3, 'client')`,
-      [
-        passengerId,
-        `fb-solo-${passengerId}`,
-        uniquePhone(),
-      ],
-    );
-    // A scheduled ride sits in `requested` until its wake fires (no dispatch yet).
-    const { row } = await ridesRepo.create({
-      passengerId,
-      originLat: 26.1445,
-      originLng: 91.7362,
-      destLat: 26.1758,
-      destLng: 91.7898,
-      fareCents: 18500,
-      idempotencyKey: `idem-${randomUUID()}`,
-      type: 'scheduled',
-      scheduledFor: new Date(Date.now() + 2 * 60 * 60 * 1000),
-    });
-
-    // Fire the wake job through the real processor.
-    const proc = new ScheduledDispatchProcessor(emitter);
-    await proc.process({ name: SCHEDULED_WAKE_JOB, data: { rideId: row.id } } as never);
-    // @OnEvent({ async: true }) → dispatchSolo runs on a later tick.
-    await new Promise((r) => setTimeout(r, 150));
-
-    expect(bus.toDriver).toHaveBeenCalledWith(
-      driverId,
-      'ride_offer',
-      expect.objectContaining({ rideId: row.id }),
-    );
-
-    emitter.off(RIDE_REQUESTED_EVENT, handler);
-    await redis.zrem('active_drivers', driverId);
   });
 });

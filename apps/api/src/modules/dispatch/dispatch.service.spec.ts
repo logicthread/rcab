@@ -374,29 +374,26 @@ describe('computeStops dropoff ordering (nearest-neighbour from last pickup)', (
 
 // ── dispatchPool / runWave ───────────────────────────────────────────────────
 
+// R07: `dispatchPool` / `dispatchSolo` (state guard + wave 1) moved to
+// DispatchStartService (see dispatch-start.service.spec.ts). These helpers run
+// wave 1 exactly as that service does, so the wave behaviour stays covered here.
+async function dispatchPool(svc: ReturnType<typeof makeService>['svc'], id: string): Promise<void> {
+  const repo = (svc as unknown as { repo: { findById(i: string): Promise<never> } }).repo;
+  await svc.runWave(await repo.findById(id), 1);
+}
+async function dispatchSolo(svc: ReturnType<typeof makeService>['svc'], id: string): Promise<void> {
+  const repo = (svc as unknown as { ridesRepo: { findById(i: string): Promise<never> } }).ridesRepo;
+  await svc.runSoloWave(await repo.findById(id), 1);
+}
+
 describe('DispatchService.dispatchPool', () => {
-  it('skips when pool not found', async () => {
-    const { svc, bus } = makeService({ byId: null });
-    await svc.dispatchPool('missing');
-    expect(bus.toDriver).not.toHaveBeenCalled();
-  });
-
-  it('skips when pool already claimed', async () => {
-    const { svc, bus, queue } = makeService({
-      byId: pool({ claimedByDriverId: 'd-other' }),
-    });
-    await svc.dispatchPool('pool-1');
-    expect(bus.toDriver).not.toHaveBeenCalled();
-    expect(queue.add).not.toHaveBeenCalled();
-  });
-
   it('wave 1: fans out ride_offer to K1 drivers with stops payload + schedules wave-2 + hard-fail', async () => {
     const { svc, bus, queue, redis } = makeService({
       byId: pool(),
       geo: ['d-1', 'd-2', 'd-3'],
     });
 
-    await svc.dispatchPool('pool-1');
+    await dispatchPool(svc, 'pool-1');
 
     // Each driver gets a ride_offer with stops + waveNumber=1
     expect(bus.toDriver).toHaveBeenCalledTimes(3);
@@ -436,7 +433,7 @@ describe('DispatchService.dispatchPool', () => {
       alreadyOffered: ['d-1'],
     });
 
-    await svc.dispatchPool('pool-1');
+    await dispatchPool(svc, 'pool-1');
 
     expect(bus.toDriver).toHaveBeenCalledTimes(1);
     expect(bus.toDriver.mock.calls[0][0]).toBe('d-2');
@@ -448,7 +445,7 @@ describe('DispatchService.dispatchPool', () => {
       geo: ['d-1'],
       setNx: null,
     });
-    await svc.dispatchPool('pool-1');
+    await dispatchPool(svc, 'pool-1');
     expect(bus.toDriver).not.toHaveBeenCalled();
   });
 });
@@ -657,22 +654,9 @@ describe('DispatchService.onRideOfferResponse', () => {
 describe('DispatchService.dispatchSolo', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('skips when the ride is not found', async () => {
-    const { svc, bus } = makeService({ soloRide: null });
-    await svc.dispatchSolo('missing');
-    expect(bus.toDriver).not.toHaveBeenCalled();
-  });
-
-  it('skips when the ride is not in requested state', async () => {
-    const { svc, bus, queue } = makeService({ soloRide: soloRide({ status: 'accepted' }) });
-    await svc.dispatchSolo('ride-1');
-    expect(bus.toDriver).not.toHaveBeenCalled();
-    expect(queue.add).not.toHaveBeenCalled();
-  });
-
   it('wave 1: fans out a solo ride_offer to candidates + schedules wave-2 + hard-fail', async () => {
     const { svc, bus, queue } = makeService({ soloRide: soloRide(), geo: ['d-1', 'd-2'] });
-    await svc.dispatchSolo('ride-1');
+    await dispatchSolo(svc, 'ride-1');
 
     expect(bus.toDriver).toHaveBeenCalledTimes(2);
     for (const call of bus.toDriver.mock.calls) {
@@ -696,7 +680,7 @@ describe('DispatchService.dispatchSolo', () => {
 
   it('tags each solo offer with offer:type=solo', async () => {
     const { svc, redis } = makeService({ soloRide: soloRide(), geo: ['d-1'] });
-    await svc.dispatchSolo('ride-1');
+    await dispatchSolo(svc, 'ride-1');
     const typeSet = redis.set.mock.calls.find(
       (c) => typeof c[0] === 'string' && (c[0] as string).startsWith('offer:type:'),
     );
@@ -710,19 +694,9 @@ describe('DispatchService.dispatchSolo', () => {
       geo: ['d-1', 'd-2'],
       alreadyOffered: ['d-1'],
     });
-    await svc.dispatchSolo('ride-1');
+    await dispatchSolo(svc, 'ride-1');
     expect(bus.toDriver).toHaveBeenCalledTimes(1);
     expect(bus.toDriver.mock.calls[0][0]).toBe('d-2');
-  });
-});
-
-describe('DispatchService.onRideRequested', () => {
-  beforeEach(() => vi.clearAllMocks());
-
-  it('dispatches the solo ride named in the event payload', async () => {
-    const { svc, bus } = makeService({ soloRide: soloRide(), geo: ['d-1'] });
-    await svc.onRideRequested({ rideId: 'ride-1' });
-    expect(bus.toDriver).toHaveBeenCalledTimes(1);
   });
 });
 

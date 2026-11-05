@@ -3,6 +3,8 @@ import { and, eq, sql } from 'drizzle-orm';
 import { DRIZZLE_DB, type DrizzleDb } from '../../infra/db/drizzle.module';
 import { rides, type SharedRideMember } from '../../db/schema';
 import { IdempotencyOperation } from './idempotency';
+import { enqueueOutbox } from '../outbox/outbox.writer';
+import { OutboxTopic } from '../outbox/outbox.types';
 
 /** The idempotency operations that persist as a `rides` row. */
 export type RideIdempotencyOperation =
@@ -153,29 +155,63 @@ export class RidesRepository {
     const type = params.type ?? 'normal';
     const operation = params.idempotencyOperation ?? operationForType(type);
     const fingerprint = params.requestFingerprint ?? null;
-    const inserted = await this.db
-      .insert(rides)
-      .values({
-        passengerId: params.passengerId,
-        originLat: params.originLat,
-        originLng: params.originLng,
-        destLat: params.destLat,
-        destLng: params.destLng,
-        fareCents: params.fareCents,
-        status: 'requested',
-        type,
-        scheduledFor: params.scheduledFor ?? null,
-        idempotencyKey: params.idempotencyKey,
-        idempotencyOperation: operation,
-        requestFingerprint: fingerprint,
-      })
-      .onConflictDoNothing({
-        target: [rides.passengerId, rides.idempotencyOperation, rides.idempotencyKey],
-      })
-      .returning();
+    const scheduled = type === 'scheduled';
 
-    if (inserted.length > 0) {
-      return { row: toRow(inserted[0]), created: true, requestFingerprint: fingerprint };
+    // ONE transaction: the ride row and the work intent that makes it
+    // dispatchable commit together or not at all (F08 / R07). A crash anywhere
+    // after COMMIT leaves a durable outbox row for the relay (and, if the
+    // queue is later lost, for the reconciler); a crash before it leaves
+    // neither, so a retry simply creates both. A replay (scope conflict) writes
+    // no new intent: the original commit already carried it.
+    const inserted = await this.db.transaction(async (tx) => {
+      const rows = await tx
+        .insert(rides)
+        .values({
+          passengerId: params.passengerId,
+          originLat: params.originLat,
+          originLng: params.originLng,
+          destLat: params.destLat,
+          destLng: params.destLng,
+          fareCents: params.fareCents,
+          status: 'requested',
+          type,
+          scheduledFor: params.scheduledFor ?? null,
+          idempotencyKey: params.idempotencyKey,
+          idempotencyOperation: operation,
+          requestFingerprint: fingerprint,
+          // A normal ride is dispatchable at once (generation 1). A scheduled
+          // ride stays at generation 0 until its wake (T-lead) moves it to 1.
+          dispatchGeneration: scheduled ? 0 : 1,
+        })
+        .onConflictDoNothing({
+          target: [rides.passengerId, rides.idempotencyOperation, rides.idempotencyKey],
+        })
+        .returning();
+      const row = rows[0];
+      if (!row) return null;
+      if (scheduled) {
+        if (!params.scheduledFor) throw new Error('scheduled ride requires scheduledFor');
+        await enqueueOutbox(tx, {
+          topic: OutboxTopic.RideWakeSchedule,
+          aggregateType: 'ride',
+          aggregateId: row.id,
+          generation: 1,
+          payload: { scheduledFor: params.scheduledFor.toISOString() },
+        });
+      } else {
+        await enqueueOutbox(tx, {
+          topic: OutboxTopic.RideDispatchRequested,
+          aggregateType: 'ride',
+          aggregateId: row.id,
+          generation: 1,
+          payload: { rideId: row.id },
+        });
+      }
+      return row;
+    });
+
+    if (inserted) {
+      return { row: toRow(inserted), created: true, requestFingerprint: fingerprint };
     }
     const existing = await this.findByIdempotencyScope(
       params.passengerId,

@@ -14,11 +14,7 @@ import {
   RIDE_OFFER_RESPONSE_EVENT,
   type RideOfferResponseEvent,
 } from '../realtime/realtime.gateway';
-import {
-  POOL_CLOSED_EVENT,
-  PoolLifecycleService,
-  type PoolClosedEventPayload,
-} from '../matching/pool-lifecycle.service';
+import { PoolLifecycleService } from '../matching/pool-lifecycle.service';
 import {
   SharedRideRepository,
   type SharedRideMember,
@@ -40,13 +36,6 @@ import type {
 export const DISPATCH_QUEUE = 'dispatch';
 export const WAVE_TIMEOUT_JOB = 'dispatch:wave-timeout';
 export const HARD_FAIL_JOB = 'dispatch:hard-fail';
-
-/** Emitted by the rides controller when a solo ride is persisted `requested`. */
-export const RIDE_REQUESTED_EVENT = 'ride.requested';
-
-export interface RideRequestedEventPayload {
-  rideId: string;
-}
 
 const STOPS_CACHE_TTL_S = 600;
 const OFFER_TTL_MS = 12_000;
@@ -106,16 +95,6 @@ export class DispatchService {
     };
   }
 
-  @OnEvent(POOL_CLOSED_EVENT, { async: true })
-  async onPoolClosed(payload: PoolClosedEventPayload): Promise<void> {
-    this.log.log({ rideId: payload.rideId, reason: payload.reason }, 'pool.closed → dispatchPool');
-    try {
-      await this.dispatchPool(payload.rideId);
-    } catch (err) {
-      this.log.error({ err, rideId: payload.rideId }, 'dispatchPool failed');
-    }
-  }
-
   @OnEvent(RIDE_OFFER_RESPONSE_EVENT, { async: true })
   async onRideOfferResponse(event: RideOfferResponseEvent): Promise<void> {
     if (!event.accept) {
@@ -172,45 +151,6 @@ export class DispatchService {
         'claimPool failed',
       );
     }
-  }
-
-  async dispatchPool(rideId: string): Promise<void> {
-    const pool = await this.repo.findById(rideId);
-    if (!pool) {
-      this.log.warn({ rideId }, 'dispatchPool: pool not found');
-      return;
-    }
-    if (pool.claimedByDriverId) {
-      this.log.warn({ rideId }, 'dispatchPool: pool already claimed; skipping');
-      return;
-    }
-    await this.runWave(pool, 1);
-  }
-
-  @OnEvent(RIDE_REQUESTED_EVENT, { async: true })
-  async onRideRequested(payload: RideRequestedEventPayload): Promise<void> {
-    this.log.log({ rideId: payload.rideId }, 'ride.requested → dispatchSolo');
-    try {
-      await this.dispatchSolo(payload.rideId);
-    } catch (err) {
-      this.log.error({ err, rideId: payload.rideId }, 'dispatchSolo failed');
-    }
-  }
-
-  async dispatchSolo(rideId: string): Promise<void> {
-    const ride = await this.ridesRepo.findById(rideId);
-    if (!ride) {
-      this.log.warn({ rideId }, 'dispatchSolo: ride not found');
-      return;
-    }
-    if (ride.status !== 'requested') {
-      this.log.warn(
-        { rideId, status: ride.status },
-        'dispatchSolo: ride not in requested state; skipping',
-      );
-      return;
-    }
-    await this.runSoloWave(ride, 1);
   }
 
   async runSoloWave(ride: RideRow, waveNumber: number): Promise<void> {
