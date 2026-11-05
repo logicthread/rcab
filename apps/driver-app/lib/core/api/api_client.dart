@@ -1,12 +1,13 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
+import '../auth/native_auth_contract.dart';
 import '../auth/token_store.dart';
 
 /// Builds the app-wide dio instance.
 ///
-/// [onSignOut] is called when a token refresh fails (401 on the refresh
-/// endpoint) so the auth notifier can clear state without a circular import.
+/// [onSignOut] is called when a token refresh is rejected by the server so
+/// the auth notifier can clear state without a circular import.
 Dio buildApiClient({
   required String baseUrl,
   required TokenStore tokenStore,
@@ -17,10 +18,7 @@ Dio buildApiClient({
   final dio = Dio(BaseOptions(baseUrl: baseUrl));
 
   if (enableLogging) {
-    dio.interceptors.add(LogInterceptor(
-      requestBody: true,
-      responseBody: true,
-    ));
+    dio.interceptors.add(LogInterceptor(requestBody: true, responseBody: true));
   }
 
   dio.interceptors.add(
@@ -35,12 +33,36 @@ Dio buildApiClient({
   return dio;
 }
 
+/// Result of one refresh attempt, shared by every request awaiting it.
+class _RefreshResult {
+  const _RefreshResult.success(this.accessToken) : transientFailure = false;
+  const _RefreshResult.rejected()
+    : accessToken = null,
+      transientFailure = false;
+  const _RefreshResult.transient()
+    : accessToken = null,
+      transientFailure = true;
+
+  /// New access token, or null when the refresh did not succeed.
+  final String? accessToken;
+
+  /// True when the failure was network/5xx: the session is kept so a later
+  /// request can try again (the refresh token was not consumed or is unknown).
+  final bool transientFailure;
+}
+
 /// Attaches the JWT on every request; handles transparent token refresh.
 ///
 /// On a 401 response the interceptor:
-///   1. Calls POST /v1/auth/refresh with the stored refresh token.
-///   2. On success — saves the new JWT and retries the original request.
-///   3. On failure — calls [onSignOut] and surfaces the original error.
+///   1. Calls POST /v1/auth/native/refresh with the stored refresh token.
+///      The refresh token is single-use and rotated; concurrent 401s share
+///      one in-flight refresh (single-flight) and each retries exactly once
+///      with the new access token.
+///   2. On success — persists the rotated access + refresh tokens, then
+///      retries the original request.
+///   3. On rejection (4xx / malformed body / no refresh token) — calls
+///      [onSignOut] and surfaces the original error. Network errors and 5xx
+///      keep the session and surface the original error.
 ///
 /// Uses a separate Dio instance for the refresh call to avoid re-entering
 /// this interceptor recursively.
@@ -50,14 +72,16 @@ class JwtRefreshInterceptor extends Interceptor {
     required TokenStore tokenStore,
     required Future<void> Function() onSignOut,
     @visibleForTesting Dio? refreshDio,
-  })  : _tokenStore = tokenStore,
-        _onSignOut = onSignOut,
-        _refreshDio = refreshDio ?? Dio(BaseOptions(baseUrl: baseUrl));
+  }) : _tokenStore = tokenStore,
+       _onSignOut = onSignOut,
+       _refreshDio = refreshDio ?? Dio(BaseOptions(baseUrl: baseUrl));
+
+  static const _retriedKey = 'rcab_auth_retried';
 
   final TokenStore _tokenStore;
   final Future<void> Function() _onSignOut;
   final Dio _refreshDio;
-  bool _isRefreshing = false;
+  Future<_RefreshResult>? _inFlight;
 
   @override
   Future<void> onRequest(
@@ -76,46 +100,84 @@ class JwtRefreshInterceptor extends Interceptor {
     DioException err,
     ErrorInterceptorHandler handler,
   ) async {
-    if (err.response?.statusCode != 401 || _isRefreshing) {
+    final options = err.requestOptions;
+    // Retry at most once per request.
+    if (err.response?.statusCode != 401 || options.extra[_retriedKey] == true) {
       return handler.next(err);
     }
 
-    _isRefreshing = true;
+    // Another request may already have rotated the tokens while this one was
+    // in flight: if the stored JWT differs from the one this request sent,
+    // just retry with the current one instead of burning another refresh.
+    final current = await _tokenStore.getJwt();
+    final sent = options.headers['Authorization'];
+    String? accessToken;
+    if (current != null && sent != 'Bearer $current') {
+      accessToken = current;
+    } else {
+      final result = await (_inFlight ??= _refresh().whenComplete(() {
+        _inFlight = null;
+      }));
+      accessToken = result.accessToken;
+    }
+
+    if (accessToken == null) return handler.next(err);
+
+    options.extra[_retriedKey] = true;
+    options.headers['Authorization'] = 'Bearer $accessToken';
     try {
-      final refresh = await _tokenStore.getRefresh();
-      if (refresh == null) {
-        await _onSignOut();
-        return handler.next(err);
+      handler.resolve(await _refreshDio.fetch<dynamic>(options));
+    } on DioException catch (e) {
+      handler.next(e);
+    }
+  }
+
+  /// Performs the single refresh round-trip. Never throws.
+  Future<_RefreshResult> _refresh() async {
+    final refresh = await _tokenStore.getRefresh();
+    if (refresh == null) {
+      await _onSignOut();
+      return const _RefreshResult.rejected();
+    }
+
+    final Response<Map<String, dynamic>> response;
+    try {
+      response = await _refreshDio.post<Map<String, dynamic>>(
+        NativeAuthContract.refreshPath,
+        data: {'refresh_token': refresh},
+      );
+    } on DioException catch (e) {
+      final status = e.response?.statusCode;
+      if (status == null || status >= 500) {
+        return const _RefreshResult.transient();
       }
+      await _signOutIfUnchanged(refresh);
+      return const _RefreshResult.rejected();
+    }
 
-      final Response<Map<String, dynamic>> refreshResponse;
-      try {
-        refreshResponse = await _refreshDio.post<Map<String, dynamic>>(
-          '/v1/auth/refresh',
-          data: {'refresh_token': refresh},
-        );
-      } on DioException {
-        await _onSignOut();
-        return handler.next(err);
-      }
+    final session = NativeSession.tryParse(response.data);
+    if (session == null) {
+      await _signOutIfUnchanged(refresh);
+      return const _RefreshResult.rejected();
+    }
 
-      final newJwt = refreshResponse.data?['rcab_jwt'] as String?;
-      if (newJwt == null) {
-        await _onSignOut();
-        return handler.next(err);
-      }
+    // A sign-out (or another session) may have replaced the stored refresh
+    // token while the request was in flight: never resurrect it.
+    if (await _tokenStore.getRefresh() != refresh) {
+      return const _RefreshResult.rejected();
+    }
 
-      final newRefresh =
-          refreshResponse.data?['refresh_token'] as String? ?? refresh;
-      await _tokenStore.saveTokens(jwt: newJwt, refresh: newRefresh);
+    // Persist both rotated credentials before releasing queued requests.
+    await _tokenStore.saveTokens(
+      jwt: session.accessToken,
+      refresh: session.refreshToken,
+    );
+    return _RefreshResult.success(session.accessToken);
+  }
 
-      // Retry the original request with the new token.
-      final retryOptions = err.requestOptions;
-      retryOptions.headers['Authorization'] = 'Bearer $newJwt';
-      final retried = await _refreshDio.fetch<dynamic>(retryOptions);
-      handler.resolve(retried);
-    } finally {
-      _isRefreshing = false;
+  Future<void> _signOutIfUnchanged(String usedRefresh) async {
+    if (await _tokenStore.getRefresh() == usedRefresh) {
+      await _onSignOut();
     }
   }
 }

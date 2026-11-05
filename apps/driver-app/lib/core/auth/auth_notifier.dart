@@ -5,6 +5,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'auth_state.dart';
+import 'native_auth_contract.dart';
 import 'token_store.dart';
 
 class AuthNotifier extends StateNotifier<AuthState> {
@@ -29,18 +30,18 @@ class AuthNotifier extends StateNotifier<AuthState> {
   Future<String?> signInWithFirebaseToken(String idToken) async {
     try {
       final response = await _dio.post<Map<String, dynamic>>(
-        '/v1/auth/firebase-exchange',
-        data: {'firebase_id_token': idToken},
+        NativeAuthContract.firebaseExchangePath,
+        data: {'id_token': idToken},
       );
-      final data = response.data;
-      if (data == null) return 'Sign-in failed';
-      final jwt = data['rcab_jwt'] as String;
-      final refresh = data['refresh_token'] as String;
-      final userMap = data['user'] as Map<String, dynamic>;
-      await _tokenStore.saveTokens(jwt: jwt, refresh: refresh);
+      final session = NativeSession.tryParse(response.data);
+      if (session == null) return 'Sign-in failed';
+      await _tokenStore.saveTokens(
+        jwt: session.accessToken,
+        refresh: session.refreshToken,
+      );
       state = AuthStateAuthenticated(
-        userId: userMap['id'] as String,
-        role: (userMap['role'] as String?) ?? 'driver',
+        userId: session.userId,
+        role: session.role,
       );
       return null;
     } on DioException catch (e) {
@@ -51,12 +52,45 @@ class AuthNotifier extends StateNotifier<AuthState> {
     }
   }
 
+  /// Signs out: best-effort server-side revocation, then always clears the
+  /// device (secure storage + Firebase), even when offline.
+  ///
+  /// Server revocation is only guaranteed when the device is online; an
+  /// offline sign-out leaves the refresh token valid server-side until expiry.
   Future<void> signOut() async {
-    await Future.wait([
-      _tokenStore.clear(),
-      _firebaseAuth.signOut(),
-    ]);
-    state = const AuthStateUnauthenticated();
+    String? access;
+    String? refresh;
+    try {
+      access = await _tokenStore.getJwt();
+      refresh = await _tokenStore.getRefresh();
+    } catch (_) {}
+
+    if (refresh != null) {
+      try {
+        await _dio.post<dynamic>(
+          NativeAuthContract.logoutPath,
+          data: {'refresh_token': refresh},
+          options: Options(
+            headers: {if (access != null) 'Authorization': 'Bearer $access'},
+            sendTimeout: const Duration(seconds: 5),
+            receiveTimeout: const Duration(seconds: 5),
+          ),
+        );
+      } catch (_) {
+        // Best effort: offline, expired access token, or already revoked.
+      }
+    }
+
+    // Clear local credentials even if the call above failed; the interceptor
+    // re-checks the store so a late refresh cannot restore the session.
+    try {
+      await _tokenStore.clear();
+    } finally {
+      try {
+        await _firebaseAuth.signOut();
+      } catch (_) {}
+      if (mounted) state = const AuthStateUnauthenticated();
+    }
   }
 
   Future<void> _restoreSession() async {
