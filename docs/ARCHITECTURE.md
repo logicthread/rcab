@@ -60,7 +60,10 @@ laptop LAN IP, not `localhost`.
 
 All under `/v1` except `/` and `/metrics`. Auth = first-party JWT `Authorization: Bearer`
 via `AuthGuard`, except the public health/auth-entry routes. `POST /v1/auth/refresh` is
-also CSRF-guarded (Origin check).
+also CSRF-guarded (Origin, then Referer, against the `CORS_ORIGINS` allowlist). Native clients
+(driver app) use `/v1/auth/native/{firebase-exchange,refresh,logout}`: JSON tokens, no cookie, no CSRF.
+Access JWTs are HS256 with `iss=rcab`, `aud=rcab-api`, `typ=access`. `JWT_SECRET` and
+`CORS_ORIGINS` are validated at startup and **fail closed** unless `NODE_ENV` is `development`/`test`.
 
 | Method + path | Module | Auth | Purpose |
 |---|---|---|---|
@@ -69,7 +72,8 @@ also CSRF-guarded (Origin check).
 | `GET /v1/health/ready` | health | public | readiness (checks pg/redis/osrm) |
 | `GET /metrics` | health | public | Prometheus metrics |
 | `POST /v1/auth/firebase-exchange` | auth | public | Firebase ID token → rcab JWT pair + refresh cookie |
-| `POST /v1/auth/refresh` | auth | cookie+CSRF | rotate access token from refresh cookie |
+| `POST /v1/auth/refresh` | auth | cookie+CSRF | single-use rotation of the refresh cookie; replay revokes the session family |
+| `POST /v1/auth/native/*` | auth | public / JWT (logout) | native exchange/refresh/logout, JSON tokens |
 | `POST /v1/auth/logout` | auth | JWT | revoke refresh token (Postgres `auth_refresh_token.revoked_at`) |
 | `POST /v1/auth/google/login` | auth | public | Google ID token → JWT (linked users) |
 | `POST /v1/auth/google/link` | auth | JWT | link a Google account |
@@ -80,7 +84,7 @@ also CSRF-guarded (Origin check).
 | `POST /v1/drivers/offline` | drivers | JWT (driver) | go offline |
 | `PATCH /v1/drivers/me/vehicle` | drivers | JWT (driver) | set current vehicle |
 | `POST /v1/rides/quote` | rides | JWT (client) | fare + route + signed quote token; `type` normal/shared/scheduled |
-| `POST /v1/rides` | rides | JWT (client) | request a ride (idempotency-key header); branches by `type` |
+| `POST /v1/rides` | rides | JWT (client) | request a ride; `Idempotency-Key` scoped to account+operation, 422 `idempotency_key_conflict`, 409 `idempotency_request_in_progress` (shared); branches by `type` |
 | `GET /v1/rides/:id` | rides | JWT (owner) | ride status + timestamp trail |
 | `GET /v1/rides/:id/stops` | rides | JWT (driver) | shared-ride stop sequence |
 | `POST /v1/rides/:id/state` | rides | JWT (driver) | solo state transition (en_route/arrived/…) |
@@ -122,7 +126,7 @@ Gateway: `apps/api/src/modules/realtime/realtime.gateway.ts`. Rooms: `user:<id>`
 
 ## 5. Data model — Postgres (Drizzle, `apps/api/src/db/schema.ts`)
 
-**9 tables.** FKs shown with →. (No `pools`/`dispatch_offers`/`ride_events`/`jwt_revocations`
+**10 tables** (incl. `idempotency_record`, shared-create claims). FKs shown with →. (No `pools`/`dispatch_offers`/`ride_events`/`jwt_revocations`
 tables exist — dispatch/offers/pools live in **Redis**. Refresh-token revocation is the
 `auth_refresh_token.revoked_at` column, **not** a Redis set.)
 
@@ -132,8 +136,8 @@ tables exist — dispatch/offers/pools live in **Redis**. Refresh-token revocati
 | `client` | client profile | `user_id` → app_user (PK), `rating_avg`, `rating_count` |
 | `driver` | driver profile | `user_id` → app_user (PK), `availability` (offline/online/on_ride), `current_vehicle_id`, `rating_avg` |
 | `vehicle` | driver vehicles | `id`, `driver_id` → driver, `type`, `reg_no` uniq, `seats`, `active` |
-| `auth_refresh_token` | refresh tokens | `token` (PK), `user_id` → app_user, `expires_at`, `revoked_at` |
-| `rides` | solo/normal + scheduled rides | `id`, `passenger_id` → app_user, origin/dest lat/lng, `fare_cents`, `status`, **`type` (normal/shared/scheduled)**, **`scheduled_for`**, `idempotency_key` uniq, `driver_id`, lifecycle + cancel timestamps |
+| `auth_refresh_token` | refresh tokens | `token_hash` (SHA-256 digest), `user_id` → app_user, `family_id`, `auth_method`, `expires_at`, `revoked_at` |
+| `rides` | solo/normal + scheduled rides | `id`, `passenger_id` → app_user, origin/dest lat/lng, `fare_cents`, `status`, **`type` (normal/shared/scheduled)**, **`scheduled_for`**, `idempotency_key`+`idempotency_operation`+`request_fingerprint` (unique per passenger/operation/key), `driver_id`, lifecycle + cancel timestamps |
 | `shared_rides` | pooled rides | `ride_id` (PK), `seat_count`, `max_seats`, `pool_state`, `members` jsonb, `claimed_by_driver_id`, detour budget |
 | `ride_stops` | shared-ride stops | (`ride_id` → shared_rides, `sequence_index`) PK, `passenger_id`, `type` (pickup/dropoff), lat/lng |
 | `ratings` | two-sided ratings | `id`, `ride_id`, `rater_id`, `subject_id`, `stars` (1–5), uniq per direction. **Capture only** — aggregation is E7 |
@@ -142,7 +146,7 @@ tables exist — dispatch/offers/pools live in **Redis**. Refresh-token revocati
 completed, cancelled, no_driver, no_show`.
 
 ### Migrations
-Hand-authored SQL in `apps/api/migrations/` (`0001`…`0011`), applied in order by a
+Hand-authored SQL in `apps/api/migrations/` (`0001`…`0013`), applied in order by a
 custom runner `apps/api/src/migrate.ts` (tracks applied files in `_rcab_migrations`).
 **Not auto-applied on `pnpm dev` / container restart** — run the runner explicitly:
 ```bash
@@ -161,9 +165,10 @@ Integration tests apply the same files via `@rcab/test-fixtures` `runMigrations(
 | `claim:ride:<id>` | STRING (SET NX) | dispatch | atomic first-accept-wins solo claim lock |
 | `offer:list:<rideId>`, `offer:type:<offerId>`, `ride:<id>:offered` | SET/STRING | dispatch | outstanding offer tracking |
 | `pool:<rideId>` (HASH), `pool:<rideId>:seats` (counter) | | matching | shared pool state + atomic seat allocation (Lua) |
-| `idem:rides:<key>` | STRING | rides | idempotency-key → ride id (24 h) |
 | `bull:dispatch:*`, `bull:matching:*`, `bull:scheduled-dispatch:*` | BullMQ | dispatch/matching/scheduled | wave-timeout, hard-fail, pool-expire, and scheduled-wake delayed jobs |
 | `socketio:*` | pub/sub | realtime | Socket.IO Redis adapter (multi-node) |
+
+Idempotency is no longer in Redis: it is durable in Postgres (migration 0013).
 
 Inspect with `/redis-inspect` (geo/queues/JWT) and `/pool-inspect` (shared pools).
 
@@ -260,8 +265,8 @@ codegraph/      graph.json + graph.md   (queryable code graph — `/code-graph`,
 ## 11. Config (`.env.dev`, auto-created by `pnpm dev:up`)
 
 Key vars: `POSTGRES_USER/PASSWORD/DB` (rcab/rcab/rcab), `OSM_PBF_URL` (OSRM region),
-`FIREBASE_PROJECT_ID`, `FIREBASE_SERVICE_ACCOUNT_JSON`, `FIREBASE_PHONE_TEST_TOKEN`
-(pre-minted test ID token to skip the SMS round-trip in smoke tests), `JWT_SECRET`,
+`FIREBASE_PROJECT_ID`, `FIREBASE_SERVICE_ACCOUNT_JSON`, `CORS_ORIGINS` (required outside dev/test), `FIREBASE_PHONE_TEST_TOKEN`
+(pre-minted test ID token to skip the SMS round-trip in smoke tests), `JWT_SECRET` (>=32 bytes, no placeholder, required unless `NODE_ENV` is development/test),
 `NEXT_PUBLIC_API_URL`. Tunables read via `ConfigService` include
 `SCHEDULED_WAKE_LEAD_MS`, `MATCHING_POOL_TIMEOUT_MS`, `SCHEDULED_DISPATCH_CONCURRENCY`.
 Validate your file with `/env-validate`.

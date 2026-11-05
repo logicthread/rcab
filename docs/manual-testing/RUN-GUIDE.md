@@ -26,7 +26,8 @@
   around Guwahati. Caveat: seeded users have synthetic `firebase_uid`s, so they **cannot
   sign in via OTP**, and they never answer an offer — accepting still needs a real driver
   on the Flutter app. `test-fixtures` `seedPilotCity` remains an empty stub.
-- **⚠ Migrations are not auto-applied** on `dev:up`/restart. Apply them explicitly (§1.3).
+- **⚠ Migrations are not auto-applied** on `dev:up`/restart. Apply them explicitly (§1.3). Latest are `0012_refresh_token_hash` and `0013_idempotency_scope`; **apply both** before testing sign-in or booking.
+- **Dev runner:** the api dev container runs `node --watch` with an SWC loader (emits decorator metadata), not `tsx watch`. Dev defaults apply only when `NODE_ENV=development`; any other value requires a strong `JWT_SECRET` (>=32 bytes) and `CORS_ORIGINS` or the api refuses to start.
 - **Firebase phone auth:** the web/driver sign-in uses real Firebase phone OTP. For
   testing without SMS, add **test phone numbers with fixed codes in the Firebase console**
   (Authentication → Sign-in method → Phone → Test numbers). `FIREBASE_PHONE_TEST_TOKEN`

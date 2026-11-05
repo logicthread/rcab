@@ -209,6 +209,9 @@ CREATE INDEX ON notification (user_id, created_at DESC);
 - `ride_request.ride_id` is nullable (set on match) but a unique partial index could be added if we ever need it.
 - `shared_ride` rows always have a paired `ride` row (FK PK).
 
+- **Auth refresh tokens (0012):** `auth_refresh_token` stores `token_hash` (SHA-256 digest, CHECK on format), `family_id`, `auth_method`; no plaintext column. See [[module-auth]].
+- **Ride idempotency (0013):** `rides.idempotency_operation` + `rides.request_fingerprint`; UNIQUE on (passenger, operation, key) replaces the former global UNIQUE on `idempotency_key`. New `idempotency_record` table backs shared-create claims (pending/completed). See [[module-rides]].
+
 ## Indexing rationale
 
 We index for the hot queries:

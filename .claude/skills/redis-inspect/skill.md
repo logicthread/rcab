@@ -1,6 +1,6 @@
 ---
 name: redis-inspect
-description: Inspect Redis state across every namespace this project uses — driver presence/geo, dispatch offers and claims, shared-ride pools, OSRM polyline cache, idempotency keys, BullMQ queues. No args.
+description: Inspect Redis state across every namespace this project uses — driver presence/geo, dispatch offers and claims, shared-ride pools, OSRM polyline cache, idempotency (now Postgres-backed), BullMQ queues. No args.
 ---
 
 # redis-inspect
@@ -24,7 +24,7 @@ RC() { docker compose --env-file .env.dev -f infra/docker/docker-compose.dev.yml
 | Ride claim locks | `claim:ride:<rideId>` (SET NX winner lock) | `dispatch.service` |
 | Shared-ride pools | `pool:<rideId>` (hash: `seat_count`, …), `pool:<rideId>:seats` | `pool-lifecycle.service` |
 | OSRM polyline cache | `osrm:poly:<geohash7>:<geohash7>` | `route-similarity.service` |
-| Idempotency | `idem:rides:<Idempotency-Key>` | `rides.controller` |
+| Idempotency | *(none in Redis)* — durable in Postgres: `rides.idempotency_operation`/`request_fingerprint` and `idempotency_record` (migration 0013). The old `idem:rides:*` keys were removed (RCAB-E8.S7) | `rides.controller` |
 | BullMQ | `bull:dispatch:*`, `bull:matching:*`, `bull:scheduled-dispatch:*` | dispatch / matching / scheduled modules |
 
 ## Steps
@@ -71,7 +71,7 @@ RC() { docker compose --env-file .env.dev -f infra/docker/docker-compose.dev.yml
 6. **Caches + totals.**
    ```bash
    RC --scan --pattern 'osrm:poly:*' | wc -l
-   RC --scan --pattern 'idem:rides:*' | wc -l
+   RC --scan --pattern 'idem:rides:*' | wc -l   # expect 0; non-zero = stale keys from before migration 0013, safe to ignore/expire
    RC DBSIZE
    RC INFO keyspace
    ```
