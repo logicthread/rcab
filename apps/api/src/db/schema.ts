@@ -73,15 +73,24 @@ export const driver = pgTable(
 export const authRefreshToken = pgTable(
   'auth_refresh_token',
   {
-    token: text('token').primaryKey(),
+    // SHA-256 hex digest of the opaque refresh token — the raw token is never stored (0012).
+    tokenHash: text('token_hash').primaryKey(),
+    // Session family: every rotation of one login shares it; replay revokes the family.
+    familyId: uuid('family_id').notNull(),
     userId: uuid('user_id')
       .notNull()
       .references(() => appUser.id, { onDelete: 'cascade' }),
+    authMethod: text('auth_method').notNull().default('phone'),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
     revokedAt: timestamp('revoked_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index('auth_refresh_token_user_idx').on(t.userId)],
+  (t) => [
+    index('auth_refresh_token_user_idx').on(t.userId),
+    index('auth_refresh_token_family_idx').on(t.familyId),
+    check('auth_refresh_token_hash_check', sql`${t.tokenHash} ~ '^[0-9a-f]{64}$'`),
+    check('auth_refresh_token_auth_method_check', sql`${t.authMethod} IN ('phone','google')`),
+  ],
 );
 
 export interface SharedRideMember {

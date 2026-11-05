@@ -69,7 +69,7 @@ async function createDriverAndJwt(): Promise<{ userId: string; jwt: string }> {
   }
 
   const jwtService = moduleRef.get(JwtService);
-  const jwt = jwtService.sign({ sub: userId, role: 'driver', auth_method: 'phone' });
+  const jwt = jwtService.sign({ sub: userId, role: 'driver', auth_method: 'phone', typ: 'access' });
   return { userId, jwt };
 }
 
@@ -166,7 +166,7 @@ describe.skipIf(skip)('vehicles round-trip', () => {
       client.release();
     }
     const jwtService = moduleRef.get(JwtService);
-    const clientJwt = jwtService.sign({ sub: userId, role: 'client', auth_method: 'phone' });
+    const clientJwt = jwtService.sign({ sub: userId, role: 'client', auth_method: 'phone', typ: 'access' });
 
     const res = await supertest(app.getHttpServer())
       .get('/v1/vehicles')
