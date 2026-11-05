@@ -5,7 +5,7 @@
     "request": { "id_token": "firebase.id.token" },
     "response_200": {
       "access_token": "access.jwt.one",
-      "token_type": "Bearer",
+      "token_type": "bearer",
       "expires_in": 900,
       "refresh_token": "refresh-one",
       "user": {
@@ -21,7 +21,7 @@
     "request": { "refresh_token": "refresh-one" },
     "response_200": {
       "access_token": "access.jwt.two",
-      "token_type": "Bearer",
+      "token_type": "bearer",
       "expires_in": 900,
       "refresh_token": "refresh-two",
       "user": {

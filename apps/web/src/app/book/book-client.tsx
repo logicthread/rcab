@@ -59,6 +59,12 @@ function formatMoney(m: Money | null | undefined): string {
   return `₹${(m.amount / 100).toFixed(2)}`;
 }
 
+const IDEMPOTENCY_CONFLICT_MSG =
+  'Your booking details changed since the last attempt, so we refreshed the quote. Please review it and confirm again.';
+const IDEMPOTENCY_IN_PROGRESS_MSG =
+  'Your previous request is still being processed. Please wait a moment and try again.';
+const IDEMPOTENCY_INVALID_MSG = 'Something went wrong preparing your request. Please try again.';
+
 const ROUTING_UNAVAILABLE_MSG =
   "We can't route between these points yet — try pickup and drop within the city.";
 
@@ -146,6 +152,31 @@ function BookPage() {
   // retries and rotated only on a changed intent or a confirmed success.
   const intentKeys = useMemo(() => createIntentKeyTracker(), []);
 
+  // Maps a failed create to user-facing copy, applying the idempotency recovery
+  // the API contract requires:
+  //  - 422 idempotency_key_conflict: the key now names a different request, so
+  //    rotate it and re-quote (the fare/quote the user saw is stale).
+  //  - 400 idempotency_key_invalid: rotate; a retry gets a fresh key.
+  //  - 409 idempotency_request_in_progress: already replayed once in the api
+  //    layer; keep the key so a manual retry still dedupes server-side.
+  const createErrorMessage = useCallback(
+    (err: unknown): string => {
+      if (!(err instanceof BookingApiError)) return 'Request failed';
+      if (err.isIdempotencyConflict) {
+        intentKeys.clear();
+        setQuoteNonce((n) => n + 1);
+        return IDEMPOTENCY_CONFLICT_MSG;
+      }
+      if (err.isIdempotencyKeyInvalid) {
+        intentKeys.clear();
+        return IDEMPOTENCY_INVALID_MSG;
+      }
+      if (err.isIdempotencyInProgress) return IDEMPOTENCY_IN_PROGRESS_MSG;
+      return err.message;
+    },
+    [intentKeys],
+  );
+
   useEffect(() => {
     if (!authed || !sharedRideId) return;
     const conn = connectBookingSocket(getToken);
@@ -228,8 +259,7 @@ function BookPage() {
       if (typeof window !== 'undefined') window.localStorage.setItem(ACTIVE_RIDE_KEY, res.rideId);
       setSoloRequested(res.rideId, res.status);
     } catch (err) {
-      const message = err instanceof BookingApiError ? err.message : 'Request failed';
-      setRequestError(message);
+      setRequestError(createErrorMessage(err));
     }
   }, [
     authed,
@@ -242,6 +272,7 @@ function BookPage() {
     startRequest,
     setSoloRequested,
     setRequestError,
+    createErrorMessage,
   ]);
 
   // Tap the map → set the active endpoint, then resolve a human label.
@@ -275,8 +306,7 @@ function BookPage() {
         setSlotted(res.sharedRideId, 2, res.poolStatus);
       }
     } catch (err) {
-      const message = err instanceof BookingApiError ? err.message : 'Request failed';
-      setRequestError(message);
+      setRequestError(createErrorMessage(err));
     }
   }, [
     authed,
@@ -289,6 +319,7 @@ function BookPage() {
     setOpened,
     setSlotted,
     setRequestError,
+    createErrorMessage,
   ]);
 
   const indicativeSeatPrice = rideType === 'shared' ? quote?.sharedEstimate?.perSeatPrice : null;

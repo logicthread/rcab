@@ -59,7 +59,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   async signOut() {
-    const { jwt, sessionGen } = get();
+    const { jwt, jwtExpiresAt, sessionGen } = get();
+    // The API's logout is behind AuthGuard (a *valid* Bearer) and CsrfGuard
+    // (browser-set Origin). An expired/missing access token would 401 and leave
+    // the refresh cookie alive, so a reload would silently log the user back in.
+    const needsFreshToken =
+      jwt === null || (jwtExpiresAt !== null && jwtExpiresAt - Date.now() <= TOKEN_EXPIRY_SKEW_MS);
     // Drop local state first (and invalidate any in-flight refresh) so the UI
     // leaves the session at once and nothing can silently log back in while the
     // server revokes the refresh token + clears the cookie.
@@ -72,11 +77,26 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       sessionGen: sessionGen + 1,
     });
     try {
+      let bearer = jwt;
+      if (needsFreshToken) {
+        // Raw call (not refreshAccessToken: that is blocked once signedOut and
+        // would write the session back into the store). It rotates the cookie,
+        // which the logout below then revokes. No session -> nothing to revoke.
+        bearer = null;
+        const res = await fetch(`${API_BASE}/v1/auth/refresh`, {
+          method: 'POST',
+          credentials: 'include',
+        });
+        if (res.ok) {
+          bearer = ((await res.json()) as { access_token?: string }).access_token ?? null;
+        }
+        if (!bearer) return;
+      }
       // CsrfGuard is Origin-based: the browser attaches Origin itself, so no extra header.
       await fetch(`${API_BASE}/v1/auth/logout`, {
         method: 'POST',
         credentials: 'include',
-        headers: jwt ? { Authorization: `Bearer ${jwt}` } : {},
+        headers: { Authorization: `Bearer ${bearer}` },
       });
     } catch {
       /* offline: device is cleared locally; server-side revocation is best-effort */

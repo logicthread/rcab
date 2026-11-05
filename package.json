@@ -20,7 +20,7 @@
     "test:e2e": "turbo test:e2e",
     "test:load": "k6 run infra/load/probe.js",
     "verify": "pnpm lint && pnpm --filter @rcab/api run test:cov && pnpm test:int",
-    "prod:up": "docker compose -f infra/docker/docker-compose.prod.yml -f infra/docker/docker-compose.prod-test.yml up -d --build",
+    "prod:up": "bash scripts/prod-up.sh",
     "prod:down": "docker compose -f infra/docker/docker-compose.prod.yml -f infra/docker/docker-compose.prod-test.yml down -v",
     "prod:smoke": "bash scripts/prod-smoke.sh",
     "obs:smoke": "bash scripts/obs-smoke.sh",

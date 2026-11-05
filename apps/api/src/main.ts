@@ -4,8 +4,9 @@ import cookieParser from 'cookie-parser';
 import { AppModule } from './app.module';
 import { logger } from './logger';
 import { resolveBrowserOrigins } from './common/guards/auth-config';
+import { envNumber } from './common/utils/env';
 
-const PORT = Number(process.env.PORT ?? 3000);
+const PORT = envNumber('PORT', 3000, { integer: true, min: 1, max: 65535 });
 
 async function bootstrap(): Promise<void> {
   // Validated before anything starts: outside development/test a missing,

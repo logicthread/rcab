@@ -24,6 +24,21 @@ export class BookingApiError extends Error {
   get isRoutingUnavailable(): boolean {
     return this.code === 'routing_unavailable' || this.status === 503;
   }
+
+  /** 422: this Idempotency-Key was already used for a *different* request. Rotate the key. */
+  get isIdempotencyConflict(): boolean {
+    return this.status === 422 && this.code === 'idempotency_key_conflict';
+  }
+
+  /** 409: the original request with this key is still being processed. */
+  get isIdempotencyInProgress(): boolean {
+    return this.status === 409 && this.code === 'idempotency_request_in_progress';
+  }
+
+  /** 400: the key is malformed (not 1–128 visible ASCII). Rotate the key. */
+  get isIdempotencyKeyInvalid(): boolean {
+    return this.status === 400 && this.code === 'idempotency_key_invalid';
+  }
 }
 
 interface ApiErrorBody {
@@ -86,6 +101,32 @@ async function postJson<T>(
   return parseOrThrow<T>(res);
 }
 
+/** Pause before the single replay of a request the server reports as still in progress. */
+export const IDEMPOTENCY_IN_PROGRESS_RETRY_MS = 1000;
+
+/**
+ * POST a create with an `Idempotency-Key`. A 409 `idempotency_request_in_progress`
+ * means the first attempt with this key is still running (e.g. a double submit or
+ * a retry racing a slow response): wait briefly and replay the SAME request with
+ * the SAME key exactly once — the server then returns the original result. A
+ * second 409 is surfaced to the caller. 422 / 400 are not retried here: they need
+ * a new key, which only the caller (which owns the key) can mint.
+ */
+async function postIdempotent<T>(
+  path: string,
+  body: unknown,
+  idempotencyKey: string,
+): Promise<T> {
+  const headers = { 'Idempotency-Key': idempotencyKey };
+  try {
+    return await postJson<T>(path, body, headers);
+  } catch (err) {
+    if (!(err instanceof BookingApiError) || !err.isIdempotencyInProgress) throw err;
+    await new Promise((resolve) => setTimeout(resolve, IDEMPOTENCY_IN_PROGRESS_RETRY_MS));
+    return postJson<T>(path, body, headers);
+  }
+}
+
 async function getJson<T>(path: string): Promise<T> {
   const res = await authedFetch(path);
   return parseOrThrow<T>(res);
@@ -120,9 +161,11 @@ export function createSharedRide(
   dropoff: Place,
   idempotencyKey: string,
 ): Promise<CreateRideResponse> {
-  return postJson<CreateRideResponse>('/v1/rides', routeBody(pickup, dropoff, 'shared'), {
-    'Idempotency-Key': idempotencyKey,
-  });
+  return postIdempotent<CreateRideResponse>(
+    '/v1/rides',
+    routeBody(pickup, dropoff, 'shared'),
+    idempotencyKey,
+  );
 }
 
 /**
@@ -136,10 +179,10 @@ export function createNormalRide(
   quoteToken: string,
   idempotencyKey: string,
 ): Promise<SoloRideResponse> {
-  return postJson<SoloRideResponse>(
+  return postIdempotent<SoloRideResponse>(
     '/v1/rides',
     { ...routeBody(pickup, dropoff, 'normal'), quoteToken },
-    { 'Idempotency-Key': idempotencyKey },
+    idempotencyKey,
   );
 }
 

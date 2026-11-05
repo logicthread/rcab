@@ -115,6 +115,9 @@ services:
     env_file:
       - ../../.env.dev
     environment:
+      # Must stay "development": any other value (or unset) makes the api fail
+      # closed without a >=32-byte JWT_SECRET and https CORS_ORIGINS (rem/api-auth).
+      # Overrides whatever .env.dev says.
       NODE_ENV: development
       PORT: 3000
       DATABASE_URL: postgres://${POSTGRES_USER:-rcab}:${POSTGRES_PASSWORD:-rcab}@postgres:5432/${POSTGRES_DB:-rcab}

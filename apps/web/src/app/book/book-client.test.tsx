@@ -260,6 +260,78 @@ describe('BookPage idempotency key per booking intent (F18a)', () => {
   });
 });
 
+describe('BookPage idempotency error recovery', () => {
+  const ride = {
+    rideId: 'r1',
+    passengerId: 'u1',
+    status: 'requested',
+    fare: { amount: 5000, currency: 'INR' as const },
+  };
+
+  it('private: 422 idempotency_key_conflict rotates the key and re-quotes', async () => {
+    fetchQuote.mockResolvedValue(quote('q1'));
+    createNormalRide
+      .mockRejectedValueOnce(
+        new api.BookingApiError(422, 'idempotency_key_conflict', 'key used for a different request'),
+      )
+      .mockResolvedValueOnce(ride);
+    render(<BookClient />);
+    fireEvent.click(screen.getByRole('radio', { name: 'Private' }));
+    pickPreset(0);
+    await waitFor(() => expect(screen.getByTestId('submit-private')).toBeEnabled());
+    expect(fetchQuote).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByTestId('submit-private'));
+    await screen.findByText(/refreshed the quote/i);
+    await waitFor(() => expect(fetchQuote).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.getByTestId('submit-private')).toBeEnabled());
+
+    fireEvent.click(screen.getByTestId('submit-private'));
+    await waitFor(() => expect(createNormalRide).toHaveBeenCalledTimes(2));
+    expect(createNormalRide.mock.calls[1][3]).not.toBe(createNormalRide.mock.calls[0][3]);
+  });
+
+  it('shared: 400 idempotency_key_invalid rotates the key', async () => {
+    fetchQuote.mockResolvedValue(quote('q1'));
+    createSharedRide
+      .mockRejectedValueOnce(new api.BookingApiError(400, 'idempotency_key_invalid', 'bad key'))
+      .mockResolvedValueOnce({
+        sharedRideId: 'sr1',
+        passengerId: 'u1',
+        mode: 'opened',
+        poolStatus: 'open',
+      });
+    render(<BookClient />);
+    pickPreset(0);
+    await waitFor(() => expect(screen.getByTestId('submit-shared')).toBeEnabled());
+
+    fireEvent.click(screen.getByTestId('submit-shared'));
+    await screen.findByText(/try again/i);
+    fireEvent.click(screen.getByTestId('submit-shared'));
+    await waitFor(() => expect(createSharedRide).toHaveBeenCalledTimes(2));
+    expect(createSharedRide.mock.calls[1][2]).not.toBe(createSharedRide.mock.calls[0][2]);
+  });
+
+  it('private: a still-in-progress 409 keeps the key for the manual retry', async () => {
+    fetchQuote.mockResolvedValue(quote('q1'));
+    createNormalRide
+      .mockRejectedValueOnce(
+        new api.BookingApiError(409, 'idempotency_request_in_progress', 'in progress'),
+      )
+      .mockResolvedValueOnce(ride);
+    render(<BookClient />);
+    fireEvent.click(screen.getByRole('radio', { name: 'Private' }));
+    pickPreset(0);
+    await waitFor(() => expect(screen.getByTestId('submit-private')).toBeEnabled());
+
+    fireEvent.click(screen.getByTestId('submit-private'));
+    await screen.findByText(/still being processed/i);
+    fireEvent.click(screen.getByTestId('submit-private'));
+    await waitFor(() => expect(createNormalRide).toHaveBeenCalledTimes(2));
+    expect(createNormalRide.mock.calls[1][3]).toBe(createNormalRide.mock.calls[0][3]);
+  });
+});
+
 describe('BookPage sign out (F12)', () => {
   it('Sign out calls signOut and clears booking state + the persisted active ride', async () => {
     const signOut = vi.fn().mockResolvedValue(undefined);

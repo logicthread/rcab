@@ -26,3 +26,10 @@ describe('createIntentKeyTracker', () => {
     expect(t.keyFor('x')).toBe('key-2');
   });
 });
+
+describe('default key format', () => {
+  it('satisfies the API Idempotency-Key rule (1-128 visible ASCII, apps/api rides/idempotency.ts)', () => {
+    const key = createIntentKeyTracker().keyFor('private|a|b');
+    expect(key).toMatch(/^[\x21-\x7e]{1,128}$/);
+  });
+});

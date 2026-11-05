@@ -106,6 +106,58 @@ describe('useAuthStore', () => {
       expect(s.signedOut).toBe(true);
     });
 
+    function expiredJwt(): string {
+      const payload = btoa(JSON.stringify({ exp: Math.floor((Date.now() - 60_000) / 1000) }));
+      return `h.${payload.replace(/=+$/, '')}.s`;
+    }
+
+    it('expired access token: refreshes first so logout carries a valid Bearer (AuthGuard) and revokes the cookie', async () => {
+      vi.mocked(fetch).mockImplementation((url) =>
+        Promise.resolve(
+          String(url).includes('/refresh')
+            ? ({ ok: true, json: () => Promise.resolve({ access_token: 'fresh-1' }) } as Response)
+            : ({ ok: true, status: 204 } as Response),
+        ),
+      );
+      useAuthStore.setState({
+        user: { id: 'u1', role: 'client', phone_e164: '+1' },
+        jwt: expiredJwt(),
+        jwtExpiresAt: Date.now() - 60_000,
+      });
+
+      await useAuthStore.getState().signOut();
+
+      const calls = vi.mocked(fetch).mock.calls;
+      expect(calls.map((c) => String(c[0]).replace(/^.*\/v1/, '/v1'))).toEqual([
+        '/v1/auth/refresh',
+        '/v1/auth/logout',
+      ]);
+      expect(calls[0][1]).toEqual(expect.objectContaining({ method: 'POST', credentials: 'include' }));
+      expect(calls[1][1]).toEqual(
+        expect.objectContaining({
+          method: 'POST',
+          credentials: 'include',
+          headers: { Authorization: 'Bearer fresh-1' },
+        }),
+      );
+      // The refreshed session must not leak back into the store.
+      const s = useAuthStore.getState();
+      expect(s.jwt).toBeNull();
+      expect(s.user).toBeNull();
+      expect(s.signedOut).toBe(true);
+    });
+
+    it('expired access token and no live session (refresh rejected): skips logout, stays signed out', async () => {
+      vi.mocked(fetch).mockResolvedValue({ ok: false, status: 401 } as Response);
+      useAuthStore.setState({ jwt: expiredJwt(), jwtExpiresAt: Date.now() - 60_000 });
+
+      await useAuthStore.getState().signOut();
+
+      expect(fetch).toHaveBeenCalledTimes(1);
+      expect(String(vi.mocked(fetch).mock.calls[0][0])).toContain('/v1/auth/refresh');
+      expect(useAuthStore.getState().signedOut).toBe(true);
+    });
+
     it('clears local state synchronously and still clears when the server is unreachable', async () => {
       vi.mocked(fetch).mockRejectedValue(new Error('offline'));
       useAuthStore.setState({ user: { id: 'u1', role: 'client', phone_e164: '+1' }, jwt: 'a' });
