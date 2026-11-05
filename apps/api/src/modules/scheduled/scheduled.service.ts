@@ -1,5 +1,6 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { getNumber } from '../../common/utils/env';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 
@@ -37,7 +38,7 @@ export class ScheduledDispatchService {
     @InjectQueue(SCHEDULED_DISPATCH_QUEUE) private readonly queue: Queue<ScheduledWakeJob>,
     @Inject(ConfigService) config: ConfigService,
   ) {
-    this.leadMs = config.get<number>('SCHEDULED_WAKE_LEAD_MS') ?? SCHEDULED_WAKE_LEAD_MS;
+    this.leadMs = getNumber(config, 'SCHEDULED_WAKE_LEAD_MS', SCHEDULED_WAKE_LEAD_MS, { integer: true, min: 0 });
   }
 
   /**

@@ -39,10 +39,18 @@ services:
       OSRM_URL: http://osrm:5000
 
   web:
+    build:
+      # Throwaway public values so the CI image builds; real values come from the
+      # compose .env in production.
+      args:
+        NEXT_PUBLIC_API_URL: https://api.rcab.example
+        NEXT_PUBLIC_FIREBASE_API_KEY: ci-placeholder-api-key
+        NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: rcab-ci.example
+        NEXT_PUBLIC_FIREBASE_PROJECT_ID: rcab-ci
+        NEXT_PUBLIC_FIREBASE_APP_ID: ci-placeholder-app-id
     environment:
       NODE_ENV: production
       PORT: "3000"
-      NEXT_PUBLIC_API_URL: https://api.rcab.example
 
   migrator:
     env_file: []

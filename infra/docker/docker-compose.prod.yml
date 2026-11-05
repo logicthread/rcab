@@ -57,11 +57,20 @@ services:
     build:
       context: ../..
       dockerfile: infra/docker/web/Dockerfile.prod
+      # NEXT_PUBLIC_* are inlined at build time (see Dockerfile.prod); set them in
+      # the compose .env (infra/docker/env.example/compose.env.example). The
+      # Dockerfile fails the build when a required one is empty.
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}
+        NEXT_PUBLIC_FIREBASE_API_KEY: ${NEXT_PUBLIC_FIREBASE_API_KEY:-}
+        NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: ${NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN:-}
+        NEXT_PUBLIC_FIREBASE_PROJECT_ID: ${NEXT_PUBLIC_FIREBASE_PROJECT_ID:-}
+        NEXT_PUBLIC_FIREBASE_APP_ID: ${NEXT_PUBLIC_FIREBASE_APP_ID:-}
+        NEXT_PUBLIC_NOMINATIM_URL: ${NEXT_PUBLIC_NOMINATIM_URL:-https://nominatim.openstreetmap.org}
     networks: [rcab_net]
     environment:
       NODE_ENV: production
       PORT: "3000"
-      NEXT_PUBLIC_API_URL: https://api.rcab.example
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:3000/ || exit 1"]
       interval: 10s

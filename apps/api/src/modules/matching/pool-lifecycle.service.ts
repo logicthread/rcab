@@ -1,5 +1,6 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { getNumber } from '../../common/utils/env';
 import { InjectQueue } from '@nestjs/bullmq';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Queue } from 'bullmq';
@@ -71,7 +72,7 @@ export class PoolLifecycleService {
     private readonly bus: RealtimeBus,
     @Inject(ConfigService) config: ConfigService,
   ) {
-    this.poolTimeoutMs = config.get<number>('MATCHING_POOL_TIMEOUT_MS') ?? 60_000;
+    this.poolTimeoutMs = getNumber(config, 'MATCHING_POOL_TIMEOUT_MS', 60_000, { integer: true, min: 1 });
     this.poolSlotScript = readFileSync(join(__dirname, 'lua', 'pool_slot.lua'), 'utf-8');
   }
 

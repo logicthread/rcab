@@ -1,5 +1,6 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { getNumber } from '../../common/utils/env';
 import { InjectQueue } from '@nestjs/bullmq';
 import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
 import { Queue, type Job } from 'bullmq';
@@ -93,12 +94,12 @@ export class DispatchService {
     this.poolClaimScript = readFileSync(join(__dirname, 'lua', 'pool_claim.lua'), 'utf-8');
 
     this.params = {
-      k1: config.get<number>('DISPATCH_K1') ?? 5,
-      k2: config.get<number>('DISPATCH_K2') ?? 10,
-      r1Meters: config.get<number>('DISPATCH_R1_METERS') ?? 2_000,
-      r2Meters: config.get<number>('DISPATCH_R2_METERS') ?? 4_000,
-      waveOneTimeoutMs: config.get<number>('DISPATCH_WAVE_ONE_TIMEOUT_MS') ?? 30_000,
-      hardFailMs: config.get<number>('DISPATCH_HARD_FAIL_MS') ?? 60_000,
+      k1: getNumber(config, 'DISPATCH_K1', 5, { integer: true, min: 1 }),
+      k2: getNumber(config, 'DISPATCH_K2', 10, { integer: true, min: 1 }),
+      r1Meters: getNumber(config, 'DISPATCH_R1_METERS', 2_000, { min: 1 }),
+      r2Meters: getNumber(config, 'DISPATCH_R2_METERS', 4_000, { min: 1 }),
+      waveOneTimeoutMs: getNumber(config, 'DISPATCH_WAVE_ONE_TIMEOUT_MS', 30_000, { integer: true, min: 1 }),
+      hardFailMs: getNumber(config, 'DISPATCH_HARD_FAIL_MS', 60_000, { integer: true, min: 1 }),
     };
   }
 
@@ -587,8 +588,8 @@ export class DispatchService {
 // ── Pure helpers ─────────────────────────────────────────────────────────────
 
 export function computeStops(pool: SharedRideRow): OfferStop[] {
-  const pickups = sortMembersByDistance(pool.members, pool.originLng, pool.originLat);
-  const dropoffs = sortMembersByDistance(pool.members, pool.destLng, pool.destLat);
+  const pickups = sortMembersByDistance(pool.members, pool.originLng, pool.originLat, 'origin');
+  const dropoffs = sortMembersByDistance(pool.members, pool.destLng, pool.destLat, 'dest');
 
   const stops: OfferStop[] = [];
   let seq = 0;
@@ -617,6 +618,9 @@ function sortMembersByDistance(
   members: SharedRideMember[],
   refLng: number,
   refLat: number,
+  // Which of the member's coordinates to rank: pickups compare origins,
+  // dropoffs must compare destinations (F16).
+  point: 'origin' | 'dest',
 ): SharedRideMember[] {
   const haversine = (lat1: number, lng1: number, lat2: number, lng2: number): number => {
     const R = 6_371_000;
@@ -629,8 +633,10 @@ function sortMembersByDistance(
   };
 
   return [...members].sort((a, b) => {
-    const da = haversine(refLat, refLng, a.origin_lat, a.origin_lng);
-    const db = haversine(refLat, refLng, b.origin_lat, b.origin_lng);
+    const [aLat, aLng] = point === 'origin' ? [a.origin_lat, a.origin_lng] : [a.dest_lat, a.dest_lng];
+    const [bLat, bLng] = point === 'origin' ? [b.origin_lat, b.origin_lng] : [b.dest_lat, b.dest_lng];
+    const da = haversine(refLat, refLng, aLat, aLng);
+    const db = haversine(refLat, refLng, bLat, bLng);
     return da - db;
   });
 }

@@ -1,5 +1,6 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { getNumber } from '../../common/utils/env';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import type Redis from 'ioredis';
 import { REDIS } from '../../infra/redis/redis.module';
@@ -69,7 +70,7 @@ export class RideStateMachine {
     @Inject(ConfigService) config: ConfigService,
     @Inject(REDIS) private readonly redis: Redis,
   ) {
-    this.noShowWaitMs = config.get<number>('RIDE_NO_SHOW_WAIT_MS') ?? 300_000;
+    this.noShowWaitMs = getNumber(config, 'RIDE_NO_SHOW_WAIT_MS', 300_000, { integer: true, min: 0 });
   }
 
   async apply(rideId: string, driverId: string, event: string): Promise<RideApplyResult> {

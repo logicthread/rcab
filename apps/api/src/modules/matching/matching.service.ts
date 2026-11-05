@@ -1,5 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { getNumber } from '../../common/utils/env';
 import { RouteSimilarityService, type RouteInput } from './route-similarity.service';
 import { SharedRideRepository, type SharedRideRow } from './shared-ride.repository';
 import { PoolLifecycleService, type PoolStatus } from './pool-lifecycle.service';
@@ -46,9 +47,9 @@ export class MatchingService {
     private readonly lifecycle: PoolLifecycleService,
     @Inject(ConfigService) config: ConfigService,
   ) {
-    this.similarityThreshold = config.get<number>('MATCHING_SIMILARITY_THRESHOLD') ?? 0.7;
-    this.detourBudgetM       = config.get<number>('MATCHING_DETOUR_BUDGET_M')       ?? 800;
-    this.maxSeats            = config.get<number>('MATCHING_MAX_SEATS')             ?? 3;
+    this.similarityThreshold = getNumber(config, 'MATCHING_SIMILARITY_THRESHOLD', 0.7, { min: 0, max: 1 });
+    this.detourBudgetM       = getNumber(config, 'MATCHING_DETOUR_BUDGET_M', 800, { min: 0 });
+    this.maxSeats            = getNumber(config, 'MATCHING_MAX_SEATS', 3, { integer: true, min: 1 });
   }
 
   async findOrCreatePool(request: SharedRideRequest): Promise<MatchResult> {
