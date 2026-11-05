@@ -300,6 +300,75 @@ describe('computeStops', () => {
   });
 });
 
+describe('computeStops dropoff ordering (nearest-neighbour from last pickup)', () => {
+  // Everyone is picked up at the same spot; destinations run east at +1/+2/+3
+  // "steps". The anchor's destination (pool.dest) is the farthest one, so the
+  // old ascending-distance-from-pool.dest order drove 3 -> 2 -> 1 (backtracking).
+  const O = { origin_lat: 22.5727, origin_lng: 88.364 };
+  const at = (k: number) => ({ dest_lat: 22.5727, dest_lng: 88.364 + 0.01 * k });
+
+  it('visits dropoffs outward along the route instead of backtracking', () => {
+    const p = pool({
+      originLat: O.origin_lat,
+      originLng: O.origin_lng,
+      destLat: at(3).dest_lat,
+      destLng: at(3).dest_lng,
+      members: [
+        member({ passenger_id: 'c', ...O, ...at(3) }),
+        member({ passenger_id: 'a', ...O, ...at(1) }),
+        member({ passenger_id: 'b', ...O, ...at(2) }),
+      ],
+    });
+    const dropoffs = computeStops(p).filter((s) => s.type === 'dropoff');
+    expect(dropoffs.map((s) => s.passengerId)).toEqual(['a', 'b', 'c']);
+    expect(dropoffs.map((s) => s.sequenceIndex)).toEqual([3, 4, 5]);
+  });
+
+  it('starts from the LAST pickup, not the pool origin', () => {
+    // Two pickups; the last one (farthest from pool origin) is next to d2.
+    const p = pool({
+      originLat: 22.5,
+      originLng: 88.3,
+      members: [
+        member({
+          passenger_id: 'first',
+          origin_lat: 22.5,
+          origin_lng: 88.3,
+          dest_lat: 22.5,
+          dest_lng: 88.1,
+        }),
+        member({
+          passenger_id: 'last',
+          origin_lat: 22.5,
+          origin_lng: 88.5,
+          dest_lat: 22.5,
+          dest_lng: 88.7,
+        }),
+      ],
+    });
+    const stops = computeStops(p);
+    expect(stops.filter((s) => s.type === 'pickup').map((s) => s.passengerId)).toEqual([
+      'first',
+      'last',
+    ]);
+    // From 88.5: 'last' dest (88.7, 0.2 away) is nearer than 'first' dest (88.1, 0.4 away).
+    expect(stops.filter((s) => s.type === 'dropoff').map((s) => s.passengerId)).toEqual([
+      'last',
+      'first',
+    ]);
+  });
+
+  it('is deterministic regardless of member input order (ties break on passenger id)', () => {
+    const ms = ['x', 'y', 'z'].map((id) => member({ passenger_id: id, ...O, ...at(1) }));
+    const ids = (members: SharedRideMember[]) =>
+      computeStops(pool({ originLat: O.origin_lat, originLng: O.origin_lng, members }))
+        .filter((s) => s.type === 'dropoff')
+        .map((s) => s.passengerId);
+    expect(ids(ms)).toEqual(['x', 'y', 'z']);
+    expect(ids([...ms].reverse())).toEqual(['x', 'y', 'z']);
+  });
+});
+
 // ── dispatchPool / runWave ───────────────────────────────────────────────────
 
 describe('DispatchService.dispatchPool', () => {

@@ -98,7 +98,10 @@ export class DispatchService {
       k2: getNumber(config, 'DISPATCH_K2', 10, { integer: true, min: 1 }),
       r1Meters: getNumber(config, 'DISPATCH_R1_METERS', 2_000, { min: 1 }),
       r2Meters: getNumber(config, 'DISPATCH_R2_METERS', 4_000, { min: 1 }),
-      waveOneTimeoutMs: getNumber(config, 'DISPATCH_WAVE_ONE_TIMEOUT_MS', 30_000, { integer: true, min: 1 }),
+      waveOneTimeoutMs: getNumber(config, 'DISPATCH_WAVE_ONE_TIMEOUT_MS', 30_000, {
+        integer: true,
+        min: 1,
+      }),
       hardFailMs: getNumber(config, 'DISPATCH_HARD_FAIL_MS', 60_000, { integer: true, min: 1 }),
     };
   }
@@ -588,8 +591,14 @@ export class DispatchService {
 // ── Pure helpers ─────────────────────────────────────────────────────────────
 
 export function computeStops(pool: SharedRideRow): OfferStop[] {
-  const pickups = sortMembersByDistance(pool.members, pool.originLng, pool.originLat, 'origin');
-  const dropoffs = sortMembersByDistance(pool.members, pool.destLng, pool.destLat, 'dest');
+  const pickups = sortPickupsByDistance(pool.members, pool.originLng, pool.originLat);
+  // Dropoffs follow nearest-neighbour from the last pickup: the driver heads to
+  // the closest remaining destination each time instead of driving to the one
+  // nearest the anchor's destination first and backtracking.
+  const last = pickups[pickups.length - 1];
+  const dropoffs = last
+    ? orderDropoffsNearestNeighbour(pickups, last.origin_lat, last.origin_lng)
+    : [];
 
   const stops: OfferStop[] = [];
   let seq = 0;
@@ -614,31 +623,60 @@ export function computeStops(pool: SharedRideRow): OfferStop[] {
   return stops;
 }
 
-function sortMembersByDistance(
+function haversineM(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6_371_000;
+  const dPhi = ((lat2 - lat1) * Math.PI) / 180;
+  const dLam = ((lng2 - lng1) * Math.PI) / 180;
+  const phi1 = (lat1 * Math.PI) / 180;
+  const phi2 = (lat2 * Math.PI) / 180;
+  const a = Math.sin(dPhi / 2) ** 2 + Math.cos(phi1) * Math.cos(phi2) * Math.sin(dLam / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
+// Deterministic tie-break so equal distances never depend on input order.
+function byPassengerId(a: SharedRideMember, b: SharedRideMember): number {
+  return a.passenger_id < b.passenger_id ? -1 : a.passenger_id > b.passenger_id ? 1 : 0;
+}
+
+function sortPickupsByDistance(
   members: SharedRideMember[],
   refLng: number,
   refLat: number,
-  // Which of the member's coordinates to rank: pickups compare origins,
-  // dropoffs must compare destinations (F16).
-  point: 'origin' | 'dest',
 ): SharedRideMember[] {
-  const haversine = (lat1: number, lng1: number, lat2: number, lng2: number): number => {
-    const R = 6_371_000;
-    const dPhi = ((lat2 - lat1) * Math.PI) / 180;
-    const dLam = ((lng2 - lng1) * Math.PI) / 180;
-    const phi1 = (lat1 * Math.PI) / 180;
-    const phi2 = (lat2 * Math.PI) / 180;
-    const a = Math.sin(dPhi / 2) ** 2 + Math.cos(phi1) * Math.cos(phi2) * Math.sin(dLam / 2) ** 2;
-    return 2 * R * Math.asin(Math.sqrt(a));
-  };
-
   return [...members].sort((a, b) => {
-    const [aLat, aLng] = point === 'origin' ? [a.origin_lat, a.origin_lng] : [a.dest_lat, a.dest_lng];
-    const [bLat, bLng] = point === 'origin' ? [b.origin_lat, b.origin_lng] : [b.dest_lat, b.dest_lng];
-    const da = haversine(refLat, refLng, aLat, aLng);
-    const db = haversine(refLat, refLng, bLat, bLng);
-    return da - db;
+    const da = haversineM(refLat, refLng, a.origin_lat, a.origin_lng);
+    const db = haversineM(refLat, refLng, b.origin_lat, b.origin_lng);
+    return da - db || byPassengerId(a, b);
   });
+}
+
+// Greedy nearest-neighbour over the members' destinations, starting from the
+// last pickup (F16 follow-up).
+function orderDropoffsNearestNeighbour(
+  members: SharedRideMember[],
+  startLat: number,
+  startLng: number,
+): SharedRideMember[] {
+  const remaining = [...members].sort(byPassengerId);
+  const ordered: SharedRideMember[] = [];
+  let curLat = startLat;
+  let curLng = startLng;
+  while (remaining.length > 0) {
+    let best = 0;
+    let bestD = Infinity;
+    for (let i = 0; i < remaining.length; i++) {
+      const d = haversineM(curLat, curLng, remaining[i].dest_lat, remaining[i].dest_lng);
+      if (d < bestD) {
+        bestD = d;
+        best = i;
+      }
+    }
+    const [next] = remaining.splice(best, 1);
+    ordered.push(next);
+    curLat = next.dest_lat;
+    curLng = next.dest_lng;
+  }
+  return ordered;
 }
 
 function waveTimeoutJobId(rideId: string, _waveNumber: number): string {
