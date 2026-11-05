@@ -1,5 +1,5 @@
 {
-  "description": "Native (mobile) session contract for /v1/auth/native/*. No cookies, no CSRF: the refresh token travels in JSON and must be kept in secure storage. Every successful refresh rotates it; the previous value is single-use and presenting it again revokes the whole session. Asserted by apps/api/src/modules/auth/auth.controller.spec.ts and test/integration/auth.int.spec.ts.",
+  "description": "Native (mobile) session contract for /v1/auth/native/*. No cookies, no CSRF: the refresh token travels in JSON and must be kept in secure storage. Every successful refresh rotates it; the previous value is single-use and presenting it again more than 10 s after rotation revokes the whole session (within 10 s it is only rejected). Logout is possession-based: the refresh token in the body suffices. Asserted by apps/api/src/modules/auth/auth.controller.spec.ts and test/integration/auth.int.spec.ts.",
   "version": 1,
   "endpoints": {
     "firebase_exchange": {
@@ -50,13 +50,12 @@
       "method": "POST",
       "path": "/v1/auth/native/logout",
       "request": {
-        "headers": {
-          "Content-Type": "application/json",
-          "Authorization": "Bearer <access_token>"
-        },
+        "headers": { "Content-Type": "application/json" },
         "body": { "refresh_token": "OqELf-qUYjiWzhUJIQie43SpezX8MVBEW9cBuSNDeEE" }
       },
-      "response": { "status": 204, "body": null }
+      "auth": "possession of the refresh token; no Authorization header required (an expired access token must not block sign-out)",
+      "response": { "status": 204, "body": null },
+      "idempotent": "always 204 — unknown, already-revoked or expired tokens give the same answer"
     }
   },
   "errors": {
@@ -70,7 +69,8 @@
     },
     "invalid_refresh_token": {
       "status": 401,
-      "when": "unknown, expired, already used, or revoked; reusing a consumed token also revokes every token of that session — sign in again",
+      "when": "unknown, expired, already used, or revoked; reusing a token consumed more than reuse_grace_seconds ago also revokes every token of that session — sign in again. A concurrent/retried refresh within the window is only rejected (the winner's successor stays valid); no extra token is issued.",
+      "reuse_grace_seconds": 10,
       "body": { "error": { "code": "invalid_refresh_token", "message": "Refresh token is invalid, expired, or already used", "request_id": "<x-request-id>" } }
     },
     "account_disabled_on_refresh": {
@@ -81,14 +81,9 @@
       "status": 403,
       "body": { "error": { "code": "account_disabled", "message": "Account is not active", "request_id": "<x-request-id>" } }
     },
-    "unauthorized": {
-      "status": 401,
-      "when": "logout without a valid Bearer access token",
-      "body": { "error": { "code": "unauthorized", "message": "Invalid or expired token", "request_id": "<x-request-id>" } }
-    },
     "rate_limited": {
       "status": 429,
-      "when": "more than 10 firebase-exchange calls per minute per client",
+      "when": "more than 10 firebase-exchange (or 10 logout) calls per minute per client",
       "body": { "error": { "code": "rate_limited", "message": "ThrottlerException: Too Many Requests", "request_id": "<x-request-id>" } }
     }
   }

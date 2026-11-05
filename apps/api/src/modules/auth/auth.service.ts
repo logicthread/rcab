@@ -17,6 +17,16 @@ const PHONE_E164_RE = /^\+[1-9]\d{7,14}$/;
 const REFRESH_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const REFRESH_TOKEN_BYTES = 32;
 
+/**
+ * Reuse grace window (seconds). A token presented again within this long of
+ * being consumed/revoked is treated as a benign concurrent or retried refresh
+ * (e.g. two app requests racing, or a response lost in transit): it gets a 401
+ * but the family is NOT revoked, so the winner's freshly issued successor
+ * stays valid. No sibling token is minted — one family never has two live
+ * chains. Reuse after the window is replay and revokes the whole family.
+ */
+export const REFRESH_REUSE_GRACE_SECONDS = 10;
+
 /** app_user.status values that may not obtain or renew a session (F12). */
 export const BLOCKED_USER_STATUSES: readonly string[] = ['suspended', 'deleted'];
 
@@ -132,14 +142,18 @@ export class AuthService {
       );
 
       if (consumed.rows.length === 0) {
-        // Unknown, expired, or already used. A known token that is already
-        // revoked is a replay: revoke whatever is still live in its family.
+        // Unknown, expired, or already used. A known token revoked longer
+        // than the grace window ago is a replay: revoke whatever is still live
+        // in its family. Within the window it is a concurrent/retried refresh
+        // whose winner already holds the successor — reject without revoking.
         await client.query(
           `UPDATE auth_refresh_token SET revoked_at = now()
             WHERE revoked_at IS NULL
               AND family_id = (SELECT family_id FROM auth_refresh_token
-                                WHERE token_hash = $1 AND revoked_at IS NOT NULL)`,
-          [tokenHash],
+                                WHERE token_hash = $1
+                                  AND revoked_at IS NOT NULL
+                                  AND revoked_at <= now() - make_interval(secs => $2))`,
+          [tokenHash, REFRESH_REUSE_GRACE_SECONDS],
         );
         outcome = invalidRefresh('Refresh token is invalid, expired, or already used');
       } else {
@@ -169,6 +183,19 @@ export class AuthService {
 
     if (outcome instanceof UnauthorizedException) throw outcome;
     return outcome;
+  }
+
+  /**
+   * Possession-based revocation for native logout: holding the refresh token
+   * is the credential, so no access token (which may have expired while the
+   * app idled) is required. Idempotent and silent — the caller cannot learn
+   * whether the token existed.
+   */
+  async revokePresented(refreshToken: string): Promise<void> {
+    await this.pool.query(
+      'UPDATE auth_refresh_token SET revoked_at = now() WHERE token_hash = $1 AND revoked_at IS NULL',
+      [hashRefreshToken(refreshToken)],
+    );
   }
 
   async revoke(refreshToken: string, userId: string): Promise<void> {

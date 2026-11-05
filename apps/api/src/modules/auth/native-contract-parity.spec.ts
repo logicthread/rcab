@@ -60,7 +60,11 @@ describe('native auth contract parity: API fixture vs driver-app fixture', () =>
     expect(mobileContract.refresh.reuse_status).toBe(apiContract.errors.invalid_refresh_token.status);
   });
 
-  it('logout: path, method, bearer header, body and 204 match the API', () => {
+  it('refresh: both sides agree on the reuse grace window', () => {
+    expect(apiContract.errors.invalid_refresh_token.reuse_grace_seconds).toBe(10);
+  });
+
+  it('logout: path, method, body and 204 match the API; possession-based, no bearer header', () => {
     const a = api.logout;
     const m = mobileContract.logout;
 
@@ -68,9 +72,10 @@ describe('native auth contract parity: API fixture vs driver-app fixture', () =>
     expect(m.method).toBe(a.method);
     expect(shapeOf(m.request)).toEqual(shapeOf(a.request.body));
     expect(m.response_status).toBe(a.response.status);
-    // The mobile fixture lists only the headers its test asserts on (Authorization).
-    expect(headerNames(a.request.headers)).toContain('authorization');
-    expect(headerNames(m.headers)).toEqual(['authorization']);
-    expect(String(m.headers.Authorization)).toMatch(/^Bearer \S+$/);
+    // An expired access token must not block sign-out: neither side may
+    // require (or send) Authorization on native logout.
+    expect(headerNames(a.request.headers)).not.toContain('authorization');
+    expect(headerNames(m.headers)).toEqual([]);
+    expect(apiContract.errors.unauthorized).toBeUndefined();
   });
 });

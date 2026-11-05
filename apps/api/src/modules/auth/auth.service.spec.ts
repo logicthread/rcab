@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { UnauthorizedException, ConflictException, ForbiddenException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { createHash } from 'node:crypto';
-import { AuthService, hashRefreshToken } from './auth.service';
+import { AuthService, hashRefreshToken, REFRESH_REUSE_GRACE_SECONDS } from './auth.service';
 import { FirebaseAdminService } from '../../infra/firebase/firebase-admin.service';
 import { GoogleVerifierService } from '../../infra/google/google-verifier.service';
 import type { auth } from 'firebase-admin';
@@ -324,11 +324,29 @@ describe('AuthService', () => {
       );
       expect(familyRevoke).toBeDefined();
       expect(String(familyRevoke![0])).toContain('revoked_at IS NOT NULL');
-      expect(familyRevoke![1]).toEqual([sha256('used-token')]);
+      expect(familyRevoke![1]).toEqual([sha256('used-token'), REFRESH_REUSE_GRACE_SECONDS]);
       // The family revocation must be committed, not rolled back with the 401.
       expect(sqlCalls()).toContain('COMMIT');
       expect(sqlCalls()).not.toContain('ROLLBACK');
       expect(insertCall(mockClientQuery.mock.calls)).toBeUndefined();
+    });
+
+    it('family revocation only fires for reuse OLDER than the 10 s grace window (concurrent refresh safe)', async () => {
+      stubTransaction([]);
+
+      await expect(service.refresh('raced-token')).rejects.toBeInstanceOf(UnauthorizedException);
+
+      expect(REFRESH_REUSE_GRACE_SECONDS).toBe(10);
+      const familyRevoke = mockClientQuery.mock.calls.find(
+        (c) => String(c[0]).includes('family_id = (SELECT family_id'),
+      );
+      // The replay predicate is gated on the age of the revocation, so a loser
+      // of a concurrent refresh (revoked milliseconds ago) never kills the
+      // winner's successor.
+      expect(String(familyRevoke![0])).toMatch(/revoked_at <= now\(\) - make_interval\(secs => \$2\)/);
+      // And no sibling token is minted for the loser.
+      expect(insertCall(mockClientQuery.mock.calls)).toBeUndefined();
+      expect(mockJwt.sign).not.toHaveBeenCalled();
     });
 
     it.each(['suspended', 'deleted'])('%s account → 401 account_disabled and all its tokens revoked', async (status) => {
@@ -355,6 +373,26 @@ describe('AuthService', () => {
       expect(sqlCalls()).toContain('ROLLBACK');
       expect(sqlCalls()).not.toContain('COMMIT');
       expect(mockClientRelease).toHaveBeenCalled();
+    });
+  });
+
+  describe('revokePresented (native logout, possession-based)', () => {
+    it('revokes the live token by digest only — no user id needed', async () => {
+      mockPoolQuery.mockResolvedValueOnce({ rowCount: 1 });
+
+      await service.revokePresented('some-token');
+
+      expect(mockPoolQuery).toHaveBeenCalledTimes(1);
+      const [sql, params] = mockPoolQuery.mock.calls[0];
+      expect(sql).toContain('UPDATE auth_refresh_token SET revoked_at = now()');
+      expect(sql).toContain('WHERE token_hash = $1 AND revoked_at IS NULL');
+      expect(sql).not.toContain('user_id');
+      expect(params).toEqual([sha256('some-token')]);
+    });
+
+    it('resolves silently when the token is unknown or already revoked', async () => {
+      mockPoolQuery.mockResolvedValueOnce({ rowCount: 0 });
+      await expect(service.revokePresented('nonexistent')).resolves.toBeUndefined();
     });
   });
 

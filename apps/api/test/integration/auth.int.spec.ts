@@ -613,6 +613,14 @@ async function nativeLogin(): Promise<{ access_token: string; refresh_token: str
   return res.body;
 }
 
+/** Moves a token's revocation outside the reuse grace window (default 10 s). */
+async function ageRevocation(refreshToken: string, seconds = 11): Promise<void> {
+  await pool.query(
+    "UPDATE auth_refresh_token SET revoked_at = revoked_at - make_interval(secs => $2) WHERE token_hash = $1",
+    [sha256(refreshToken), seconds],
+  );
+}
+
 describe.skipIf(skip)('native contract (F02)', () => {
   it('exchange → 200 with refresh_token in JSON, no cookie, shape matches the fixture', async () => {
     const uid = randomUUID();
@@ -671,6 +679,62 @@ describe.skipIf(skip)('native contract (F02)', () => {
     expect(after.status).toBe(401);
   });
 
+  it('logout is possession-based: no Bearer header → 204 and the token is revoked', async () => {
+    const login = await nativeLogin();
+
+    const logout = await supertest(app.getHttpServer())
+      .post('/v1/auth/native/logout')
+      .send({ refresh_token: login.refresh_token });
+    expect(logout.status).toBe(204);
+
+    const row = await pool.query<{ revoked_at: Date | null }>(
+      'SELECT revoked_at FROM auth_refresh_token WHERE token_hash = $1',
+      [sha256(login.refresh_token)],
+    );
+    expect(row.rows[0].revoked_at).not.toBeNull();
+
+    const after = await supertest(app.getHttpServer())
+      .post('/v1/auth/native/refresh')
+      .send({ refresh_token: login.refresh_token });
+    expect(after.status).toBe(401);
+  });
+
+  it('logout after the access token expired (15-min idle) still revokes the session', async () => {
+    const login = await nativeLogin();
+    // A correctly signed access token that lapsed a minute ago.
+    const expired = moduleRef
+      .get(JwtService)
+      .sign(
+        { sub: login.user.id, role: 'driver', auth_method: 'phone', typ: 'access' },
+        { issuer: 'rcab', audience: 'rcab-api', expiresIn: -60 },
+      );
+    const guarded = await supertest(app.getHttpServer())
+      .post('/v1/auth/google/link')
+      .set('Authorization', `Bearer ${expired}`)
+      .send({ google_id_token: 'g' });
+    expect(guarded.status).toBe(401); // really expired
+
+    const logout = await supertest(app.getHttpServer())
+      .post('/v1/auth/native/logout')
+      .set('Authorization', `Bearer ${expired}`)
+      .send({ refresh_token: login.refresh_token });
+    expect(logout.status).toBe(204);
+
+    const after = await supertest(app.getHttpServer())
+      .post('/v1/auth/native/refresh')
+      .send({ refresh_token: login.refresh_token });
+    expect(after.status).toBe(401);
+  });
+
+  it('logout is idempotent and leaks nothing: unknown / repeated tokens → 204', async () => {
+    const login = await nativeLogin();
+    for (const token of [login.refresh_token, login.refresh_token, 'never-issued-token']) {
+      const res = await supertest(app.getHttpServer()).post('/v1/auth/native/logout').send({ refresh_token: token });
+      expect(res.status).toBe(204);
+      expect(res.text).toBe('');
+    }
+  });
+
   it('refresh never reads the cookie (400 without a body token)', async () => {
     const res = await supertest(app.getHttpServer())
       .post('/v1/auth/native/refresh')
@@ -703,14 +767,50 @@ describe.skipIf(skip)('refresh rotation (F12)', () => {
 
     const minted = await pool.query('SELECT 1 FROM auth_refresh_token WHERE family_id = $1', [familyId]);
     expect(minted.rows).toHaveLength(2); // the original + exactly one child
+
+    // The losers must not have revoked the family: the winner's successor works.
+    const winner = results.find((r) => r.status === 200)!;
+    const next = await supertest(app.getHttpServer())
+      .post('/v1/auth/native/refresh')
+      .send({ refresh_token: winner.body.refresh_token });
+    expect(next.status).toBe(200);
   });
 
-  it('reusing a consumed token revokes the whole family, including its live successor', async () => {
+  it('a retried refresh within the grace window → 401, but the successor stays valid and no sibling is minted', async () => {
     const login = await nativeLogin();
     const rotated = await supertest(app.getHttpServer())
       .post('/v1/auth/native/refresh')
       .send({ refresh_token: login.refresh_token });
     expect(rotated.status).toBe(200);
+
+    const retry = await supertest(app.getHttpServer())
+      .post('/v1/auth/native/refresh')
+      .send({ refresh_token: login.refresh_token });
+    expect(retry.status).toBe(401);
+    expect(retry.body.error.code).toBe('invalid_refresh_token');
+    expect(retry.body.refresh_token).toBeUndefined();
+
+    const live = await pool.query(
+      `SELECT 1 FROM auth_refresh_token
+        WHERE revoked_at IS NULL
+          AND family_id = (SELECT family_id FROM auth_refresh_token WHERE token_hash = $1)`,
+      [sha256(login.refresh_token)],
+    );
+    expect(live.rows).toHaveLength(1); // only the winner's successor
+
+    const successor = await supertest(app.getHttpServer())
+      .post('/v1/auth/native/refresh')
+      .send({ refresh_token: rotated.body.refresh_token });
+    expect(successor.status).toBe(200);
+  });
+
+  it('reusing a consumed token after the grace window revokes the whole family, including its live successor', async () => {
+    const login = await nativeLogin();
+    const rotated = await supertest(app.getHttpServer())
+      .post('/v1/auth/native/refresh')
+      .send({ refresh_token: login.refresh_token });
+    expect(rotated.status).toBe(200);
+    await ageRevocation(login.refresh_token);
 
     const replay = await supertest(app.getHttpServer())
       .post('/v1/auth/native/refresh')
@@ -732,6 +832,7 @@ describe.skipIf(skip)('refresh rotation (F12)', () => {
     const deviceB = (await supertest(app.getHttpServer()).post('/v1/auth/native/firebase-exchange').send({ id_token: 'b' })).body;
 
     await supertest(app.getHttpServer()).post('/v1/auth/native/refresh').send({ refresh_token: deviceA.refresh_token });
+    await ageRevocation(deviceA.refresh_token);
     await supertest(app.getHttpServer()).post('/v1/auth/native/refresh').send({ refresh_token: deviceA.refresh_token });
 
     const b = await supertest(app.getHttpServer()).post('/v1/auth/native/refresh').send({ refresh_token: deviceB.refresh_token });
@@ -934,6 +1035,16 @@ describe.skipIf(skip)('rate limiting', () => {
     const throttled = await supertest(server)
       .post('/v1/auth/native/firebase-exchange')
       .send({ id_token: 'native-token-10' });
+    expect(throttled.status).toBe(429);
+  });
+
+  it('throttles the unauthenticated native logout (10/min)', async () => {
+    const server = throttleApp.getHttpServer();
+    for (let i = 0; i < 10; i++) {
+      const res = await supertest(server).post('/v1/auth/native/logout').send({ refresh_token: `guess-${i}` });
+      expect(res.status).toBe(204);
+    }
+    const throttled = await supertest(server).post('/v1/auth/native/logout').send({ refresh_token: 'guess-10' });
     expect(throttled.status).toBe(429);
   });
 });

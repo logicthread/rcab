@@ -240,12 +240,59 @@ void main() {
                 ),
               ).captured.single
               as Options;
-      expect(captured.headers, (_logout['headers'] as Map<String, dynamic>));
+      // Possession-based logout: the contract lists no required headers and
+      // the client sends no Bearer token (an expired one must not block it).
+      expect(_logout['headers'] as Map<String, dynamic>, isEmpty);
+      expect(captured.headers ?? const {}, isNot(contains('Authorization')));
       verify(() => mockFb.signOut()).called(1);
       expect(notifier.state, isA<AuthStateUnauthenticated>());
       expect(await store.getJwt(), isNull);
       expect(await store.getRefresh(), isNull);
     });
+
+    test(
+      'no access token stored (expired/idle): still revokes via refresh token',
+      () async {
+        final store = _FakeTokenStore();
+        final mockFb = MockFirebaseAuth();
+        final mockDio = MockDio();
+        final notifier = _makeNotifier(
+          store: store,
+          firebaseAuth: mockFb,
+          dio: mockDio,
+        );
+        notifier.state = const AuthStateAuthenticated(userId: 'u1');
+
+        when(() => mockFb.signOut()).thenAnswer((_) async {});
+        when(
+          () => mockDio.post<dynamic>(
+            any(),
+            data: any(named: 'data'),
+            options: any(named: 'options'),
+          ),
+        ).thenAnswer(
+          (_) async => Response<dynamic>(
+            statusCode: 204,
+            requestOptions: RequestOptions(path: _logout['path'] as String),
+          ),
+        );
+        // Only the refresh token survives (e.g. the JWT slot was wiped).
+        await store.saveTokens(jwt: 'unused', refresh: 'refresh-only');
+        store._data.remove('rcab_jwt');
+
+        await notifier.signOut();
+
+        verify(
+          () => mockDio.post<dynamic>(
+            _logout['path'] as String,
+            data: {'refresh_token': 'refresh-only'},
+            options: any(named: 'options'),
+          ),
+        ).called(1);
+        expect(await store.getRefresh(), isNull);
+        expect(notifier.state, isA<AuthStateUnauthenticated>());
+      },
+    );
 
     test('offline: logout failure still clears local tokens', () async {
       final store = _FakeTokenStore();

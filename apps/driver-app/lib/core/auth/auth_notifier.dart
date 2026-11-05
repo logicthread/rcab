@@ -55,13 +55,15 @@ class AuthNotifier extends StateNotifier<AuthState> {
   /// Signs out: best-effort server-side revocation, then always clears the
   /// device (secure storage + Firebase), even when offline.
   ///
+  /// Native logout is possession-based: the refresh token in the body is the
+  /// only credential, so sign-out still revokes the session after the access
+  /// token has expired (e.g. the app idled > 15 min). No Bearer header is sent.
+  ///
   /// Server revocation is only guaranteed when the device is online; an
   /// offline sign-out leaves the refresh token valid server-side until expiry.
   Future<void> signOut() async {
-    String? access;
     String? refresh;
     try {
-      access = await _tokenStore.getJwt();
       refresh = await _tokenStore.getRefresh();
     } catch (_) {}
 
@@ -71,13 +73,13 @@ class AuthNotifier extends StateNotifier<AuthState> {
           NativeAuthContract.logoutPath,
           data: {'refresh_token': refresh},
           options: Options(
-            headers: {if (access != null) 'Authorization': 'Bearer $access'},
             sendTimeout: const Duration(seconds: 5),
             receiveTimeout: const Duration(seconds: 5),
           ),
         );
       } catch (_) {
-        // Best effort: offline, expired access token, or already revoked.
+        // Best effort: offline or server error. The server always answers
+        // 204 for a well-formed body, even for an unknown/revoked token.
       }
     }
 

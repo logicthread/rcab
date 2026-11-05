@@ -91,14 +91,17 @@ export class AuthController {
     return this.auth.refresh(dto.refresh_token);
   }
 
+  /**
+   * Possession-based: the refresh token in the body is the credential, so a
+   * sign-out after the 15-min access token lapsed still revokes the session.
+   * No AuthGuard; any Authorization header is ignored. Always 204 (idempotent,
+   * no token-existence oracle); throttled like the exchange.
+   */
   @Post('native/logout')
-  @UseGuards(AuthGuard)
   @HttpCode(204)
-  async nativeLogout(
-    @Req() req: Request & { user: JwtPayload },
-    @Body() dto: NativeRefreshTokenDto,
-  ): Promise<void> {
-    await this.auth.revoke(dto.refresh_token, req.user.sub);
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  async nativeLogout(@Body() dto: NativeRefreshTokenDto): Promise<void> {
+    await this.auth.revokePresented(dto.refresh_token);
   }
 
   @Post('google/link')

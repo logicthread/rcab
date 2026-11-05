@@ -35,7 +35,7 @@
   "logout": {
     "method": "POST",
     "path": "/v1/auth/native/logout",
-    "headers": { "Authorization": "Bearer access.jwt.one" },
+    "headers": {},
     "request": { "refresh_token": "refresh-one" },
     "response_status": 204
   }

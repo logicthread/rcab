@@ -72,6 +72,7 @@ describe('AuthController', () => {
     exchangeFirebaseToken: vi.fn(),
     refresh: vi.fn(),
     revoke: vi.fn(),
+    revokePresented: vi.fn(),
     linkGoogle: vi.fn(),
     loginWithGoogle: vi.fn(),
   };
@@ -174,30 +175,48 @@ describe('AuthController', () => {
       expect(res.body.error.code).toBe('invalid_refresh_token');
     });
 
-    it('logout: 204 and revokes the body token for the bearer user', async () => {
-      auth.revoke.mockResolvedValue(undefined);
+    it('logout: 204 and revokes the body token by possession — no Bearer needed', async () => {
+      auth.revokePresented.mockResolvedValue(undefined);
 
-      const res = await supertest(app.getHttpServer())
-        .post(logout.path)
-        .set('Authorization', bearer)
-        .send(logout.request.body);
+      const res = await supertest(app.getHttpServer()).post(logout.path).send(logout.request.body);
 
       expect(res.status).toBe(logout.response.status);
       expect(res.text).toBe('');
-      expect(auth.revoke).toHaveBeenCalledWith(logout.request.body.refresh_token, 'user-1');
+      expect(auth.revokePresented).toHaveBeenCalledWith(logout.request.body.refresh_token);
+      expect(auth.revoke).not.toHaveBeenCalled();
     });
 
-    it('logout: requires a Bearer access token', async () => {
-      const res = await supertest(app.getHttpServer()).post(logout.path).send(logout.request.body);
-      expect(res.status).toBe(401);
-      expect(res.body.error.code).toBe('unauthorized');
-      expect(auth.revoke).not.toHaveBeenCalled();
+    it('logout: an expired / garbage Bearer header does not block sign-out', async () => {
+      auth.revokePresented.mockResolvedValue(undefined);
+      const expired = jwt.sign({
+        sub: 'user-1',
+        role: 'driver',
+        auth_method: 'phone',
+        typ: 'access',
+        exp: Math.floor(Date.now() / 1000) - 60,
+      });
+
+      for (const header of [`Bearer ${expired}`, 'Bearer not-a-jwt']) {
+        const res = await supertest(app.getHttpServer())
+          .post(logout.path)
+          .set('Authorization', header)
+          .send(logout.request.body);
+        expect(res.status).toBe(204);
+      }
+      expect(auth.revokePresented).toHaveBeenCalledTimes(2);
+    });
+
+    it('logout: also 204 when the token is unknown or already revoked (no oracle)', async () => {
+      auth.revokePresented.mockResolvedValue(undefined);
+      const res = await supertest(app.getHttpServer()).post(logout.path).send({ refresh_token: 'never-issued' });
+      expect(res.status).toBe(204);
+      expect(res.text).toBe('');
     });
 
     it('logout: requires refresh_token in the body', async () => {
-      const res = await supertest(app.getHttpServer()).post(logout.path).set('Authorization', bearer).send({});
+      const res = await supertest(app.getHttpServer()).post(logout.path).send({});
       expect(res.status).toBe(400);
-      expect(auth.revoke).not.toHaveBeenCalled();
+      expect(auth.revokePresented).not.toHaveBeenCalled();
     });
   });
 

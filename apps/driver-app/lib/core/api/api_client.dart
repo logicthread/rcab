@@ -47,7 +47,11 @@ class _RefreshResult {
   final String? accessToken;
 
   /// True when the failure was network/5xx: the session is kept so a later
-  /// request can try again (the refresh token was not consumed or is unknown).
+  /// request can try again. The refresh token MAY already have been consumed
+  /// (the server rotated it but the response was lost). A retry within the
+  /// server's 10 s reuse-grace window then gets a plain 401 (no family
+  /// revocation) and the user signs in again; a retry after the window is
+  /// treated as replay and revokes the session — either way, sign-in.
   final bool transientFailure;
 }
 
@@ -149,6 +153,8 @@ class JwtRefreshInterceptor extends Interceptor {
     } on DioException catch (e) {
       final status = e.response?.statusCode;
       if (status == null || status >= 500) {
+        // Keep the session, but the token may have been consumed server-side
+        // (see [_RefreshResult.transientFailure]); a later retry can 401.
         return const _RefreshResult.transient();
       }
       await _signOutIfUnchanged(refresh);
