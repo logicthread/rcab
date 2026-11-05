@@ -9,7 +9,12 @@ import type {
   IdempotencyScope,
 } from './idempotency.repository';
 import type { JwtPayload } from '../../common/guards/auth.guard';
-import { IdempotencyOperation, parseIdempotencyKey, requestFingerprint } from './idempotency';
+import {
+  IdempotencyOperation,
+  PENDING_RECLAIM_AFTER_MS,
+  parseIdempotencyKey,
+  requestFingerprint,
+} from './idempotency';
 
 /**
  * F07 / F15 (R05) — account-scoped, fingerprint-bound idempotency for ride
@@ -77,13 +82,30 @@ class FakeRidesStore {
 /** In-memory `idempotency_record` with its (principal, operation, key) PK. */
 class FakeIdempotencyStore {
   private readonly records = new Map<string, IdempotencyRecordRow>();
+  private readonly startedAt = new Map<string, number>();
+  /** Test hook: pretend the pending claim for `s` was made `ageMs` ago. */
+  age(s: IdempotencyScope, ageMs: number) {
+    this.startedAt.set(this.k(s), Date.now() - ageMs);
+  }
   private k(s: IdempotencyScope) {
     return `${s.principalId}|${s.operation}|${s.key}`;
   }
 
   readonly claim = vi.fn(async (s: IdempotencyScope, fp: string): Promise<IdempotencyClaim> => {
     const hit = this.records.get(this.k(s));
-    if (hit) return { kind: 'existing', record: { ...hit } };
+    if (hit) {
+      const began = this.startedAt.get(this.k(s)) ?? Date.now();
+      if (
+        hit.state === 'pending' &&
+        hit.requestFingerprint === fp &&
+        Date.now() - began >= PENDING_RECLAIM_AFTER_MS
+      ) {
+        this.startedAt.set(this.k(s), Date.now());
+        return { kind: 'reclaimed', previousAttemptAt: new Date(began) };
+      }
+      return { kind: 'existing', record: { ...hit } };
+    }
+    this.startedAt.set(this.k(s), Date.now());
     this.records.set(this.k(s), {
       requestFingerprint: fp,
       state: 'pending',
@@ -132,6 +154,7 @@ function rideRow(o: Partial<RideRow>): RideRow {
   };
 }
 
+const membership = vi.fn();
 function harness(stores?: { rides: FakeRidesStore; idem: FakeIdempotencyStore }) {
   const rides = stores?.rides ?? new FakeRidesStore();
   const idem = stores?.idem ?? new FakeIdempotencyStore();
@@ -153,7 +176,7 @@ function harness(stores?: { rides: FakeRidesStore; idem: FakeIdempotencyStore })
     {} as never,
     {} as never,
     quoteToken as never,
-    rides as never,
+    Object.assign(rides, { findRecentPoolMembership: membership }) as never,
     {} as never,
     { joinRide: vi.fn().mockResolvedValue(undefined) } as never,
     events as never,
@@ -169,6 +192,8 @@ const normal = (o: object = {}) =>
 const shared = (o: object = {}) => ({ type: RideType.Shared, ...ROUTE, ...o }) as never;
 const scheduledDto = (scheduledFor: string, o: object = {}) =>
   ({ type: RideType.Scheduled, ...ROUTE, quoteToken: QUOTE, scheduledFor, ...o }) as never;
+
+beforeEach(() => membership.mockReset().mockResolvedValue(null));
 
 describe('ride create idempotency — account scope (F07)', () => {
   it("another account's identical key never replays the first account's ride", async () => {
@@ -216,11 +241,27 @@ describe('ride create idempotency — account scope (F07)', () => {
       status: 422,
       response: { code: 'idempotency_key_conflict' },
     });
-    // A re-quote (new token) under the old key is also a different intent.
-    await expect(
-      h.ctrl.create(as(ALICE), normal({ quoteToken: 'requoted.tok' }), 'k1'),
-    ).rejects.toMatchObject({ response: { code: 'idempotency_key_conflict' } });
     expect(h.rides.create).toHaveBeenCalledTimes(1);
+    expect(h.events.emit).toHaveBeenCalledTimes(1);
+  });
+
+  it('same key + same route + a re-quoted token replays the original ride (no second booking)', async () => {
+    const h = harness();
+    const r1 = (await h.ctrl.create(as(ALICE), normal(), 'k1')) as { rideId: string };
+    // Lost response → client re-quotes → retries under the SAME key, new token
+    // (even one that would no longer verify: replay is resolved first).
+    h.quoteToken.verify.mockImplementation(() => {
+      throw Object.assign(new Error('bad'), { name: 'JsonWebTokenError' });
+    });
+    const retry = (await h.ctrl.create(
+      as(ALICE),
+      normal({ quoteToken: 'requoted.tok' }),
+      'k1',
+    )) as {
+      rideId: string;
+    };
+    expect(retry.rideId).toBe(r1.rideId);
+    expect(h.rides.rowCount()).toBe(1);
     expect(h.events.emit).toHaveBeenCalledTimes(1);
   });
 
@@ -288,6 +329,21 @@ describe('ride create idempotency — account scope (F07)', () => {
         rideId: string;
       };
       expect(replay.rideId).toBe(original.rideId);
+      expect(h.scheduled.scheduleWake).toHaveBeenCalledTimes(1);
+    });
+
+    it('same key + same slot + a re-quoted token replays the scheduled booking', async () => {
+      const h = harness();
+      const when = new Date(Date.now() + 2 * 3600_000).toISOString();
+      const first = (await h.ctrl.create(as(ALICE), scheduledDto(when), 'k1')) as {
+        rideId: string;
+      };
+      const retry = (await h.ctrl.create(
+        as(ALICE),
+        scheduledDto(when, { quoteToken: 'requoted.tok' }),
+        'k1',
+      )) as { rideId: string };
+      expect(retry.rideId).toBe(first.rideId);
       expect(h.scheduled.scheduleWake).toHaveBeenCalledTimes(1);
     });
 
@@ -362,6 +418,72 @@ describe('shared create idempotency (F15)', () => {
     expect(h.idem.release).toHaveBeenCalledTimes(1);
   });
 
+  const scopeOf = (sub: string, key: string) => ({
+    principalId: sub,
+    operation: IdempotencyOperation.Shared,
+    key,
+  });
+
+  it('a pending claim younger than the bound still 409s', async () => {
+    h.idem.complete.mockRejectedValue(new Error('db blip'));
+    await h.ctrl.create(as(ALICE), shared(), 'sk'); // complete() fails → stays pending
+    h.idem.age(scopeOf(ALICE, 'sk'), PENDING_RECLAIM_AFTER_MS - 5_000);
+    await expect(h.ctrl.create(as(ALICE), shared(), 'sk')).rejects.toMatchObject({
+      status: 409,
+      response: { code: 'idempotency_request_in_progress' },
+    });
+  });
+
+  it('a stale pending claim is reclaimed and re-allocates when no seat was taken', async () => {
+    h.idem.complete.mockRejectedValue(new Error('db blip'));
+    await h.ctrl.create(as(ALICE), shared(), 'sk');
+    h.idem.complete.mockReset();
+    h.idem.age(scopeOf(ALICE, 'sk'), PENDING_RECLAIM_AFTER_MS + 1_000);
+
+    const retry = (await h.ctrl.create(as(ALICE), shared(), 'sk')) as { sharedRideId: string };
+    expect(membership).toHaveBeenCalledTimes(1);
+    expect(retry.sharedRideId).toBe('pool-2'); // nothing held → fresh allocation
+    expect(h.matching.findOrCreatePool).toHaveBeenCalledTimes(2);
+    // …and the record is now completed, so a further retry replays it.
+    await expect(h.ctrl.create(as(ALICE), shared(), 'sk')).resolves.toEqual(retry);
+    expect(h.matching.findOrCreatePool).toHaveBeenCalledTimes(2);
+  });
+
+  it('a stale pending claim returns the seat the dead attempt already took (no second seat)', async () => {
+    h.idem.complete.mockRejectedValue(new Error('db blip'));
+    await h.ctrl.create(as(ALICE), shared(), 'sk'); // allocated pool-1, record stuck pending
+    h.idem.complete.mockReset();
+    h.idem.age(scopeOf(ALICE, 'sk'), PENDING_RECLAIM_AFTER_MS + 1_000);
+    membership.mockResolvedValueOnce({
+      sharedRideId: 'pool-1',
+      poolState: 'open',
+      opened: true,
+    });
+
+    const retry = await h.ctrl.create(as(ALICE), shared(), 'sk');
+    expect(retry).toMatchObject({ sharedRideId: 'pool-1', mode: 'opened', passengerId: ALICE });
+    expect(h.matching.findOrCreatePool).toHaveBeenCalledTimes(1);
+    expect(h.idem.complete).toHaveBeenCalledTimes(1);
+  });
+
+  it('a stale claim with a different fingerprint is a 422, never reclaimed', async () => {
+    h.idem.complete.mockRejectedValue(new Error('db blip'));
+    await h.ctrl.create(as(ALICE), shared(), 'sk');
+    h.idem.age(scopeOf(ALICE, 'sk'), PENDING_RECLAIM_AFTER_MS + 1_000);
+    await expect(h.ctrl.create(as(ALICE), shared({ destLat: 26.3 }), 'sk')).rejects.toMatchObject({
+      response: { code: 'idempotency_key_conflict' },
+    });
+    expect(h.matching.findOrCreatePool).toHaveBeenCalledTimes(1);
+  });
+
+  it('a transient complete() failure is retried and the record still completes', async () => {
+    h.idem.complete.mockRejectedValueOnce(new Error('blip'));
+    const first = await h.ctrl.create(as(ALICE), shared(), 'sk');
+    expect(h.idem.complete).toHaveBeenCalledTimes(2);
+    await expect(h.ctrl.create(as(ALICE), shared(), 'sk')).resolves.toEqual(first);
+    expect(h.matching.findOrCreatePool).toHaveBeenCalledTimes(1);
+  });
+
   it('without a key the legacy (non-idempotent) path still works', async () => {
     await h.ctrl.create(as(ALICE), shared(), undefined);
     expect(h.idem.claim).not.toHaveBeenCalled();
@@ -381,7 +503,7 @@ describe('idempotency helpers', () => {
 
   it('normalises coordinates and instants so equivalent bodies match', () => {
     const op = IdempotencyOperation.Scheduled;
-    const base = { ...ROUTE, quoteToken: QUOTE, scheduledFor: '2026-11-05T10:00:00Z' };
+    const base = { ...ROUTE, scheduledFor: '2026-11-05T10:00:00Z' };
     expect(
       requestFingerprint(op, {
         ...base,
@@ -394,10 +516,15 @@ describe('idempotency helpers', () => {
     );
   });
 
-  it('shared fingerprints ignore the (unused) quote token', () => {
-    const op = IdempotencyOperation.Shared;
-    expect(requestFingerprint(op, { ...ROUTE, quoteToken: 'a' })).toBe(
-      requestFingerprint(op, ROUTE),
+  it('the quote token is not part of the fingerprint; the operation and route are', () => {
+    for (const op of [IdempotencyOperation.Solo, IdempotencyOperation.Scheduled]) {
+      const dto = { ...ROUTE, scheduledFor: '2026-11-05T10:00:00Z' };
+      expect(requestFingerprint(op, { ...dto, quoteToken: 'a' } as never)).toBe(
+        requestFingerprint(op, { ...dto, quoteToken: 'b' } as never),
+      );
+    }
+    expect(requestFingerprint(IdempotencyOperation.Solo, ROUTE)).not.toBe(
+      requestFingerprint(IdempotencyOperation.Shared, ROUTE),
     );
   });
 });

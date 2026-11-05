@@ -1,8 +1,8 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { DRIZZLE_DB, type DrizzleDb } from '../../infra/db/drizzle.module';
 import { idempotencyRecord } from '../../db/schema';
-import type { IdempotencyOperation } from './idempotency';
+import { PENDING_RECLAIM_AFTER_MS, type IdempotencyOperation } from './idempotency';
 
 export interface IdempotencyScope {
   principalId: string;
@@ -19,6 +19,13 @@ export interface IdempotencyRecordRow {
 
 export type IdempotencyClaim =
   | { kind: 'claimed' }
+  /**
+   * A stale `pending` claim with the same fingerprint was taken over. The side
+   * effect may or may not have happened under the previous attempt (which
+   * started at `previousAttemptAt`), so the caller must look for its result
+   * before repeating it.
+   */
+  | { kind: 'reclaimed'; previousAttemptAt: Date }
   | { kind: 'existing'; record: IdempotencyRecordRow };
 
 /**
@@ -46,6 +53,9 @@ export class IdempotencyRepository {
       .returning({ key: idempotencyRecord.idempotencyKey });
     if (inserted.length > 0) return { kind: 'claimed' };
 
+    const reclaimed = await this.reclaimStale(scope, requestFingerprint);
+    if (reclaimed) return { kind: 'reclaimed', previousAttemptAt: reclaimed };
+
     const existing = await this.find(scope);
     if (!existing) {
       // Released between our INSERT and SELECT — treat as still in flight; the
@@ -56,6 +66,36 @@ export class IdempotencyRepository {
       };
     }
     return { kind: 'existing', record: existing };
+  }
+
+  /**
+   * Compare-and-swap takeover of an abandoned claim: only a `pending` row with
+   * the SAME fingerprint, older than `PENDING_RECLAIM_AFTER_MS`, is restamped.
+   * The conditional UPDATE is atomic, so of several concurrent retries exactly
+   * one reclaims; the rest see a fresh `created_at` and fall through to
+   * 409 in-progress. Returns the previous attempt's start time, or null.
+   */
+  private async reclaimStale(scope: IdempotencyScope, fingerprint: string): Promise<Date | null> {
+    const cutoff = new Date(Date.now() - PENDING_RECLAIM_AFTER_MS);
+    const result = await this.db.execute<{ previous_created_at: Date | string }>(sql`
+      UPDATE idempotency_record AS r
+         SET created_at = now()
+        FROM (SELECT created_at, principal_id, operation, idempotency_key
+                FROM idempotency_record
+               WHERE principal_id = ${scope.principalId}
+                 AND operation = ${scope.operation}
+                 AND idempotency_key = ${scope.key}
+                 FOR UPDATE) AS old
+       WHERE r.principal_id = old.principal_id
+         AND r.operation = old.operation
+         AND r.idempotency_key = old.idempotency_key
+         AND r.state = 'pending'
+         AND r.request_fingerprint = ${fingerprint}
+         AND old.created_at < ${cutoff.toISOString()}::timestamptz
+      RETURNING old.created_at AS previous_created_at
+    `);
+    const prev = result.rows[0]?.previous_created_at;
+    return prev === undefined ? null : new Date(prev);
   }
 
   async complete(scope: IdempotencyScope, resourceId: string, response: unknown): Promise<void> {

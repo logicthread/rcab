@@ -59,7 +59,6 @@ export interface FingerprintInput {
   originLng: number;
   destLat: number;
   destLng: number;
-  quoteToken?: string;
   scheduledFor?: string;
 }
 
@@ -71,10 +70,15 @@ export interface FingerprintInput {
  *   become a mismatch.
  * - `scheduledFor` is normalised to epoch ms, so `…Z` and `…+05:30` spellings of
  *   one instant are the same intent.
- * - The quote token IS part of solo/scheduled intent (it is the accepted fare
- *   identity): a genuine retry resends the identical body; re-quoting is a new
- *   booking attempt and needs a new key (else 422). Shared create has no quote
- *   token, so it is excluded there. The access token is never part of it.
+ * - The quote token is deliberately NOT part of the intent. The web client keeps
+ *   one key per (ride type + route) intent; after a lost create response it
+ *   re-quotes (new token) and retries under the SAME key. Binding the token
+ *   would 422 that retry and push the client to rotate its key, creating a
+ *   second booking. The intent is the operation (which encodes ride type),
+ *   pickup/dropoff and — for scheduled — the pickup instant. There is no seat
+ *   count on the create DTO yet; add it here when one exists. A replay is
+ *   resolved before the quote token is validated, so a stale/new token never
+ *   blocks recovering the committed ride. The access token is never part of it.
  */
 export function requestFingerprint(
   operation: IdempotencyOperation,
@@ -85,7 +89,6 @@ export function requestFingerprint(
     op: operation,
     origin: [coord(input.originLat), coord(input.originLng)],
     dest: [coord(input.destLat), coord(input.destLng)],
-    quote: operation === IdempotencyOperation.Shared ? null : (input.quoteToken ?? null),
     scheduledFor:
       operation !== IdempotencyOperation.Scheduled
         ? null
@@ -115,6 +118,15 @@ export function idempotencyKeyConflict(): UnprocessableEntityException {
     message: 'Idempotency-Key was already used for a different request — use a new key',
   });
 }
+
+/**
+ * A `pending` shared-create claim older than this is presumed abandoned (the
+ * process died, or `complete()` failed after the seat was allocated) and may be
+ * taken over by a retry carrying the same fingerprint. Comfortably above the
+ * worst-case allocation time (OSRM scoring + pool transaction), so a slow but
+ * live first request is not raced.
+ */
+export const PENDING_RECLAIM_AFTER_MS = 60_000;
 
 export function idempotencyRequestInProgress(): ConflictException {
   return new ConflictException({

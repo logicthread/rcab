@@ -256,4 +256,88 @@ describe.skipIf(skip)('RidesRepository — idempotency (real Postgres)', () => {
     await idem.release(otherScope);
     expect(await idem.find(otherScope)).toBeNull();
   });
+  // F15 reclaim: a pending claim stranded by a crash / failed complete().
+  it('idempotency_record: stale pending claim is reclaimed by exactly one same-fingerprint retry', async () => {
+    const scope = {
+      principalId: passengerId,
+      operation: 'ride.create.shared' as const,
+      key: `k-${randomUUID()}`,
+    };
+    expect((await idem.claim(scope, 'fp')).kind).toBe('claimed');
+    // Fresh pending → still just "existing" (409 at the controller).
+    expect((await idem.claim(scope, 'fp')).kind).toBe('existing');
+
+    await pool.query(
+      `UPDATE idempotency_record SET created_at = now() - interval '2 minutes'
+        WHERE principal_id = $1 AND idempotency_key = $2`,
+      [scope.principalId, scope.key],
+    );
+    // A different intent never takes over someone else's claim.
+    expect((await idem.claim(scope, 'other-fp')).kind).toBe('existing');
+
+    const [x, y] = await Promise.all([idem.claim(scope, 'fp'), idem.claim(scope, 'fp')]);
+    expect([x.kind, y.kind].sort()).toEqual(['existing', 'reclaimed']);
+    const won = [x, y].find((c) => c.kind === 'reclaimed');
+    expect(
+      won?.kind === 'reclaimed' && Date.now() - won.previousAttemptAt.getTime(),
+    ).toBeGreaterThan(60_000);
+
+    // Reclaiming restamped it: it is fresh again, and can then complete.
+    expect((await idem.claim(scope, 'fp')).kind).toBe('existing');
+    const resourceId = randomUUID();
+    await idem.complete(scope, resourceId, { sharedRideId: resourceId });
+    expect((await idem.find(scope))?.state).toBe('completed');
+  });
+
+  it('a completed record is never reclaimed, however old', async () => {
+    const scope = {
+      principalId: passengerId,
+      operation: 'ride.create.shared' as const,
+      key: `k-${randomUUID()}`,
+    };
+    await idem.claim(scope, 'fp');
+    await idem.complete(scope, randomUUID(), { ok: true });
+    await pool.query(
+      `UPDATE idempotency_record SET created_at = now() - interval '1 day'
+        WHERE principal_id = $1 AND idempotency_key = $2`,
+      [scope.principalId, scope.key],
+    );
+    expect((await idem.claim(scope, 'fp')).kind).toBe('existing');
+  });
+
+  it('findRecentPoolMembership finds the passenger seat in an open pool, only if recent', async () => {
+    const rideId = randomUUID();
+    const joinedAt = new Date();
+    await pool.query(
+      `INSERT INTO shared_rides (ride_id, seat_count, max_seats, pool_state, pool_closed_at,
+         detour_budget_m, origin_lat, origin_lng, dest_lat, dest_lng, members)
+       VALUES ($1, 1, 3, 'open', now() + interval '1 minute', 1500, 26.1, 91.7, 26.2, 91.8, $2::jsonb)`,
+      [
+        rideId,
+        JSON.stringify([
+          {
+            passenger_id: passengerId,
+            origin_lat: 26.1,
+            origin_lng: 91.7,
+            dest_lat: 26.2,
+            dest_lng: 91.8,
+            joined_at: joinedAt.toISOString(),
+          },
+        ]),
+      ],
+    );
+    try {
+      const found = await repo.findRecentPoolMembership(passengerId, new Date(Date.now() - 30_000));
+      expect(found).toEqual({ sharedRideId: rideId, poolState: 'open', opened: true });
+      // Membership older than the dead attempt's start is not "its" seat.
+      expect(
+        await repo.findRecentPoolMembership(passengerId, new Date(Date.now() + 60_000)),
+      ).toBeNull();
+      expect(
+        await repo.findRecentPoolMembership(otherPassengerId, new Date(Date.now() - 30_000)),
+      ).toBeNull();
+    } finally {
+      await pool.query('DELETE FROM shared_rides WHERE ride_id = $1', [rideId]);
+    }
+  });
 });
