@@ -56,7 +56,7 @@ Access tokens are HS256. `verifyAccessToken()` (`common/guards/access-token.ts`)
 
 - Refresh tokens are 256-bit random base64url values. Only the **SHA-256 digest** is stored: `auth_refresh_token (token_hash, user_id, family_id, auth_method, expires_at, revoked_at)` (migration `0012_refresh_token_hash.sql`; the plaintext column is gone).
 - **Single-use atomic rotation:** one conditional `UPDATE ... WHERE token_hash = ? AND revoked_at IS NULL AND expires_at > now() RETURNING` inside the transaction that inserts the replacement. Zero rows means 401. Of two concurrent refreshes exactly one succeeds.
-- **Reuse detection:** replaying a consumed or revoked token revokes its whole session family (`family_id`). There is no grace period.
+- **Reuse detection:** replaying a consumed or revoked token revokes its whole session family (`family_id`). **Grace window 10 s** (`REFRESH_REUSE_GRACE_SECONDS`): reuse of a token revoked <10 s ago (concurrent refresh, lost response) gets 401 without revoking the family and never mints a sibling token; older reuse revokes the family.
 - Refresh keeps the session's original `auth_method` (phone/google).
 - **Account status:** suspended/deleted users get 403 `account_disabled` at phone exchange and Google login, and 401 `account_disabled` at refresh (all of the user's refresh tokens are revoked).
 
@@ -66,7 +66,7 @@ Access tokens are HS256. `verifyAccessToken()` (`common/guards/access-token.ts`)
 - Native (driver app): explicit JSON endpoints, no cookies, no CSRF; refresh token held in secure storage. Native is a separate route family, never inferred from User-Agent or a client flag.
   - `POST /v1/auth/native/firebase-exchange` `{id_token}` returns 200 tokens
   - `POST /v1/auth/native/refresh` `{refresh_token}` returns 200 rotated tokens
-  - `POST /v1/auth/native/logout` (Bearer) `{refresh_token}` returns 204
+  - `POST /v1/auth/native/logout` `{refresh_token}` returns 204 — possession-based (no Bearer needed, works after access token expiry), idempotent, throttled 10/min
   - Example shapes: `apps/api/test/fixtures/native-auth-contract.json` (asserted by the controller spec and integration suite).
 
 ## Internal collaborators
