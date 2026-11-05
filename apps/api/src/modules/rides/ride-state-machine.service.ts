@@ -5,21 +5,25 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import type Redis from 'ioredis';
 import { REDIS } from '../../infra/redis/redis.module';
 import { RealtimeBus } from '../realtime/realtime.bus';
+import { clearCurrentRide } from '../dispatch/driver-assignment.projection';
 import { RidesRepository, type RideCancelResult, type RideRow } from './rides.repository';
 
 export const RIDE_STATE_CHANGED_EVENT = 'ride_state_changed';
 
 /**
  * Emitted after a solo ride is cancelled / marked no-show, so `DispatchService`
- * can unwind any in-flight dispatch (release the claim, revoke offers, drop the
- * wave / hard-fail timers). Decouples the rides module from dispatch internals
- * (mirrors the E4.S7 gateway→listener pattern). RCAB-E4.S8.
+ * can drop the wave / hard-fail timers. Offer revocation and the driver's
+ * assignment-guard release already happened inside the cancel transaction.
+ * Decouples the rides module from dispatch internals (mirrors the E4.S7
+ * gateway→listener pattern). RCAB-E4.S8.
  */
 export const RIDE_CANCELLED_EVENT = 'ride.cancelled';
 
 export interface RideCancelledEventPayload {
   rideId: string;
   driverId: string | null;
+  /** The ride's dispatch generation, so the matching timer ids can be removed. */
+  generation: number;
 }
 
 /** The forward solo lifecycle events this story owns. Cancellation / no-show
@@ -53,10 +57,11 @@ export type RideApplyResult =
 
 /**
  * The only sanctioned way to advance a solo ride's state. Validates the event,
- * delegates the guarded `SELECT … FOR UPDATE` transition to the repository,
- * then — strictly after commit — broadcasts `ride_state_changed` to the ride
- * room and clears the driver's `current_ride_id` once the ride completes.
- * RCAB-E4.S6.
+ * delegates the guarded `SELECT … FOR UPDATE` transition to the repository
+ * (which releases the driver's assignment guard in the same transaction when
+ * the ride completes), then — strictly after commit — broadcasts
+ * `ride_state_changed` to the ride room and clears the driver's
+ * `current_ride_id` projection if it still names this ride. RCAB-E4.S6.
  */
 @Injectable()
 export class RideStateMachine {
@@ -88,7 +93,7 @@ export class RideStateMachine {
       by: 'driver',
     });
     if (result.row.status === 'completed') {
-      await this.clearDriverCurrentRide(driverId);
+      await this.clearDriverCurrentRide(driverId, rideId);
     }
     return result;
   }
@@ -97,9 +102,11 @@ export class RideStateMachine {
    * Cancel a solo ride, or mark it `no_show`. The role-aware counterpart to the
    * driver-only forward `apply()`: the repository validates ownership + that the
    * current state is cancellable for the actor (and, for a no-show, that the
-   * 5-minute wait has elapsed). Strictly after commit it broadcasts the terminal
-   * `ride_state_changed`, frees the bound driver, and emits `RIDE_CANCELLED_EVENT`
-   * so dispatch unwinds anything in flight. No fee is charged (Phase-0). RCAB-E4.S8.
+   * 5-minute wait has elapsed); the same transaction revokes live offers and
+   * releases the bound driver's guard. Strictly after commit it broadcasts the
+   * terminal `ride_state_changed`, tells revoked drivers, clears the driver's
+   * projection, and emits `RIDE_CANCELLED_EVENT` so dispatch drops its timers.
+   * No fee is charged (Phase-0). RCAB-E4.S8.
    */
   async cancel(params: {
     rideId: string;
@@ -111,29 +118,55 @@ export class RideStateMachine {
     const result = await this.repo.cancel({ ...params, noShowWaitMs: this.noShowWaitMs });
     if (!result.ok) return result;
 
-    // After commit only ([[module-rides]] concurrency rule): tell the ride room,
-    // free the driver, and let dispatch release any in-flight artefacts.
-    this.bus.toRide(params.rideId, RIDE_STATE_CHANGED_EVENT, {
-      rideId: params.rideId,
-      state: result.row.status,
-      by: params.actor,
-    });
-    if (result.row.driverId) {
-      await this.clearDriverCurrentRide(result.row.driverId);
+    // After commit only ([[module-rides]] concurrency rule): tell the ride room
+    // and the revoked drivers, clear the projection, and let dispatch drop its
+    // timers. A delivery failure here never turns the committed cancel into an
+    // error — reconciliation repairs projections.
+    this.safely(() =>
+      this.bus.toRide(params.rideId, RIDE_STATE_CHANGED_EVENT, {
+        rideId: params.rideId,
+        state: result.row.status,
+        by: params.actor,
+      }),
+    );
+    for (const revoked of result.revokedOffers) {
+      this.safely(() =>
+        this.bus.toDriver(revoked.driverId, 'ride_offer_revoked', {
+          offerId: revoked.offerId,
+          rideId: params.rideId,
+          sharedRideId: params.rideId,
+          reason: 'revoked',
+        }),
+      );
     }
-    this.events.emit(RIDE_CANCELLED_EVENT, {
-      rideId: params.rideId,
-      driverId: result.row.driverId,
-    } satisfies RideCancelledEventPayload);
+    if (result.row.driverId) {
+      await this.clearDriverCurrentRide(result.row.driverId, params.rideId);
+    }
+    this.safely(() =>
+      this.events.emit(RIDE_CANCELLED_EVENT, {
+        rideId: params.rideId,
+        driverId: result.row.driverId,
+        generation: result.row.dispatchGeneration,
+      } satisfies RideCancelledEventPayload),
+    );
 
     return result;
   }
 
-  private async clearDriverCurrentRide(driverId: string): Promise<void> {
+  /** Compare-and-delete: never clears a newer trip's projection (F06). */
+  private async clearDriverCurrentRide(driverId: string, rideId: string): Promise<void> {
     try {
-      await this.redis.hdel(`driver:state:${driverId}`, 'current_ride_id');
+      await clearCurrentRide(this.redis, driverId, rideId);
     } catch (err) {
-      this.log.warn({ err, driverId }, 'failed to clear driver:state.current_ride_id');
+      this.log.warn({ err, driverId, rideId }, 'failed to clear driver:state.current_ride_id');
+    }
+  }
+
+  private safely(deliver: () => unknown): void {
+    try {
+      deliver();
+    } catch (err) {
+      this.log.warn({ err }, 'post-commit delivery failed');
     }
   }
 }

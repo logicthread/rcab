@@ -2,6 +2,7 @@ import { Pool } from 'pg';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { randomUUID } from 'node:crypto';
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import Redis from 'ioredis';
 import * as schema from '../../src/db/schema';
 import { RidesRepository } from '../../src/modules/rides/rides.repository';
 import {
@@ -9,6 +10,7 @@ import {
   RIDE_CANCELLED_EVENT,
 } from '../../src/modules/rides/ride-state-machine.service';
 import { RidesRealtimeListener } from '../../src/modules/rides/rides-realtime.listener';
+import { guardsFor, seedDriver } from './support/dispatch-fixtures';
 
 const skip = process.env.RCAB_INT_SKIPPED === '1';
 
@@ -24,15 +26,18 @@ describe.skipIf(skip)('RidesRealtimeListener + cancellation (real Postgres)', ()
   let stateMachine: RideStateMachine;
   let listener: RidesRealtimeListener;
   const bus = { toRide: vi.fn(), joinRide: vi.fn().mockResolvedValue(undefined) };
-  const redis = { hdel: vi.fn().mockResolvedValue(1) };
+  let redis: Redis;
   const events = { emit: vi.fn() };
   // Default 5-min no-show wait (config returns undefined → the 300_000 default).
   const config = { get: vi.fn().mockReturnValue(undefined) };
   let passengerId: string;
-  const driverId = randomUUID();
+  // A fresh driver per accepted ride: the assignment guard allows one active
+  // trip per driver (F06), and several of these rides are never completed.
+  let driverId: string;
 
   beforeAll(async () => {
     pool = new Pool({ connectionString: process.env.TEST_POSTGRES_URI });
+    redis = new Redis(process.env.TEST_REDIS_URL!, { maxRetriesPerRequest: null });
     repo = new RidesRepository(drizzle(pool, { schema }) as never);
     stateMachine = new RideStateMachine(
       repo,
@@ -57,6 +62,7 @@ describe.skipIf(skip)('RidesRealtimeListener + cancellation (real Postgres)', ()
     await pool.query('DELETE FROM rides WHERE passenger_id = $1', [passengerId]);
     await pool.query('DELETE FROM app_user WHERE id = $1', [passengerId]);
     await pool.end();
+    await redis.quit();
   });
 
   async function newRequestedRide(): Promise<string> {
@@ -74,8 +80,11 @@ describe.skipIf(skip)('RidesRealtimeListener + cancellation (real Postgres)', ()
 
   async function newAcceptedRide(): Promise<string> {
     const id = await newRequestedRide();
-    const bound = await repo.claimSolo(id, driverId, new Date());
+    driverId = await seedDriver(pool);
+    const bound = await repo.claimSolo(id, driverId);
     expect(bound?.status).toBe('accepted');
+    // Presence hash + the post-accept projection, as dispatch would leave them.
+    await redis.hset(`driver:state:${driverId}`, { availability: 'online', current_ride_id: id });
     return id;
   }
 
@@ -157,12 +166,15 @@ describe.skipIf(skip)('RidesRealtimeListener + cancellation (real Postgres)', ()
     expect(row?.status).toBe('cancelled');
     expect(row?.cancelledBy).toBe('client');
     expect(row?.cancelledAt).toBeInstanceOf(Date);
-    expect(events.emit).toHaveBeenCalledWith(RIDE_CANCELLED_EVENT, { rideId: id, driverId: null });
+    expect(events.emit).toHaveBeenCalledWith(
+      RIDE_CANCELLED_EVENT,
+      expect.objectContaining({ rideId: id, driverId: null }),
+    );
   });
 
-  it('client cancel of an arrived ride → cancelled, clears bound driver current_ride_id', async () => {
+  it('client cancel of an arrived ride → cancelled, releases the guard, clears current_ride_id', async () => {
     const id = await newArrivedRide();
-    redis.hdel.mockClear();
+    expect(await guardsFor(pool, { driverId })).toHaveLength(1);
 
     const res = await stateMachine.cancel({
       rideId: id,
@@ -176,7 +188,9 @@ describe.skipIf(skip)('RidesRealtimeListener + cancellation (real Postgres)', ()
     const row = await repo.findById(id);
     expect(row?.status).toBe('cancelled');
     expect(row?.cancelledBy).toBe('client');
-    expect(redis.hdel).toHaveBeenCalledWith(`driver:state:${driverId}`, 'current_ride_id');
+    expect(await redis.hget(`driver:state:${driverId}`, 'current_ride_id')).toBeNull();
+    expect(await guardsFor(pool, { driverId })).toEqual([]);
+    expect(await guardsFor(pool, { rideId: id })).toEqual([]);
   });
 
   it('driver cancel records the reason', async () => {

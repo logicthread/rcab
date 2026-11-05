@@ -130,6 +130,7 @@ describe('RealtimeGateway — driver:location handler', () => {
 });
 
 describe('RealtimeGateway — ride_offer_response handler', () => {
+  const OFFER = '00000000-0000-4000-8000-000000000001';
   let gateway: RealtimeGateway;
   let events: EventEmitter2;
 
@@ -138,44 +139,50 @@ describe('RealtimeGateway — ride_offer_response handler', () => {
     gateway = new RealtimeGateway(buildJwt(), buildBus(), events, buildRedis() as never);
   });
 
-  it('emits dispatch.ride_offer_response with driverId from socket data', () => {
-    const seen = vi.fn();
+  it('emits only driverId (from the socket), offerId and the boolean; returns the listener result as the ack', async () => {
+    const seen = vi.fn().mockResolvedValue({ ok: true, replay: false });
     events.on(RIDE_OFFER_RESPONSE_EVENT, seen);
     const client = makeSocket();
 
-    gateway.handleRideOfferResponse(
-      { offerId: 'offer-1', sharedRideId: 'pool-1', accept: true },
+    const ack = await gateway.handleRideOfferResponse(
+      { offerId: OFFER, sharedRideId: 'pool-1', accept: true },
       client,
     );
 
-    expect(seen).toHaveBeenCalledWith({
-      driverId: DRIVER_ID,
-      offerId: 'offer-1',
-      sharedRideId: 'pool-1',
-      accept: true,
-    });
+    // The client-sent trip id is dropped: dispatch derives the trip from the offer.
+    expect(seen).toHaveBeenCalledWith({ driverId: DRIVER_ID, offerId: OFFER, accept: true });
+    expect(ack).toEqual({ ok: true, replay: false });
   });
 
-  it('ignores responses from non-driver sockets', () => {
+  it('acks `unavailable` when no listener answers', async () => {
+    const ack = await gateway.handleRideOfferResponse({ offerId: OFFER, accept: false }, makeSocket());
+    expect(ack).toEqual({ ok: false, reason: 'unavailable' });
+  });
+
+  it('forbids non-driver sockets', async () => {
     const seen = vi.fn();
     events.on(RIDE_OFFER_RESPONSE_EVENT, seen);
-    const client = makeSocket({ role: 'client' });
-
-    gateway.handleRideOfferResponse({ offerId: 'offer-2', accept: true }, client);
-
+    const ack = await gateway.handleRideOfferResponse(
+      { offerId: OFFER, accept: true },
+      makeSocket({ role: 'client' }),
+    );
+    expect(ack).toEqual({ ok: false, reason: 'forbidden' });
     expect(seen).not.toHaveBeenCalled();
   });
 
-  it('ignores malformed payloads', () => {
+  it.each([
+    ['non-string offerId', { offerId: 123, accept: true }],
+    ['non-UUID offerId', { offerId: 'offer-1', accept: true }],
+    ["string 'false'", { offerId: OFFER, accept: 'false' }],
+    ['numeric 1', { offerId: OFFER, accept: 1 }],
+    ['missing accept', { offerId: OFFER }],
+    ['null payload', null],
+    ['string payload', 'accept'],
+  ])('rejects a malformed payload (%s) without emitting', async (_n, payload) => {
     const seen = vi.fn();
     events.on(RIDE_OFFER_RESPONSE_EVENT, seen);
-    const client = makeSocket();
-
-    gateway.handleRideOfferResponse(
-      { offerId: 123 } as unknown as { offerId: string; accept: boolean },
-      client,
-    );
-
+    const ack = await gateway.handleRideOfferResponse(payload, makeSocket());
+    expect(ack).toEqual({ ok: false, reason: 'invalid_payload' });
     expect(seen).not.toHaveBeenCalled();
   });
 });

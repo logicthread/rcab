@@ -227,15 +227,4 @@ export class SharedRideRepository {
     `);
     return (res.rowCount ?? 0) > 0;
   }
-
-  async setClaimed(rideId: string, driverId: string, claimedAt: Date): Promise<void> {
-    await this.db
-      .update(sharedRide)
-      .set({
-        claimedByDriverId: driverId,
-        claimedAt,
-        updatedAt: new Date(),
-      })
-      .where(eq(sharedRide.rideId, rideId));
-  }
 }
