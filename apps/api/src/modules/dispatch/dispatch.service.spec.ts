@@ -1,15 +1,21 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   DispatchService,
   computeStops,
   HARD_FAIL_JOB,
   WAVE_TIMEOUT_JOB,
+  hardFailJobId,
+  legacyHardFailJobId,
+  legacyWaveTwoJobId,
+  waveTwoJobId,
   type HardFailJob,
   type WaveTimeoutJob,
 } from './dispatch.service';
 import type { Job } from 'bullmq';
 import type { SharedRideMember, SharedRideRow } from '../matching/shared-ride.repository';
 import type { RideRow } from '../rides/rides.repository';
+import type { OfferRow } from './offer.repository';
+import type { SharedTripLockRow } from './assignment.repository';
 
 function member(overrides: Partial<SharedRideMember> = {}): SharedRideMember {
   return {
@@ -44,18 +50,6 @@ function pool(overrides: Partial<SharedRideRow> = {}): SharedRideRow {
   };
 }
 
-function buildRepo(opts: { byId?: SharedRideRow | null } = {}) {
-  return {
-    findCandidates: vi.fn(),
-    findById: vi.fn().mockResolvedValue(opts.byId ?? null),
-    create: vi.fn(),
-    incrementSeats: vi.fn(),
-    appendMember: vi.fn(),
-    closePool: vi.fn(),
-    setClaimed: vi.fn().mockResolvedValue(undefined),
-  };
-}
-
 function soloRide(overrides: Partial<RideRow> = {}): RideRow {
   return {
     id: 'ride-1',
@@ -81,161 +75,6 @@ function soloRide(overrides: Partial<RideRow> = {}): RideRow {
     dispatchGeneration: 1,
     ...overrides,
   };
-}
-
-function buildRidesRepo(
-  opts: {
-    byId?: RideRow | null;
-    claimResult?: RideRow | null;
-    noDriverResult?: RideRow | null;
-  } = {},
-) {
-  return {
-    create: vi.fn(),
-    findById: vi.fn().mockResolvedValue(opts.byId === undefined ? soloRide() : opts.byId),
-    findByIdempotencyKey: vi.fn(),
-    claimSolo: vi
-      .fn()
-      .mockResolvedValue(
-        opts.claimResult === undefined
-          ? soloRide({ status: 'accepted', driverId: 'd-1', acceptedAt: new Date() })
-          : opts.claimResult,
-      ),
-    markNoDriver: vi
-      .fn()
-      .mockResolvedValue(
-        opts.noDriverResult === undefined ? soloRide({ status: 'no_driver' }) : opts.noDriverResult,
-      ),
-  };
-}
-
-function buildStops() {
-  return {
-    seed: vi.fn().mockResolvedValue(undefined),
-    findByRideId: vi.fn().mockResolvedValue([]),
-    confirm: vi.fn().mockResolvedValue(null),
-    countPending: vi.fn().mockResolvedValue(0),
-    markRideCompleted: vi.fn().mockResolvedValue(undefined),
-    markRideStarted: vi.fn().mockResolvedValue(undefined),
-  };
-}
-
-function buildLifecycle() {
-  return { closePool: vi.fn().mockResolvedValue(undefined) };
-}
-
-function buildBus() {
-  return { toDriver: vi.fn(), toUser: vi.fn(), toRide: vi.fn(), broadcast: vi.fn() };
-}
-
-function buildQueue() {
-  return {
-    add: vi.fn().mockResolvedValue({ id: 'job' }),
-    remove: vi.fn().mockResolvedValue(1),
-  };
-}
-
-function buildRedis(
-  opts: {
-    geoCandidates?: string[];
-    alreadyOffered?: string[];
-    setNxResult?: string | null;
-    evalResult?: number;
-    offerListIds?: string[];
-    offerOwners?: Record<string, string>;
-    stopsCache?: string | null;
-    metaResult?: string | null;
-    offerType?: string | null;
-  } = {},
-) {
-  const setNxResult = opts.setNxResult === undefined ? 'OK' : opts.setNxResult;
-  return {
-    smembers: vi.fn().mockImplementation(async (key: string) => {
-      if (key.endsWith(':offered')) return opts.alreadyOffered ?? [];
-      if (key.startsWith('offer:list:')) return opts.offerListIds ?? [];
-      return [];
-    }),
-    georadius: vi.fn().mockResolvedValue(opts.geoCandidates ?? []),
-    set: vi
-      .fn()
-      .mockImplementation(async (_k: string, _v: string, ..._rest: unknown[]) => setNxResult),
-    sadd: vi.fn().mockResolvedValue(1),
-    expire: vi.fn().mockResolvedValue(1),
-    del: vi.fn().mockResolvedValue(1),
-    hset: vi.fn().mockResolvedValue(1),
-    get: vi.fn().mockImplementation(async (key: string) => {
-      if (key === 'pool:pool-1:stops') return opts.stopsCache ?? null;
-      if (key.startsWith('offer:type:')) return opts.offerType ?? null;
-      if (key.startsWith('offer:meta:')) return opts.metaResult ?? null;
-      if (key.startsWith('offer:')) return opts.offerOwners?.[key.replace('offer:', '')] ?? null;
-      return null;
-    }),
-    eval: vi.fn().mockResolvedValue(opts.evalResult ?? 1),
-  };
-}
-
-function buildEvents() {
-  return { emit: vi.fn() };
-}
-
-function buildConfig(overrides: Record<string, unknown> = {}) {
-  return { get: vi.fn((key: string) => overrides[key]) };
-}
-
-interface ServiceOpts {
-  byId?: SharedRideRow | null;
-  soloRide?: RideRow | null;
-  soloClaimResult?: RideRow | null;
-  soloNoDriverResult?: RideRow | null;
-  geo?: string[];
-  alreadyOffered?: string[];
-  setNx?: string | null;
-  evalResult?: number;
-  offerListIds?: string[];
-  offerOwners?: Record<string, string>;
-  stopsCache?: string | null;
-  metaResult?: string | null;
-  offerType?: string | null;
-  config?: Record<string, unknown>;
-}
-
-function makeService(opts: ServiceOpts = {}) {
-  const repo = buildRepo({ byId: opts.byId });
-  const ridesRepo = buildRidesRepo({
-    byId: opts.soloRide,
-    claimResult: opts.soloClaimResult,
-    noDriverResult: opts.soloNoDriverResult,
-  });
-  const stops = buildStops();
-  const lifecycle = buildLifecycle();
-  const bus = buildBus();
-  const queue = buildQueue();
-  const redis = buildRedis({
-    geoCandidates: opts.geo,
-    alreadyOffered: opts.alreadyOffered,
-    setNxResult: opts.setNx,
-    evalResult: opts.evalResult,
-    offerListIds: opts.offerListIds,
-    offerOwners: opts.offerOwners,
-    stopsCache: opts.stopsCache,
-    metaResult: opts.metaResult,
-    offerType: opts.offerType,
-  });
-  const events = buildEvents();
-  const config = buildConfig(opts.config ?? {});
-
-  const svc = new DispatchService(
-    repo as never,
-    ridesRepo as never,
-    stops as never,
-    lifecycle as never,
-    bus as never,
-    queue as never,
-    redis as never,
-    events as never,
-    config as never,
-  );
-  return { svc, repo, ridesRepo, stops, lifecycle, bus, queue, redis, events };
 }
 
 // ── computeStops ─────────────────────────────────────────────────────────────
@@ -374,493 +213,611 @@ describe('computeStops dropoff ordering (nearest-neighbour from last pickup)', (
 
 // ── dispatchPool / runWave ───────────────────────────────────────────────────
 
-describe('DispatchService.dispatchPool', () => {
-  it('skips when pool not found', async () => {
-    const { svc, bus } = makeService({ byId: null });
-    await svc.dispatchPool('missing');
-    expect(bus.toDriver).not.toHaveBeenCalled();
-  });
+// ── DispatchService (unit: repositories + infra mocked) ──────────────────────
 
-  it('skips when pool already claimed', async () => {
-    const { svc, bus, queue } = makeService({
-      byId: pool({ claimedByDriverId: 'd-other' }),
-    });
-    await svc.dispatchPool('pool-1');
-    expect(bus.toDriver).not.toHaveBeenCalled();
-    expect(queue.add).not.toHaveBeenCalled();
-  });
+const OFFER = '00000000-0000-4000-8000-000000000001';
+const DRIVER = '00000000-0000-4000-8000-000000000002';
+const OTHER = '00000000-0000-4000-8000-000000000003';
+const RIDE = '00000000-0000-4000-8000-0000000000aa';
+const POOL = '00000000-0000-4000-8000-0000000000bb';
 
-  it('wave 1: fans out ride_offer to K1 drivers with stops payload + schedules wave-2 + hard-fail', async () => {
-    const { svc, bus, queue, redis } = makeService({
-      byId: pool(),
-      geo: ['d-1', 'd-2', 'd-3'],
-    });
+function offerRow(overrides: Partial<OfferRow> = {}): OfferRow {
+  return {
+    id: OFFER,
+    trip: { kind: 'solo', rideId: RIDE },
+    driverId: DRIVER,
+    generation: 1,
+    waveNumber: 1,
+    state: 'offered',
+    offeredAt: new Date(),
+    expiresAt: new Date(Date.now() + 10_000),
+    resolvedAt: null,
+    lapsed: false,
+    ...overrides,
+  };
+}
 
-    await svc.dispatchPool('pool-1');
+function poolLock(overrides: Partial<SharedTripLockRow> = {}): SharedTripLockRow {
+  return {
+    rideId: POOL,
+    poolState: 'closed_full',
+    seatCount: 2,
+    maxSeats: 3,
+    claimedByDriverId: null,
+    dispatchGeneration: 1,
+    stateVersion: 3,
+    ...overrides,
+  };
+}
 
-    // Each driver gets a ride_offer with stops + waveNumber=1
-    expect(bus.toDriver).toHaveBeenCalledTimes(3);
-    for (const call of bus.toDriver.mock.calls) {
-      const [driverId, event, payload] = call as [
-        string,
-        string,
-        { stops: unknown; waveNumber: number; sharedRideId: string },
-      ];
-      expect(['d-1', 'd-2', 'd-3']).toContain(driverId);
-      expect(event).toBe('ride_offer');
-      expect(payload.sharedRideId).toBe('pool-1');
-      expect(payload.waveNumber).toBe(1);
-      expect(Array.isArray(payload.stops)).toBe(true);
-    }
+function stopRows(n: number) {
+  return Array.from({ length: n }, (_, i) => ({
+    rideId: POOL,
+    sequenceIndex: i,
+    passengerId: `p-${i}`,
+    type: (i < n / 2 ? 'pickup' : 'dropoff') as 'pickup' | 'dropoff',
+    lat: 22.57,
+    lng: 88.36,
+    confirmedAt: null,
+  }));
+}
 
-    // K1 default = 5; we have 3 candidates so all 3 reserved (each candidate:
-    // offer:<id> SET NX EX + offer:meta:<id> SET EX) plus one pool:<id>:stops cache write.
-    const offerLockCalls = redis.set.mock.calls.filter(
-      (c) =>
-        typeof c[0] === 'string' &&
-        (c[0] as string).startsWith('offer:') &&
-        !(c[0] as string).startsWith('offer:meta:'),
-    );
-    expect(offerLockCalls).toHaveLength(3);
+function makeService(config: Record<string, unknown> = {}) {
+  const tx = { tx: true };
+  const db = { transaction: vi.fn(async (fn: (t: unknown) => unknown) => fn(tx)) };
+  const repo = { findById: vi.fn().mockResolvedValue(pool()) };
+  const ridesRepo = {
+    findById: vi.fn().mockResolvedValue(soloRide({ id: RIDE })),
+    markNoDriver: vi.fn().mockResolvedValue(null),
+  };
+  const stops = {
+    findByRideId: vi.fn().mockResolvedValue(stopRows(4)),
+    countAll: vi.fn().mockResolvedValue(4),
+  };
+  const offers = {
+    findForDriver: vi.fn().mockResolvedValue(offerRow()),
+    lockForUpdate: vi.fn().mockResolvedValue(offerRow()),
+    resolveLive: vi.fn().mockResolvedValue(true),
+    markAccepted: vi.fn().mockResolvedValue(undefined),
+    decline: vi.fn().mockResolvedValue('declined'),
+    revokeLiveForTrip: vi.fn().mockResolvedValue([]),
+    createOffer: vi.fn().mockImplementation(async () => ({
+      offerId: OFFER,
+      expiresAt: new Date('2026-11-06T00:00:12.000Z'),
+    })),
+    offeredDriverIds: vi.fn().mockResolvedValue([]),
+    eligibleCandidates: vi.fn().mockImplementation(async (_db: unknown, ids: string[]) => ids),
+  };
+  const assignments = {
+    lockSoloTrip: vi.fn().mockResolvedValue(soloRide({ id: RIDE })),
+    lockSharedTrip: vi.fn().mockResolvedValue(poolLock()),
+    findByTrip: vi.fn().mockResolvedValue(null),
+    driverEligibility: vi.fn().mockResolvedValue('ok'),
+    acquire: vi.fn().mockResolvedValue({ ok: true }),
+    claimSoloRow: vi.fn().mockResolvedValue(soloRide({ id: RIDE, status: 'accepted' })),
+    claimSharedRow: vi.fn().mockResolvedValue(undefined),
+    abortUnclaimedPool: vi.fn().mockResolvedValue(true),
+  };
+  const projection = { set: vi.fn().mockResolvedValue(undefined) };
+  const bus = { toDriver: vi.fn(), toUser: vi.fn(), toRide: vi.fn() };
+  const queue = {
+    add: vi.fn().mockResolvedValue({ id: 'job' }),
+    remove: vi.fn().mockResolvedValue(1),
+  };
+  const redis = { georadius: vi.fn().mockResolvedValue([]) };
+  const svc = new DispatchService(
+    repo as never,
+    ridesRepo as never,
+    stops as never,
+    offers as never,
+    assignments as never,
+    projection as never,
+    bus as never,
+    queue as never,
+    redis as never,
+    db as never,
+    { get: vi.fn((k: string) => config[k]) } as never,
+  );
+  return { svc, db, tx, repo, ridesRepo, stops, offers, assignments, projection, bus, queue, redis };
+}
 
-    // Wave-2 + hard-fail scheduled
-    const jobNames = queue.add.mock.calls.map((c) => c[0]);
-    expect(jobNames).toContain(WAVE_TIMEOUT_JOB);
-    expect(jobNames).toContain(HARD_FAIL_JOB);
-  });
-
-  it('wave 1: excludes drivers already in pool:<id>:offered', async () => {
-    const { svc, bus } = makeService({
-      byId: pool(),
-      geo: ['d-1', 'd-2'],
-      alreadyOffered: ['d-1'],
-    });
-
-    await svc.dispatchPool('pool-1');
-
-    expect(bus.toDriver).toHaveBeenCalledTimes(1);
-    expect(bus.toDriver.mock.calls[0][0]).toBe('d-2');
-  });
-
-  it('wave 1: skips a candidate whose offer:<id> SET NX returns null (race)', async () => {
-    const { svc, bus } = makeService({
-      byId: pool(),
-      geo: ['d-1'],
-      setNx: null,
-    });
-    await svc.dispatchPool('pool-1');
-    expect(bus.toDriver).not.toHaveBeenCalled();
-  });
-});
-
-// ── handleHardFail ───────────────────────────────────────────────────────────
-
-describe('DispatchService.handleHardFail', () => {
-  it('closes pool as aborted, revokes outstanding offers', async () => {
-    const { svc, lifecycle, redis, bus } = makeService({
-      byId: pool(),
-      offerListIds: ['offer-1', 'offer-2'],
-      offerOwners: { 'offer-1': 'd-1', 'offer-2': 'd-2' },
-    });
-
-    const job = { data: { rideId: 'pool-1' } } as Job<{ rideId: string }>;
-    await svc.handleHardFail(job);
-
-    expect(lifecycle.closePool).toHaveBeenCalledWith('pool-1', 'aborted');
-    expect(redis.del).toHaveBeenCalledWith('offer:offer-1');
-    expect(redis.del).toHaveBeenCalledWith('offer:offer-2');
-    expect(bus.toDriver).toHaveBeenCalledWith('d-1', 'ride_offer_revoked', expect.any(Object));
-    expect(bus.toDriver).toHaveBeenCalledWith('d-2', 'ride_offer_revoked', expect.any(Object));
-  });
-
-  it('skips abort when pool was already claimed', async () => {
-    const { svc, lifecycle } = makeService({
-      byId: pool({ claimedByDriverId: 'd-1' }),
-    });
-    const job = { data: { rideId: 'pool-1' } } as Job<{ rideId: string }>;
-    await svc.handleHardFail(job);
-    expect(lifecycle.closePool).not.toHaveBeenCalled();
-  });
-});
-
-// ── claimPool ────────────────────────────────────────────────────────────────
-
-describe('DispatchService.claimPool', () => {
-  it('ok=true on Lua return 1: sets DB claimed_by, revokes offers, removes timers', async () => {
-    const { svc, repo, queue } = makeService({
-      evalResult: 1,
-      offerListIds: [],
-    });
-
-    const result = await svc.claimPool('pool-1', 'd-1');
-    expect(result).toEqual({ ok: true, reason: 'claimed' });
-    expect(repo.setClaimed).toHaveBeenCalledWith('pool-1', 'd-1', expect.any(Date));
-    expect(queue.remove).toHaveBeenCalledWith('dispatch:wave2-timeout:pool-1');
-    expect(queue.remove).toHaveBeenCalledWith('dispatch:hard-fail:pool-1');
-  });
-
-  it('writes driver:state.current_ride_id on successful claim', async () => {
-    const { svc, redis } = makeService({ evalResult: 1 });
-    await svc.claimPool('pool-1', 'd-1');
-    expect(redis.hset).toHaveBeenCalledWith('driver:state:d-1', 'current_ride_id', 'pool-1');
-  });
-
-  it('seeds ride_stops from pool:<id>:stops cache after successful claim', async () => {
-    const cached = JSON.stringify([
-      { type: 'pickup', lat: 22.5727, lng: 88.364, passengerId: 'p-1', sequenceIndex: 0 },
-      { type: 'dropoff', lat: 22.5801, lng: 88.3701, passengerId: 'p-1', sequenceIndex: 1 },
-    ]);
-    const { svc, stops } = makeService({ evalResult: 1, stopsCache: cached });
-
-    await svc.claimPool('pool-1', 'd-1');
-
-    expect(stops.seed).toHaveBeenCalledTimes(1);
-    expect(stops.seed).toHaveBeenCalledWith('pool-1', [
-      { sequenceIndex: 0, passengerId: 'p-1', type: 'pickup', lat: 22.5727, lng: 88.364 },
-      { sequenceIndex: 1, passengerId: 'p-1', type: 'dropoff', lat: 22.5801, lng: 88.3701 },
-    ]);
-  });
-
-  it('skips ride_stops seed when cache is empty (logs warning, no throw)', async () => {
-    const { svc, stops } = makeService({ evalResult: 1, stopsCache: null });
-    const result = await svc.claimPool('pool-1', 'd-1');
-    expect(result.ok).toBe(true);
-    expect(stops.seed).not.toHaveBeenCalled();
-  });
-
-  it('does not seed ride_stops when Lua claim fails', async () => {
-    const cached = JSON.stringify([
-      { type: 'pickup', lat: 0, lng: 0, passengerId: 'p-1', sequenceIndex: 0 },
-    ]);
-    const { svc, stops } = makeService({ evalResult: 0, stopsCache: cached });
-    await svc.claimPool('pool-1', 'd-1');
-    expect(stops.seed).not.toHaveBeenCalled();
-  });
-
-  it('returns already_taken on Lua return 0', async () => {
-    const { svc, repo } = makeService({ evalResult: 0 });
-    const result = await svc.claimPool('pool-1', 'd-1');
-    expect(result).toEqual({ ok: false, reason: 'already_taken' });
-    expect(repo.setClaimed).not.toHaveBeenCalled();
-  });
-
-  it('returns not_closed on Lua return -1', async () => {
-    const { svc } = makeService({ evalResult: -1 });
-    const result = await svc.claimPool('pool-1', 'd-1');
-    expect(result).toEqual({ ok: false, reason: 'not_closed' });
-  });
-
-  it('returns not_found on Lua return -2', async () => {
-    const { svc } = makeService({ evalResult: -2 });
-    const result = await svc.claimPool('pool-1', 'd-1');
-    expect(result).toEqual({ ok: false, reason: 'not_found' });
+describe('job ids (contract §1.3 rule 7)', () => {
+  it('are generation-scoped and colon-free; legacy ids are kept for removal', () => {
+    expect(waveTwoJobId('t', 3)).toBe('dispatch-wave2-t-g3');
+    expect(hardFailJobId('t', 3)).toBe('dispatch-hardfail-t-g3');
+    expect(legacyWaveTwoJobId('t')).toBe('dispatch:wave2-timeout:t');
+    expect(legacyHardFailJobId('t')).toBe('dispatch:hard-fail:t');
   });
 });
-
-// ── onRideOfferResponse ──────────────────────────────────────────────────────
 
 describe('DispatchService.onRideOfferResponse', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
+  it('routes accept and decline and returns the result (the gateway ack)', async () => {
+    const { svc, offers } = makeService();
+    await expect(
+      svc.onRideOfferResponse({ driverId: DRIVER, offerId: OFFER, accept: true }),
+    ).resolves.toEqual({ ok: true, trip: { kind: 'solo', rideId: RIDE }, generation: 1, replay: false });
+    await expect(
+      svc.onRideOfferResponse({ driverId: DRIVER, offerId: OFFER, accept: false }),
+    ).resolves.toBe('declined');
+    expect(offers.decline).toHaveBeenCalledWith(expect.anything(), OFFER, DRIVER);
   });
+});
 
-  it('decline: deletes offer lock; no claim attempt', async () => {
-    const { svc, redis, repo } = makeService();
-    await svc.onRideOfferResponse({
-      driverId: 'd-1',
-      offerId: 'o-1',
-      sharedRideId: 'pool-1',
-      accept: false,
-    });
-    expect(redis.del).toHaveBeenCalledWith('offer:o-1');
-    expect(repo.setClaimed).not.toHaveBeenCalled();
-  });
+describe('DispatchService.acceptOffer', () => {
+  it('solo winner: guard → claim → accept → revoke, in that order, then after-commit effects', async () => {
+    const m = makeService();
+    m.offers.revokeLiveForTrip.mockResolvedValue([{ offerId: 'o-2', driverId: OTHER }]);
+    const res = await m.svc.acceptOffer({ offerId: OFFER, driverId: DRIVER });
 
-  it('accept w/ sharedRideId: calls claimPool', async () => {
-    const { svc, repo } = makeService({ evalResult: 1 });
-    await svc.onRideOfferResponse({
-      driverId: 'd-1',
-      offerId: 'o-1',
-      sharedRideId: 'pool-1',
-      accept: true,
+    expect(res).toEqual({ ok: true, trip: { kind: 'solo', rideId: RIDE }, generation: 1, replay: false });
+    const order = [
+      m.assignments.lockSoloTrip,
+      m.offers.lockForUpdate,
+      m.assignments.driverEligibility,
+      m.assignments.acquire,
+      m.assignments.claimSoloRow,
+      m.offers.markAccepted,
+      m.offers.revokeLiveForTrip,
+    ].map((f) => f.mock.invocationCallOrder[0]);
+    expect(order).toEqual([...order].sort((a, b) => a - b));
+    expect(m.assignments.acquire).toHaveBeenCalledWith(m.tx, {
+      driverId: DRIVER,
+      trip: { kind: 'solo', rideId: RIDE },
+      offerId: OFFER,
+      generation: 1,
     });
-    expect(repo.setClaimed).toHaveBeenCalledWith('pool-1', 'd-1', expect.any(Date));
-  });
-
-  it('accept w/o sharedRideId: resolves rideId via offer:meta:<offerId>', async () => {
-    const { svc, repo } = makeService({
-      evalResult: 1,
-      metaResult: 'pool-from-meta',
+    expect(m.offers.revokeLiveForTrip).toHaveBeenCalledWith(m.tx, { kind: 'solo', rideId: RIDE }, OFFER);
+    expect(m.projection.set).toHaveBeenCalledWith(DRIVER, RIDE);
+    expect(m.queue.remove).toHaveBeenCalledWith(waveTwoJobId(RIDE, 1));
+    expect(m.queue.remove).toHaveBeenCalledWith(hardFailJobId(RIDE, 1));
+    expect(m.queue.remove).toHaveBeenCalledWith(legacyWaveTwoJobId(RIDE));
+    expect(m.queue.remove).toHaveBeenCalledWith(legacyHardFailJobId(RIDE));
+    expect(m.bus.toDriver).toHaveBeenCalledWith(DRIVER, 'ride_offer_accepted', {
+      offerId: OFFER,
+      rideId: RIDE,
     });
-    await svc.onRideOfferResponse({
-      driverId: 'd-1',
-      offerId: 'o-1',
-      accept: true,
+    expect(m.bus.toDriver).toHaveBeenCalledWith(OTHER, 'ride_offer_revoked', {
+      offerId: 'o-2',
+      rideId: RIDE,
+      sharedRideId: RIDE,
+      reason: 'taken',
     });
-    expect(repo.setClaimed).toHaveBeenCalledWith('pool-from-meta', 'd-1', expect.any(Date));
-  });
-
-  it('accept w/o resolvable rideId: ignores', async () => {
-    const { svc, repo } = makeService({
-      evalResult: 1,
-      metaResult: null,
-    });
-    await svc.onRideOfferResponse({
-      driverId: 'd-1',
-      offerId: 'o-1',
-      accept: true,
-    });
-    expect(repo.setClaimed).not.toHaveBeenCalled();
-  });
-
-  it('accept on a solo offer (winner): claims the rides row, never claimPool, confirms the driver', async () => {
-    const { svc, repo, ridesRepo, bus } = makeService({
-      metaResult: 'ride-1',
-      offerType: 'solo',
-    });
-    await svc.onRideOfferResponse({ driverId: 'd-1', offerId: 'o-1', accept: true });
-
-    expect(ridesRepo.claimSolo).toHaveBeenCalledWith('ride-1', 'd-1', expect.any(Date));
-    expect(repo.setClaimed).not.toHaveBeenCalled(); // pool Lua untouched
-    expect(bus.toDriver).toHaveBeenCalledWith('d-1', 'ride_offer_accepted', {
-      offerId: 'o-1',
-      rideId: 'ride-1',
-    });
-    // Booking client (already in ride:<id>) is told a driver was assigned so its
-    // live-tracking view activates immediately (RCAB-E4.S7).
-    expect(bus.toRide).toHaveBeenCalledWith('ride-1', 'ride_state_changed', {
-      rideId: 'ride-1',
+    expect(m.bus.toRide).toHaveBeenCalledWith(RIDE, 'ride_state_changed', {
+      rideId: RIDE,
       state: 'accepted',
       by: 'driver',
     });
   });
 
-  it('accept on a solo offer (lost the race): tells the driver the ride is taken', async () => {
-    const { svc, ridesRepo, bus } = makeService({
-      metaResult: 'ride-1',
-      offerType: 'solo',
-      setNx: null, // claim:ride SET NX fails → already claimed by someone
+  it('shared winner: needs a complete itinerary and seats ≥ seat_count', async () => {
+    const m = makeService();
+    const trip = { kind: 'shared', sharedRideId: POOL } as const;
+    m.offers.findForDriver.mockResolvedValue(offerRow({ trip }));
+    m.offers.lockForUpdate.mockResolvedValue(offerRow({ trip }));
+    const res = await m.svc.acceptOffer({ offerId: OFFER, driverId: DRIVER });
+
+    expect(res).toEqual({ ok: true, trip, generation: 1, replay: false });
+    expect(m.assignments.lockSharedTrip).toHaveBeenCalledWith(m.tx, POOL);
+    expect(m.stops.countAll).toHaveBeenCalledWith(POOL, m.tx);
+    expect(m.assignments.driverEligibility).toHaveBeenCalledWith(m.tx, DRIVER, 2);
+    expect(m.assignments.claimSharedRow).toHaveBeenCalledWith(m.tx, POOL, DRIVER, 1);
+    expect(m.bus.toDriver).toHaveBeenCalledWith(DRIVER, 'ride_offer_accepted', {
+      offerId: OFFER,
+      rideId: POOL,
+      sharedRideId: POOL,
     });
-    await svc.onRideOfferResponse({ driverId: 'd-2', offerId: 'o-2', accept: true });
+    expect(m.bus.toRide).not.toHaveBeenCalled();
+  });
 
-    expect(ridesRepo.claimSolo).not.toHaveBeenCalled();
-    expect(bus.toDriver).toHaveBeenCalledWith('d-2', 'ride_offer_revoked', {
-      offerId: 'o-2',
-      rideId: 'ride-1',
-      reason: 'taken',
+  it.each([
+    ['malformed offer id', { offerId: 'x' }, 'offer_not_found'],
+    ['malformed driver id', { driverId: 'd' }, 'offer_not_found'],
+  ])('%s → %s without touching the DB', async (_n, input, reason) => {
+    const m = makeService();
+    const res = await m.svc.acceptOffer({ offerId: OFFER, driverId: DRIVER, ...input });
+    expect(res).toEqual({ ok: false, reason });
+    expect(m.offers.findForDriver).not.toHaveBeenCalled();
+  });
+
+  it('unknown / foreign offer → offer_not_found; the refusal is also pushed as a revoke', async () => {
+    const m = makeService();
+    m.offers.findForDriver.mockResolvedValue(null);
+    expect(await m.svc.acceptOffer({ offerId: OFFER, driverId: DRIVER })).toEqual({
+      ok: false,
+      reason: 'offer_not_found',
+    });
+    expect(m.db.transaction).not.toHaveBeenCalled();
+    expect(m.bus.toDriver).toHaveBeenCalledWith(DRIVER, 'ride_offer_revoked', {
+      offerId: OFFER,
+      reason: 'unavailable',
+      detail: 'offer_not_found',
     });
   });
-});
 
-// ── dispatchSolo / runSoloWave (RCAB-E4.S3) ──────────────────────────────────
-
-describe('DispatchService.dispatchSolo', () => {
-  beforeEach(() => vi.clearAllMocks());
-
-  it('skips when the ride is not found', async () => {
-    const { svc, bus } = makeService({ soloRide: null });
-    await svc.dispatchSolo('missing');
-    expect(bus.toDriver).not.toHaveBeenCalled();
-  });
-
-  it('skips when the ride is not in requested state', async () => {
-    const { svc, bus, queue } = makeService({ soloRide: soloRide({ status: 'accepted' }) });
-    await svc.dispatchSolo('ride-1');
-    expect(bus.toDriver).not.toHaveBeenCalled();
-    expect(queue.add).not.toHaveBeenCalled();
-  });
-
-  it('wave 1: fans out a solo ride_offer to candidates + schedules wave-2 + hard-fail', async () => {
-    const { svc, bus, queue } = makeService({ soloRide: soloRide(), geo: ['d-1', 'd-2'] });
-    await svc.dispatchSolo('ride-1');
-
-    expect(bus.toDriver).toHaveBeenCalledTimes(2);
-    for (const call of bus.toDriver.mock.calls) {
-      const [driverId, event, payload] = call as [
-        string,
-        string,
-        { rideId: string; pickup: unknown; fareCents: number; waveNumber: number },
-      ];
-      expect(['d-1', 'd-2']).toContain(driverId);
-      expect(event).toBe('ride_offer');
-      expect(payload.rideId).toBe('ride-1');
-      expect(payload.fareCents).toBe(18500);
-      expect(payload.waveNumber).toBe(1);
-      expect(payload.pickup).toEqual({ lat: 26.1445, lng: 91.7362 });
-    }
-
-    const jobNames = queue.add.mock.calls.map((c) => c[0]);
-    expect(jobNames).toContain(WAVE_TIMEOUT_JOB);
-    expect(jobNames).toContain(HARD_FAIL_JOB);
-  });
-
-  it('tags each solo offer with offer:type=solo', async () => {
-    const { svc, redis } = makeService({ soloRide: soloRide(), geo: ['d-1'] });
-    await svc.dispatchSolo('ride-1');
-    const typeSet = redis.set.mock.calls.find(
-      (c) => typeof c[0] === 'string' && (c[0] as string).startsWith('offer:type:'),
-    );
-    expect(typeSet).toBeDefined();
-    expect(typeSet?.[1]).toBe('solo');
-  });
-
-  it('excludes drivers already in ride:<id>:offered', async () => {
-    const { svc, bus } = makeService({
-      soloRide: soloRide(),
-      geo: ['d-1', 'd-2'],
-      alreadyOffered: ['d-1'],
-    });
-    await svc.dispatchSolo('ride-1');
-    expect(bus.toDriver).toHaveBeenCalledTimes(1);
-    expect(bus.toDriver.mock.calls[0][0]).toBe('d-2');
-  });
-});
-
-describe('DispatchService.onRideRequested', () => {
-  beforeEach(() => vi.clearAllMocks());
-
-  it('dispatches the solo ride named in the event payload', async () => {
-    const { svc, bus } = makeService({ soloRide: soloRide(), geo: ['d-1'] });
-    await svc.onRideRequested({ rideId: 'ride-1' });
-    expect(bus.toDriver).toHaveBeenCalledTimes(1);
-  });
-});
-
-// ── claimSolo (RCAB-E4.S4) ───────────────────────────────────────────────────
-
-describe('DispatchService.claimSolo', () => {
-  beforeEach(() => vi.clearAllMocks());
-
-  it('winner: binds the rides row, sets driver:state, removes wave-2 + hard-fail timers', async () => {
-    const { svc, ridesRepo, redis, queue } = makeService();
-    const result = await svc.claimSolo('ride-1', 'd-1');
-
-    expect(result).toEqual({ ok: true, reason: 'claimed' });
-    expect(redis.set).toHaveBeenCalledWith(
-      'claim:ride:ride-1',
-      'd-1',
-      'EX',
-      expect.any(Number),
-      'NX',
-    );
-    expect(ridesRepo.claimSolo).toHaveBeenCalledWith('ride-1', 'd-1', expect.any(Date));
-    expect(redis.hset).toHaveBeenCalledWith('driver:state:d-1', 'current_ride_id', 'ride-1');
-    expect(queue.remove).toHaveBeenCalledWith('dispatch:wave2-timeout:ride-1');
-    expect(queue.remove).toHaveBeenCalledWith('dispatch:hard-fail:ride-1');
-  });
-
-  it('lost the claim race (SET NX fails, held by another driver): already_taken, no DB write', async () => {
-    const { svc, ridesRepo } = makeService({ setNx: null });
-    const result = await svc.claimSolo('ride-1', 'd-2');
-    expect(result).toEqual({ ok: false, reason: 'already_taken' });
-    expect(ridesRepo.claimSolo).not.toHaveBeenCalled();
-  });
-
-  it('ride moved on after the Redis claim (DB guard matches 0 rows): not_claimable, releases claim', async () => {
-    const { svc, redis } = makeService({ soloClaimResult: null });
-    const result = await svc.claimSolo('ride-1', 'd-1');
-    expect(result).toEqual({ ok: false, reason: 'not_claimable' });
-    expect(redis.del).toHaveBeenCalledWith('claim:ride:ride-1');
-  });
-
-  it('revokes losing offers but NOT the winner', async () => {
-    const { svc, bus } = makeService({
-      offerListIds: ['o-win', 'o-lose'],
-      offerOwners: { 'o-win': 'd-1', 'o-lose': 'd-2' },
-    });
-    await svc.claimSolo('ride-1', 'd-1');
-
-    expect(bus.toDriver).toHaveBeenCalledWith('d-2', 'ride_offer_revoked', expect.any(Object));
-    expect(bus.toDriver).not.toHaveBeenCalledWith('d-1', 'ride_offer_revoked', expect.any(Object));
-  });
-});
-
-// ── solo wave-2 / hard-fail handlers (RCAB-E4.S4) ─────────────────────────────
-
-describe('DispatchService.handleWaveTimeout (solo)', () => {
-  beforeEach(() => vi.clearAllMocks());
-
-  it('kind=solo + still requested: runs wave 2 and re-offers', async () => {
-    const { svc, bus, queue } = makeService({ soloRide: soloRide(), geo: ['d-9'] });
-    await svc.handleWaveTimeout({
-      data: { rideId: 'ride-1', waveNumber: 2, kind: 'solo' },
-    } as Job<WaveTimeoutJob>);
-
-    expect(bus.toDriver).toHaveBeenCalledTimes(1);
-    const [driverId, event, payload] = bus.toDriver.mock.calls[0] as [
-      string,
-      string,
-      { waveNumber: number },
-    ];
-    expect(driverId).toBe('d-9');
-    expect(event).toBe('ride_offer');
-    expect(payload.waveNumber).toBe(2);
-    // wave 2 does not schedule further timers
-    expect(queue.add).not.toHaveBeenCalled();
-  });
-
-  it('kind=solo but ride no longer requested: stale no-op', async () => {
-    const { svc, bus } = makeService({ soloRide: soloRide({ status: 'accepted' }) });
-    await svc.handleWaveTimeout({
-      data: { rideId: 'ride-1', waveNumber: 2, kind: 'solo' },
-    } as Job<WaveTimeoutJob>);
-    expect(bus.toDriver).not.toHaveBeenCalled();
-  });
-});
-
-describe('DispatchService.handleHardFail (solo)', () => {
-  beforeEach(() => vi.clearAllMocks());
-
-  it('kind=solo: marks no_driver, revokes offers, notifies the passenger', async () => {
-    const { svc, ridesRepo, bus } = makeService({
-      offerListIds: ['o-1'],
-      offerOwners: { 'o-1': 'd-1' },
-    });
-    await svc.handleHardFail({ data: { rideId: 'ride-1', kind: 'solo' } } as Job<HardFailJob>);
-
-    expect(ridesRepo.markNoDriver).toHaveBeenCalledWith('ride-1');
-    expect(bus.toDriver).toHaveBeenCalledWith('d-1', 'ride_offer_revoked', expect.any(Object));
-    expect(bus.toUser).toHaveBeenCalledWith('c-1', 'ride_no_driver', { rideId: 'ride-1' });
-  });
-
-  it('kind=solo but the ride was just claimed (guard matches 0 rows): no-op', async () => {
-    const { svc, bus } = makeService({ soloNoDriverResult: null });
-    await svc.handleHardFail({ data: { rideId: 'ride-1', kind: 'solo' } } as Job<HardFailJob>);
-    expect(bus.toUser).not.toHaveBeenCalled();
-  });
-});
-
-describe('DispatchService.onRideCancelled / releaseDispatch (RCAB-E4.S8)', () => {
-  beforeEach(() => vi.clearAllMocks());
-
-  it('drops the claim, revokes outstanding offers, removes both timers', async () => {
-    const { svc, redis, queue, bus } = makeService({
-      offerListIds: ['o-1'],
-      offerOwners: { 'o-1': 'd-loser' },
-    });
-    await svc.onRideCancelled({ rideId: 'ride-1', driverId: 'd-1' });
-
-    expect(redis.del).toHaveBeenCalledWith('claim:ride:ride-1');
-    expect(redis.del).toHaveBeenCalledWith('offer:o-1');
-    expect(bus.toDriver).toHaveBeenCalledWith(
-      'd-loser',
+  type M = ReturnType<typeof makeService>;
+  const cases: Array<[string, (m: M) => void, string]> = [
+    ['trip row gone', (m) => m.assignments.lockSoloTrip.mockResolvedValue(null), 'trip_not_claimable'],
+    [
+      'offer re-read under lock belongs to someone else',
+      (m) => m.offers.lockForUpdate.mockResolvedValue(offerRow({ driverId: OTHER })),
+      'offer_not_found',
+    ],
+    [
+      'accepted earlier but the assignment was released',
+      (m) => m.offers.lockForUpdate.mockResolvedValue(offerRow({ state: 'accepted' })),
+      'trip_not_claimable',
+    ],
+    [
+      'revoked because another driver won',
+      (m) => {
+        m.offers.lockForUpdate.mockResolvedValue(offerRow({ state: 'revoked' }));
+        m.assignments.lockSoloTrip.mockResolvedValue(
+          soloRide({ id: RIDE, status: 'accepted', driverId: OTHER }),
+        );
+      },
+      'trip_taken',
+    ],
+    [
+      'revoked by cancellation',
+      (m) => m.offers.lockForUpdate.mockResolvedValue(offerRow({ state: 'revoked' })),
+      'offer_revoked',
+    ],
+    [
+      'declined',
+      (m) => m.offers.lockForUpdate.mockResolvedValue(offerRow({ state: 'declined' })),
+      'offer_declined',
+    ],
+    [
+      'lapsed on the DB clock',
+      (m) => m.offers.lockForUpdate.mockResolvedValue(offerRow({ lapsed: true })),
+      'offer_expired',
+    ],
+    [
+      'older generation',
+      (m) => m.assignments.lockSoloTrip.mockResolvedValue(soloRide({ id: RIDE, dispatchGeneration: 2 })),
+      'offer_stale',
+    ],
+    [
+      'solo already bound',
+      (m) => m.assignments.lockSoloTrip.mockResolvedValue(soloRide({ id: RIDE, driverId: OTHER })),
+      'trip_taken',
+    ],
+    [
+      'solo no longer requested',
+      (m) => m.assignments.lockSoloTrip.mockResolvedValue(soloRide({ id: RIDE, status: 'cancelled' })),
+      'trip_not_claimable',
+    ],
+    ['ineligible account', (m) => m.assignments.driverEligibility.mockResolvedValue('driver_ineligible'), 'driver_ineligible'],
+    ['undersized vehicle', (m) => m.assignments.driverEligibility.mockResolvedValue('vehicle_capacity'), 'vehicle_capacity'],
+    [
+      'guard: driver already busy',
+      (m) => m.assignments.acquire.mockResolvedValue({ ok: false, reason: 'driver_busy' }),
+      'driver_busy',
+    ],
+    [
+      'guard: trip already assigned',
+      (m) => m.assignments.acquire.mockResolvedValue({ ok: false, reason: 'trip_taken' }),
+      'trip_taken',
+    ],
+  ];
+  it.each(cases)('%s → %s, nothing claimed', async (_name, arrange, reason) => {
+    const m = makeService();
+    arrange(m);
+    expect(await m.svc.acceptOffer({ offerId: OFFER, driverId: DRIVER })).toEqual({ ok: false, reason });
+    expect(m.assignments.claimSoloRow).not.toHaveBeenCalled();
+    expect(m.offers.markAccepted).not.toHaveBeenCalled();
+    expect(m.projection.set).not.toHaveBeenCalled();
+    expect(m.bus.toDriver).toHaveBeenCalledWith(
+      DRIVER,
       'ride_offer_revoked',
-      expect.objectContaining({ offerId: 'o-1' }),
+      expect.objectContaining({ offerId: OFFER, rideId: RIDE, detail: reason }),
     );
-    expect(queue.remove).toHaveBeenCalledWith('dispatch:wave2-timeout:ride-1');
-    expect(queue.remove).toHaveBeenCalledWith('dispatch:hard-fail:ride-1');
   });
 
-  it('is a safe no-op when nothing is in flight', async () => {
-    const { svc, redis, queue, bus } = makeService({ offerListIds: [] });
-    await expect(
-      svc.onRideCancelled({ rideId: 'ride-9', driverId: null }),
-    ).resolves.toBeUndefined();
+  it('expiry and staleness resolve the offer inside the transaction', async () => {
+    const lapsed = makeService();
+    lapsed.offers.lockForUpdate.mockResolvedValue(offerRow({ lapsed: true }));
+    await lapsed.svc.acceptOffer({ offerId: OFFER, driverId: DRIVER });
+    expect(lapsed.offers.resolveLive).toHaveBeenCalledWith(lapsed.tx, OFFER, 'expired');
 
-    // del + timer removal are always attempted (each a no-op if the key is absent).
-    expect(redis.del).toHaveBeenCalledWith('claim:ride:ride-9');
-    expect(queue.remove).toHaveBeenCalledWith('dispatch:wave2-timeout:ride-9');
-    expect(queue.remove).toHaveBeenCalledWith('dispatch:hard-fail:ride-9');
-    expect(bus.toDriver).not.toHaveBeenCalled();
+    const stale = makeService();
+    stale.assignments.lockSoloTrip.mockResolvedValue(soloRide({ id: RIDE, dispatchGeneration: 2 }));
+    await stale.svc.acceptOffer({ offerId: OFFER, driverId: DRIVER });
+    expect(stale.offers.resolveLive).toHaveBeenCalledWith(stale.tx, OFFER, 'revoked');
+  });
+
+  it('shared trip-state checks: claimed, wrong state, incomplete itinerary', async () => {
+    const trip = { kind: 'shared', sharedRideId: POOL } as const;
+    const arrange = (lock: Partial<SharedTripLockRow>, stopCount = 4) => {
+      const m = makeService();
+      m.offers.findForDriver.mockResolvedValue(offerRow({ trip }));
+      m.offers.lockForUpdate.mockResolvedValue(offerRow({ trip }));
+      m.assignments.lockSharedTrip.mockResolvedValue(poolLock(lock));
+      m.stops.countAll.mockResolvedValue(stopCount);
+      return m.svc.acceptOffer({ offerId: OFFER, driverId: DRIVER });
+    };
+    expect(await arrange({ claimedByDriverId: OTHER })).toEqual({ ok: false, reason: 'trip_taken' });
+    expect(await arrange({ poolState: 'aborted' })).toEqual({ ok: false, reason: 'trip_not_claimable' });
+    expect(await arrange({}, 0)).toEqual({ ok: false, reason: 'itinerary_missing' });
+    expect(await arrange({ seatCount: 0 }, 0)).toEqual({ ok: false, reason: 'itinerary_missing' });
+  });
+
+  it('replays a committed acceptance (before expiry rules) and re-acks without side effects', async () => {
+    const m = makeService();
+    m.offers.lockForUpdate.mockResolvedValue(offerRow({ state: 'accepted', lapsed: true }));
+    m.assignments.findByTrip.mockResolvedValue({
+      driverId: DRIVER,
+      trip: { kind: 'solo', rideId: RIDE },
+      offerId: OFFER,
+      generation: 1,
+      assignedAt: new Date(),
+    });
+    expect(await m.svc.acceptOffer({ offerId: OFFER, driverId: DRIVER })).toEqual({
+      ok: true,
+      trip: { kind: 'solo', rideId: RIDE },
+      generation: 1,
+      replay: true,
+    });
+    expect(m.assignments.acquire).not.toHaveBeenCalled();
+    expect(m.queue.remove).not.toHaveBeenCalled();
+    expect(m.bus.toRide).not.toHaveBeenCalled();
+    expect(m.projection.set).toHaveBeenCalledWith(DRIVER, RIDE);
+    expect(m.bus.toDriver).toHaveBeenCalledWith(DRIVER, 'ride_offer_accepted', expect.anything());
+  });
+
+  it('retries a deadlock victim twice, then answers conflict', async () => {
+    const m = makeService();
+    m.db.transaction.mockRejectedValue(Object.assign(new Error('deadlock'), { code: '40P01' }));
+    expect(await m.svc.acceptOffer({ offerId: OFFER, driverId: DRIVER })).toEqual({
+      ok: false,
+      reason: 'conflict',
+    });
+    expect(m.db.transaction).toHaveBeenCalledTimes(3);
+    // The offer is still live: no revoke is pushed for a lost lock race.
+    expect(m.bus.toDriver).not.toHaveBeenCalled();
+  });
+
+  it('a serialization failure that clears on retry still wins', async () => {
+    const m = makeService();
+    const real = m.db.transaction.getMockImplementation()!;
+    m.db.transaction
+      .mockRejectedValueOnce({ cause: { code: '40001' } })
+      .mockImplementation(real);
+    expect(await m.svc.acceptOffer({ offerId: OFFER, driverId: DRIVER })).toMatchObject({ ok: true });
+  });
+
+  it('a non-retryable error propagates (no false success)', async () => {
+    const m = makeService();
+    m.assignments.claimSoloRow.mockRejectedValue(new Error('boom'));
+    await expect(m.svc.acceptOffer({ offerId: OFFER, driverId: DRIVER })).rejects.toThrow('boom');
+    expect(m.projection.set).not.toHaveBeenCalled();
+  });
+
+  it('a failing socket delivery after commit never fails the winner', async () => {
+    const m = makeService();
+    m.bus.toDriver.mockImplementation(() => {
+      throw new Error('socket down');
+    });
+    m.queue.remove.mockRejectedValue(new Error('redis down'));
+    expect(await m.svc.acceptOffer({ offerId: OFFER, driverId: DRIVER })).toMatchObject({ ok: true });
+  });
+});
+
+describe('DispatchService.runSoloWave', () => {
+  it('offers eligible, not-yet-offered drivers; wave 1 arms generation timers', async () => {
+    const m = makeService();
+    m.redis.georadius.mockResolvedValue([DRIVER, OTHER, 'gone']);
+    m.offers.offeredDriverIds.mockResolvedValue(['gone']);
+    m.offers.createOffer.mockImplementation(async (_db: unknown, p: { driverId: string }) =>
+      p.driverId === OTHER ? null : { offerId: OFFER, expiresAt: new Date('2026-11-06T00:00:12.000Z') },
+    );
+
+    await m.svc.runSoloWave(soloRide({ id: RIDE }), 1, 1);
+
+    expect(m.redis.georadius).toHaveBeenCalledWith('active_drivers', 91.7362, 26.1445, 2000, 'm', 'ASC', 'COUNT', 21);
+    expect(m.offers.eligibleCandidates).toHaveBeenCalledWith(expect.anything(), [DRIVER, OTHER], 1);
+    expect(m.bus.toDriver).toHaveBeenCalledTimes(1);
+    expect(m.bus.toDriver).toHaveBeenCalledWith(DRIVER, 'ride_offer', {
+      offerId: OFFER,
+      rideId: RIDE,
+      ttlMs: 12_000,
+      expiresAt: '2026-11-06T00:00:12.000Z',
+      pickup: { lat: 26.1445, lng: 91.7362 },
+      dropoff: { lat: 26.1758, lng: 91.7898 },
+      fareCents: 18500,
+      waveNumber: 1,
+    });
+    expect(m.queue.add).toHaveBeenCalledWith(
+      WAVE_TIMEOUT_JOB,
+      { rideId: RIDE, waveNumber: 2, kind: 'solo', generation: 1 },
+      expect.objectContaining({ jobId: waveTwoJobId(RIDE, 1), delay: 30_000 }),
+    );
+    expect(m.queue.add).toHaveBeenCalledWith(
+      HARD_FAIL_JOB,
+      { rideId: RIDE, kind: 'solo', generation: 1 },
+      expect.objectContaining({ jobId: hardFailJobId(RIDE, 1), delay: 60_000 }),
+    );
+  });
+
+  it('wave 2 uses K2/R2 and arms no timers; the configured windows are honoured', async () => {
+    const m = makeService({ DISPATCH_K2: 3, DISPATCH_R2_METERS: 9000 });
+    await m.svc.runSoloWave(soloRide({ id: RIDE }), 2, 1);
+    expect(m.redis.georadius).toHaveBeenCalledWith('active_drivers', 91.7362, 26.1445, 9000, 'm', 'ASC', 'COUNT', 12);
+    expect(m.queue.add).not.toHaveBeenCalled();
+  });
+
+  it('refuses generation 0 (an un-woken / un-dispatched ride) and propagates infra errors', async () => {
+    const m = makeService();
+    await expect(m.svc.runSoloWave(soloRide({ id: RIDE, dispatchGeneration: 0 }), 1)).rejects.toThrow(
+      /no dispatch generation/,
+    );
+    m.redis.georadius.mockRejectedValue(new Error('redis down'));
+    await expect(m.svc.runSoloWave(soloRide({ id: RIDE }), 1, 1)).rejects.toThrow('redis down');
+    m.redis.georadius.mockResolvedValue([]);
+    m.queue.add.mockRejectedValue(new Error('queue down'));
+    await expect(m.svc.runSoloWave(soloRide({ id: RIDE }), 1, 1)).rejects.toThrow('queue down');
+  });
+});
+
+describe('DispatchService.runPoolWave', () => {
+  it('offers the persisted itinerary with passengerCount = seat_count', async () => {
+    const m = makeService();
+    m.redis.georadius.mockResolvedValue([DRIVER]);
+    await m.svc.runPoolWave(pool({ rideId: POOL }), 1, 1);
+    expect(m.offers.eligibleCandidates).toHaveBeenCalledWith(expect.anything(), [DRIVER], 2);
+    expect(m.bus.toDriver).toHaveBeenCalledWith(
+      DRIVER,
+      'ride_offer',
+      expect.objectContaining({ sharedRideId: POOL, passengerCount: 2, waveNumber: 1 }),
+    );
+    const payload = m.bus.toDriver.mock.calls[0][2] as { stops: unknown[] };
+    expect(payload.stops).toHaveLength(4);
+    expect(m.queue.add).toHaveBeenCalledWith(
+      WAVE_TIMEOUT_JOB,
+      { rideId: POOL, waveNumber: 2, kind: 'pool', generation: 1 },
+      expect.objectContaining({ jobId: waveTwoJobId(POOL, 1) }),
+    );
+  });
+
+  it('an incomplete itinerary gets no offers but still arms the hard-fail', async () => {
+    const m = makeService();
+    m.stops.findByRideId.mockResolvedValue(stopRows(2));
+    m.redis.georadius.mockResolvedValue([DRIVER]);
+    await m.svc.runPoolWave(pool({ rideId: POOL }), 1, 1);
+    expect(m.offers.createOffer).not.toHaveBeenCalled();
+    expect(m.queue.add).toHaveBeenCalledWith(HARD_FAIL_JOB, expect.anything(), expect.anything());
+  });
+
+  it('refuses generation 0 (open pool)', async () => {
+    const m = makeService();
+    await expect(m.svc.runPoolWave(pool({ dispatchGeneration: 0 }), 1)).rejects.toThrow(
+      /no dispatch generation/,
+    );
+  });
+});
+
+describe('DispatchService.handleWaveTimeout', () => {
+  const job = (data: WaveTimeoutJob) => ({ data }) as Job<WaveTimeoutJob>;
+
+  it('solo, still requested on the job generation → wave 2', async () => {
+    const m = makeService();
+    const spy = vi.spyOn(m.svc, 'runSoloWave').mockResolvedValue(undefined);
+    await m.svc.handleWaveTimeout(job({ rideId: RIDE, waveNumber: 2, kind: 'solo', generation: 1 }));
+    expect(spy).toHaveBeenCalledWith(expect.objectContaining({ id: RIDE }), 2, 1);
+  });
+
+  it.each([
+    ['ride gone', null, 1],
+    ['ride accepted', soloRide({ id: RIDE, status: 'accepted', driverId: OTHER }), 1],
+    ['older generation', soloRide({ id: RIDE, dispatchGeneration: 2 }), 1],
+  ])('solo stale (%s) → no-op', async (_n, ride, generation) => {
+    const m = makeService();
+    m.ridesRepo.findById.mockResolvedValue(ride);
+    const spy = vi.spyOn(m.svc, 'runSoloWave');
+    await m.svc.handleWaveTimeout(job({ rideId: RIDE, waveNumber: 2, kind: 'solo', generation }));
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('legacy pool job (no kind, no generation) → current generation', async () => {
+    const m = makeService();
+    const spy = vi.spyOn(m.svc, 'runPoolWave').mockResolvedValue(undefined);
+    await m.svc.handleWaveTimeout(job({ rideId: POOL, waveNumber: 2 }));
+    expect(spy).toHaveBeenCalledWith(expect.objectContaining({ rideId: 'pool-1' }), 2, 1);
+  });
+
+  it.each([
+    ['claimed', pool({ claimedByDriverId: OTHER })],
+    ['aborted', pool({ poolState: 'aborted' })],
+    ['re-dispatched', pool({ dispatchGeneration: 2 })],
+  ])('pool stale (%s) → no-op', async (_n, p) => {
+    const m = makeService();
+    m.repo.findById.mockResolvedValue(p);
+    const spy = vi.spyOn(m.svc, 'runPoolWave');
+    await m.svc.handleWaveTimeout(job({ rideId: POOL, waveNumber: 2, kind: 'pool', generation: 1 }));
+    expect(spy).not.toHaveBeenCalled();
+  });
+});
+
+describe('DispatchService.handleHardFail', () => {
+  const job = (data: HardFailJob) => ({ data }) as Job<HardFailJob>;
+
+  it('solo: no_driver committed → revoked drivers + passenger told, timers dropped', async () => {
+    const m = makeService();
+    m.ridesRepo.markNoDriver.mockResolvedValue({
+      row: soloRide({ id: RIDE, status: 'no_driver' }),
+      revokedOffers: [{ offerId: OFFER, driverId: DRIVER }],
+    });
+    await m.svc.handleHardFail(job({ rideId: RIDE, kind: 'solo', generation: 1 }));
+    expect(m.ridesRepo.markNoDriver).toHaveBeenCalledWith(RIDE, 1);
+    expect(m.bus.toDriver).toHaveBeenCalledWith(DRIVER, 'ride_offer_revoked', {
+      offerId: OFFER,
+      rideId: RIDE,
+      sharedRideId: RIDE,
+      reason: 'revoked',
+    });
+    expect(m.bus.toUser).toHaveBeenCalledWith('c-1', 'ride_no_driver', { rideId: RIDE });
+    expect(m.queue.remove).toHaveBeenCalledWith(waveTwoJobId(RIDE, 1));
+  });
+
+  it('solo: claimed / stale in the same instant → no-op', async () => {
+    const m = makeService();
+    await m.svc.handleHardFail(job({ rideId: RIDE, kind: 'solo', generation: 1 }));
+    expect(m.bus.toUser).not.toHaveBeenCalled();
+  });
+
+  it('pool: aborts the unclaimed pool on its generation and revokes offers', async () => {
+    const m = makeService();
+    m.offers.revokeLiveForTrip.mockResolvedValue([{ offerId: OFFER, driverId: DRIVER }]);
+    await m.svc.handleHardFail(job({ rideId: POOL, kind: 'pool' }));
+    expect(m.assignments.abortUnclaimedPool).toHaveBeenCalledWith(m.tx, POOL, 1);
+    expect(m.bus.toDriver).toHaveBeenCalledWith(DRIVER, 'ride_offer_revoked', {
+      offerId: OFFER,
+      sharedRideId: POOL,
+      reason: 'revoked',
+    });
+    expect(m.queue.remove).toHaveBeenCalledWith(hardFailJobId(POOL, 1));
+  });
+
+  it.each([
+    ['pool gone', null, undefined],
+    ['older generation job', poolLock({ dispatchGeneration: 2 }), 1],
+  ])('pool: %s → no abort', async (_n, lock, generation) => {
+    const m = makeService();
+    m.assignments.lockSharedTrip.mockResolvedValue(lock);
+    await m.svc.handleHardFail(job({ rideId: POOL, kind: 'pool', generation }));
+    expect(m.assignments.abortUnclaimedPool).not.toHaveBeenCalled();
+  });
+
+  it('pool: already claimed (abort matched nothing) → no revoke', async () => {
+    const m = makeService();
+    m.assignments.abortUnclaimedPool.mockResolvedValue(false);
+    await m.svc.handleHardFail(job({ rideId: POOL, kind: 'pool', generation: 1 }));
+    expect(m.offers.revokeLiveForTrip).not.toHaveBeenCalled();
+    expect(m.queue.remove).not.toHaveBeenCalled();
+  });
+});
+
+describe('DispatchService.onRideCancelled / releaseDispatch', () => {
+  it('drops current + legacy timers for the cancelled generation', async () => {
+    const m = makeService();
+    await m.svc.onRideCancelled({ rideId: RIDE, driverId: null, generation: 3 });
+    expect(m.queue.remove.mock.calls.map((c) => c[0])).toEqual([
+      legacyWaveTwoJobId(RIDE),
+      legacyHardFailJobId(RIDE),
+      waveTwoJobId(RIDE, 3),
+      hardFailJobId(RIDE, 3),
+    ]);
+  });
+
+  it('looks the generation up when not given; tolerates a missing ride and queue errors', async () => {
+    const m = makeService();
+    await m.svc.releaseDispatch(RIDE);
+    expect(m.queue.remove).toHaveBeenCalledWith(hardFailJobId(RIDE, 1));
+
+    const gone = makeService();
+    gone.ridesRepo.findById.mockRejectedValue(new Error('db down'));
+    gone.queue.remove.mockRejectedValue(new Error('redis down'));
+    await expect(gone.svc.releaseDispatch(RIDE)).resolves.toBeUndefined();
+    expect(gone.queue.remove).toHaveBeenCalledTimes(2);
   });
 });

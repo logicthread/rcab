@@ -194,15 +194,4 @@ export class SharedRideRepository {
       .set({ poolState: reason, poolClosedAt: new Date(), updatedAt: new Date() })
       .where(eq(sharedRide.rideId, rideId));
   }
-
-  async setClaimed(rideId: string, driverId: string, claimedAt: Date): Promise<void> {
-    await this.db
-      .update(sharedRide)
-      .set({
-        claimedByDriverId: driverId,
-        claimedAt,
-        updatedAt: new Date(),
-      })
-      .where(eq(sharedRide.rideId, rideId));
-  }
 }

@@ -110,8 +110,14 @@ describe.skipIf(skip)('RidesRepository — idempotency (real Postgres)', () => {
   // spec uses `pg.Pool`, unlike the single-Client dispatch-pool spec). RCAB-E1.S12.
   it('concurrent client-cancel + driver-cancel → exactly one applies, state coherent', async () => {
     const { row } = await repo.create(params(`idem-${randomUUID()}`));
+    // The guard (F06) references `driver`: the bound driver needs real rows.
     const driverId = randomUUID();
-    await repo.claimSolo(row.id, driverId, new Date()); // → accepted, both parties bound
+    await pool.query(
+      `INSERT INTO app_user (id, firebase_uid, phone_e164, role) VALUES ($1, $2, $3, 'driver')`,
+      [driverId, `fb-${driverId}`, `+92${String(Date.now()).slice(-10)}`],
+    );
+    await pool.query('INSERT INTO driver (user_id) VALUES ($1)', [driverId]);
+    expect(await repo.claimSolo(row.id, driverId)).not.toBeNull(); // → accepted + guard
 
     const [client, driver] = await Promise.all([
       repo.cancel({
@@ -145,6 +151,12 @@ describe.skipIf(skip)('RidesRepository — idempotency (real Postgres)', () => {
     );
     expect(rows[0].status).toBe('cancelled');
     expect(['client', 'driver']).toContain(rows[0].cancelled_by);
+    // The winning cancel released the driver's guard in the same transaction.
+    const guards = await pool.query(
+      'SELECT 1 FROM driver_active_assignment WHERE driver_id = $1',
+      [driverId],
+    );
+    expect(guards.rowCount).toBe(0);
   });
 
   // RCAB-E6.S2: scheduled rides persist type + scheduled_for (migration 0011).

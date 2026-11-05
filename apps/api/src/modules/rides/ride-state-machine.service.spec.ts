@@ -38,10 +38,10 @@ function build(transitionResult: RideTransitionResult, cancelResult?: RideCancel
     transition: vi.fn().mockResolvedValue(transitionResult),
     cancel: vi.fn().mockResolvedValue(cancelResult ?? transitionResult),
   };
-  const bus = { toRide: vi.fn() };
+  const bus = { toRide: vi.fn(), toDriver: vi.fn() };
   const events = { emit: vi.fn() };
   const config = { get: vi.fn().mockReturnValue(undefined) };
-  const redis = { hdel: vi.fn().mockResolvedValue(1) };
+  const redis = { eval: vi.fn().mockResolvedValue(1) };
   const sm = new RideStateMachine(
     repo as never,
     bus as never,
@@ -110,19 +110,26 @@ describe('RideStateMachine', () => {
   it('clears the driver current_ride_id on end_ride → completed', async () => {
     const { sm, redis } = build({ ok: true, row: makeRow('completed') });
     await sm.apply('r-1', 'd-1', 'end_ride');
-    expect(redis.hdel).toHaveBeenCalledWith('driver:state:d-1', 'current_ride_id');
+    // Compare-and-delete: only clears the projection if it still names r-1.
+    expect(redis.eval).toHaveBeenCalledWith(
+      expect.any(String),
+      1,
+      'driver:state:d-1',
+      'current_ride_id',
+      'r-1',
+    );
   });
 
   it('does not clear current_ride_id on a non-terminal transition', async () => {
     const { sm, redis } = build({ ok: true, row: makeRow('en_route') });
     await sm.apply('r-1', 'd-1', 'start_en_route');
-    expect(redis.hdel).not.toHaveBeenCalled();
+    expect(redis.eval).not.toHaveBeenCalled();
   });
 
   describe('cancel', () => {
     it('client cancel → repo.cancel, broadcasts cancelled by client, emits RIDE_CANCELLED_EVENT', async () => {
       const row = makeRow('cancelled', { cancelledBy: 'client' });
-      const { sm, repo, bus, events } = build({ ok: true, row }, { ok: true, row });
+      const { sm, repo, bus, events } = build({ ok: true, row }, { ok: true, row, revokedOffers: [] });
       const res = await sm.cancel({
         rideId: 'r-1',
         actor: 'client',
@@ -148,12 +155,13 @@ describe('RideStateMachine', () => {
       expect(events.emit).toHaveBeenCalledWith(RIDE_CANCELLED_EVENT, {
         rideId: 'r-1',
         driverId: 'd-1',
+        generation: 1,
       });
     });
 
     it('driver cancel broadcasts cancelled by driver', async () => {
       const row = makeRow('cancelled', { cancelledBy: 'driver', cancelReason: 'vehicle issue' });
-      const { sm, bus } = build({ ok: true, row }, { ok: true, row });
+      const { sm, bus } = build({ ok: true, row }, { ok: true, row, revokedOffers: [] });
       await sm.cancel({
         rideId: 'r-1',
         actor: 'driver',
@@ -170,7 +178,7 @@ describe('RideStateMachine', () => {
 
     it('no-show broadcasts state no_show', async () => {
       const row = makeRow('no_show', { cancelledBy: 'driver', cancelReason: 'no_show' });
-      const { sm, bus } = build({ ok: true, row }, { ok: true, row });
+      const { sm, bus } = build({ ok: true, row }, { ok: true, row, revokedOffers: [] });
       await sm.cancel({
         rideId: 'r-1',
         actor: 'driver',
@@ -187,7 +195,7 @@ describe('RideStateMachine', () => {
 
     it('clears the bound driver current_ride_id on cancel', async () => {
       const row = makeRow('cancelled', { cancelledBy: 'client' });
-      const { sm, redis } = build({ ok: true, row }, { ok: true, row });
+      const { sm, redis } = build({ ok: true, row }, { ok: true, row, revokedOffers: [] });
       await sm.cancel({
         rideId: 'r-1',
         actor: 'client',
@@ -195,12 +203,57 @@ describe('RideStateMachine', () => {
         isNoShow: false,
         reason: null,
       });
-      expect(redis.hdel).toHaveBeenCalledWith('driver:state:d-1', 'current_ride_id');
+      expect(redis.eval).toHaveBeenCalledWith(
+        expect.any(String),
+        1,
+        'driver:state:d-1',
+        'current_ride_id',
+        'r-1',
+      );
+    });
+
+    it('tells every driver whose offer the cancel revoked', async () => {
+      const row = makeRow('cancelled', { driverId: null, cancelledBy: 'client' });
+      const { sm, bus } = build(
+        { ok: true, row },
+        { ok: true, row, revokedOffers: [{ offerId: 'o-1', driverId: 'd-9' }] },
+      );
+      await sm.cancel({ rideId: 'r-1', actor: 'client', actorId: 'p-1', isNoShow: false, reason: null });
+      expect(bus.toDriver).toHaveBeenCalledWith('d-9', 'ride_offer_revoked', {
+        offerId: 'o-1',
+        rideId: 'r-1',
+        sharedRideId: 'r-1',
+        reason: 'revoked',
+      });
+    });
+
+    it('post-commit delivery failures never fail the committed cancel', async () => {
+      const row = makeRow('cancelled', { cancelledBy: 'client' });
+      const { sm, bus, redis, events } = build(
+        { ok: true, row },
+        { ok: true, row, revokedOffers: [{ offerId: 'o-1', driverId: 'd-9' }] },
+      );
+      bus.toRide.mockImplementation(() => {
+        throw new Error('socket down');
+      });
+      bus.toDriver.mockImplementation(() => {
+        throw new Error('socket down');
+      });
+      redis.eval.mockRejectedValue(new Error('redis down'));
+      const res = await sm.cancel({
+        rideId: 'r-1',
+        actor: 'client',
+        actorId: 'p-1',
+        isNoShow: false,
+        reason: null,
+      });
+      expect(res.ok).toBe(true);
+      expect(events.emit).toHaveBeenCalled();
     });
 
     it('does not touch the driver when none is bound (cancel before claim)', async () => {
       const row = makeRow('cancelled', { driverId: null, cancelledBy: 'client' });
-      const { sm, redis, events } = build({ ok: true, row }, { ok: true, row });
+      const { sm, redis, events } = build({ ok: true, row }, { ok: true, row, revokedOffers: [] });
       await sm.cancel({
         rideId: 'r-1',
         actor: 'client',
@@ -208,10 +261,11 @@ describe('RideStateMachine', () => {
         isNoShow: false,
         reason: null,
       });
-      expect(redis.hdel).not.toHaveBeenCalled();
+      expect(redis.eval).not.toHaveBeenCalled();
       expect(events.emit).toHaveBeenCalledWith(RIDE_CANCELLED_EVENT, {
         rideId: 'r-1',
         driverId: null,
+        generation: 1,
       });
     });
 
@@ -235,7 +289,7 @@ describe('RideStateMachine', () => {
         expect(res).toEqual({ ok: false, reason });
         expect(bus.toRide).not.toHaveBeenCalled();
         expect(events.emit).not.toHaveBeenCalled();
-        expect(redis.hdel).not.toHaveBeenCalled();
+        expect(redis.eval).not.toHaveBeenCalled();
       },
     );
   });

@@ -1,6 +1,6 @@
 import { Injectable, Inject } from '@nestjs/common';
-import { and, asc, eq, isNull, sql } from 'drizzle-orm';
-import { DRIZZLE_DB, type DrizzleDb } from '../../infra/db/drizzle.module';
+import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { DRIZZLE_DB, type DbExecutor, type DrizzleDb } from '../../infra/db/drizzle.module';
 import { rideStop, sharedRide } from '../../db/schema';
 
 export interface RideStopRow {
@@ -13,14 +13,6 @@ export interface RideStopRow {
   confirmedAt: Date | null;
 }
 
-export interface RideStopInsert {
-  sequenceIndex: number;
-  passengerId: string;
-  type: 'pickup' | 'dropoff';
-  lat: number;
-  lng: number;
-}
-
 function fromDb(r: {
   ride_id: string;
   sequence_index: number | string;
@@ -28,7 +20,7 @@ function fromDb(r: {
   type: string;
   lat: number | string;
   lng: number | string;
-  confirmed_at: Date | null;
+  confirmed_at: Date | string | null;
 }): RideStopRow {
   return {
     rideId: r.ride_id,
@@ -37,33 +29,23 @@ function fromDb(r: {
     type: r.type as 'pickup' | 'dropoff',
     lat: Number(r.lat),
     lng: Number(r.lng),
-    confirmedAt: r.confirmed_at,
+    // Raw `execute` rows carry timestamps as driver strings (drizzle's pg parsers).
+    confirmedAt: r.confirmed_at === null ? null : new Date(r.confirmed_at),
   };
 }
 
+/**
+ * A pool's persisted itinerary (`ride_stops`). Slice C writes it at pool
+ * closure; this repository reads it and records stop confirmations. Every
+ * method takes an optional executor so the stop-confirmation transaction (which
+ * holds the pool row lock) can run them; the default is the pool-backed db.
+ */
 @Injectable()
 export class RideStopRepository {
   constructor(@Inject(DRIZZLE_DB) private readonly db: DrizzleDb) {}
 
-  async seed(rideId: string, stops: RideStopInsert[]): Promise<void> {
-    if (stops.length === 0) return;
-    await this.db
-      .insert(rideStop)
-      .values(
-        stops.map((s) => ({
-          rideId,
-          sequenceIndex: s.sequenceIndex,
-          passengerId: s.passengerId,
-          type: s.type,
-          lat: s.lat,
-          lng: s.lng,
-        })),
-      )
-      .onConflictDoNothing();
-  }
-
-  async findByRideId(rideId: string): Promise<RideStopRow[]> {
-    const result = await this.db
+  async findByRideId(rideId: string, db: DbExecutor = this.db): Promise<RideStopRow[]> {
+    const result = await db
       .select()
       .from(rideStop)
       .where(eq(rideStop.rideId, rideId))
@@ -79,22 +61,23 @@ export class RideStopRepository {
     }));
   }
 
+  /** Stamp one unconfirmed stop on the DB clock. `null` ⇒ already confirmed / unknown. */
   async confirm(
     rideId: string,
     sequenceIndex: number,
-    confirmedAt: Date,
+    db: DbExecutor = this.db,
   ): Promise<RideStopRow | null> {
-    const result = await this.db.execute<{
+    const result = await db.execute<{
       ride_id: string;
       sequence_index: number | string;
       passenger_id: string;
       type: string;
       lat: number | string;
       lng: number | string;
-      confirmed_at: Date | null;
+      confirmed_at: Date | string | null;
     }>(sql`
       UPDATE ride_stops
-      SET    confirmed_at = ${confirmedAt}
+      SET    confirmed_at = now()
       WHERE  ride_id = ${rideId}
         AND  sequence_index = ${sequenceIndex}
         AND  confirmed_at IS NULL
@@ -104,27 +87,39 @@ export class RideStopRepository {
     return row ? fromDb(row) : null;
   }
 
-  async countPending(rideId: string): Promise<number> {
-    const result = await this.db
+  async countPending(rideId: string, db: DbExecutor = this.db): Promise<number> {
+    const result = await db
       .select({ n: sql<number>`COUNT(*)::int` })
       .from(rideStop)
       .where(and(eq(rideStop.rideId, rideId), isNull(rideStop.confirmedAt)));
     return Number(result[0]?.n ?? 0);
   }
 
-  async markRideCompleted(rideId: string, completedAt: Date): Promise<void> {
-    await this.db
-      .update(sharedRide)
-      .set({
-        poolState: 'completed',
-        completedAt,
-        updatedAt: new Date(),
-      })
-      .where(eq(sharedRide.rideId, rideId));
+  async countAll(rideId: string, db: DbExecutor = this.db): Promise<number> {
+    const result = await db
+      .select({ n: sql<number>`COUNT(*)::int` })
+      .from(rideStop)
+      .where(eq(rideStop.rideId, rideId));
+    return Number(result[0]?.n ?? 0);
   }
 
-  async markRideStarted(rideId: string): Promise<void> {
-    await this.db.execute(sql`
+  /** Final stop confirmed → `completed`. Only from a started/claimed pool. */
+  async markRideCompleted(rideId: string, db: DbExecutor = this.db): Promise<Date | null> {
+    const updated = await db
+      .update(sharedRide)
+      .set({ poolState: 'completed', completedAt: sql`now()`, updatedAt: sql`now()` })
+      .where(
+        and(
+          eq(sharedRide.rideId, rideId),
+          inArray(sharedRide.poolState, ['closed_full', 'closed_timeout', 'closed_started']),
+        ),
+      )
+      .returning({ completedAt: sharedRide.completedAt });
+    return updated[0]?.completedAt ?? null;
+  }
+
+  async markRideStarted(rideId: string, db: DbExecutor = this.db): Promise<void> {
+    await db.execute(sql`
       UPDATE shared_rides
       SET    pool_state = 'closed_started',
              updated_at = now()

@@ -2,7 +2,18 @@ import { Injectable, Inject } from '@nestjs/common';
 import { and, eq, sql } from 'drizzle-orm';
 import { DRIZZLE_DB, type DrizzleDb } from '../../infra/db/drizzle.module';
 import { rides, type SharedRideMember } from '../../db/schema';
+import { DriverAssignmentRepository } from '../dispatch/assignment.repository';
+import { DispatchOfferRepository } from '../dispatch/offer.repository';
 import { IdempotencyOperation } from './idempotency';
+import { toRow, type RideRow } from './ride-row';
+
+export type { RideRow } from './ride-row';
+
+/** A live offer a ride-state change revoked; its driver is told after commit. */
+export interface RevokedOffer {
+  offerId: string;
+  driverId: string;
+}
 
 /** The idempotency operations that persist as a `rides` row. */
 export type RideIdempotencyOperation =
@@ -21,31 +32,6 @@ export interface PoolMembershipRow {
   opened: boolean;
 }
 
-export interface RideRow {
-  id: string;
-  passengerId: string;
-  originLat: number;
-  originLng: number;
-  destLat: number;
-  destLng: number;
-  fareCents: number;
-  status: string;
-  type: string;
-  scheduledFor: Date | null;
-  idempotencyKey: string;
-  driverId: string | null;
-  acceptedAt: Date | null;
-  enRouteAt: Date | null;
-  arrivedAt: Date | null;
-  startedAt: Date | null;
-  completedAt: Date | null;
-  cancelledAt: Date | null;
-  cancelledBy: string | null;
-  cancelReason: string | null;
-  /** 0014: generation every offer/dispatch job for this ride must match. */
-  dispatchGeneration: number;
-}
-
 /**
  * Result of a guarded lifecycle transition. The three failure reasons map to
  * HTTP 404 / 403 / 409 at the controller. RCAB-E4.S6.
@@ -59,7 +45,7 @@ export type RideTransitionResult =
  * a no-show reported before the 5-minute wait has elapsed (→ HTTP 409). RCAB-E4.S8.
  */
 export type RideCancelResult =
-  | { ok: true; row: RideRow }
+  | { ok: true; row: RideRow; revokedOffers: RevokedOffer[] }
   | {
       ok: false;
       reason: 'not_found' | 'not_owner' | 'invalid_transition' | 'no_show_too_early';
@@ -88,6 +74,9 @@ const DRIVER_CANCELLABLE: ReadonlySet<string> = new Set([
 
 // Each forward target state stamps exactly one timestamp column. `accepted` is
 // stamped by claimSolo (0007); the rest land here on transition.
+// Statuses after which the driver no longer holds the trip (guard released).
+const TERMINAL_STATUSES: ReadonlySet<string> = new Set(['completed', 'cancelled', 'no_show']);
+
 const TIMESTAMP_FOR_STATUS: Record<
   string,
   'enRouteAt' | 'arrivedAt' | 'startedAt' | 'completedAt' | undefined
@@ -98,34 +87,13 @@ const TIMESTAMP_FOR_STATUS: Record<
   completed: 'completedAt',
 };
 
-function toRow(r: typeof rides.$inferSelect): RideRow {
-  return {
-    id: r.id,
-    passengerId: r.passengerId,
-    originLat: Number(r.originLat),
-    originLng: Number(r.originLng),
-    destLat: Number(r.destLat),
-    destLng: Number(r.destLng),
-    fareCents: Number(r.fareCents),
-    status: r.status,
-    type: r.type,
-    scheduledFor: r.scheduledFor,
-    idempotencyKey: r.idempotencyKey,
-    driverId: r.driverId,
-    acceptedAt: r.acceptedAt,
-    enRouteAt: r.enRouteAt,
-    arrivedAt: r.arrivedAt,
-    startedAt: r.startedAt,
-    completedAt: r.completedAt,
-    cancelledAt: r.cancelledAt,
-    cancelledBy: r.cancelledBy,
-    cancelReason: r.cancelReason,
-    dispatchGeneration: Number(r.dispatchGeneration),
-  };
-}
-
 @Injectable()
 export class RidesRepository {
+  // Stateless SQL helpers (they run on the transaction they are handed); held
+  // directly rather than injected so RidesModule does not depend on dispatch.
+  private readonly assignments = new DriverAssignmentRepository();
+  private readonly offers = new DispatchOfferRepository();
+
   constructor(@Inject(DRIZZLE_DB) private readonly db: DrizzleDb) {}
 
   /**
@@ -220,32 +188,54 @@ export class RidesRepository {
   }
 
   /**
-   * First-accept-wins solo claim. Conditional on `status='requested'`, so it is
-   * atomic against a concurrent claim (only one UPDATE can match the row while
-   * it is requested). Returns the bound row, or null if the ride was already
-   * claimed / cancelled / gone (0 rows affected). RCAB-E4.S4.
+   * Direct (offer-less) guarded assignment of a `requested` solo ride to a
+   * driver — the operator / fixture seam. Same transaction shape as an offer
+   * accept: lock the ride, take the driver-exclusivity guard (F06), bind the
+   * row, revoke any live offers. Returns null when the ride is not claimable,
+   * the driver already holds an active trip, or the ride already has a driver.
    */
-  async claimSolo(rideId: string, driverId: string, acceptedAt: Date): Promise<RideRow | null> {
-    const updated = await this.db
-      .update(rides)
-      .set({ status: 'accepted', driverId, acceptedAt, updatedAt: new Date() })
-      .where(and(eq(rides.id, rideId), eq(rides.status, 'requested')))
-      .returning();
-    return updated[0] ? toRow(updated[0]) : null;
+  async claimSolo(rideId: string, driverId: string): Promise<RideRow | null> {
+    return this.db.transaction(async (tx) => {
+      const ride = await this.assignments.lockSoloTrip(tx, rideId);
+      if (!ride || ride.status !== 'requested' || ride.driverId) return null;
+      const generation = Math.max(ride.dispatchGeneration, 1);
+      const trip = { kind: 'solo', rideId } as const;
+      const guard = await this.assignments.acquire(tx, {
+        driverId,
+        trip,
+        offerId: null,
+        generation,
+      });
+      if (!guard.ok) return null;
+      const row = await this.assignments.claimSoloRow(tx, rideId, driverId, generation);
+      await this.offers.revokeLiveForTrip(tx, trip);
+      return row;
+    });
   }
 
   /**
    * Terminal transition when dispatch exhausts all waves with no acceptance.
-   * Guarded by `status='requested'` so it never clobbers a ride that got
-   * claimed in the same instant the hard-fail timer fired. RCAB-E4.S4.
+   * One transaction: lock the ride, require `requested`, unassigned and — when
+   * the timer carries one — the same dispatch generation (a legacy job without
+   * a generation means "current"), then mark `no_driver` and revoke every live
+   * offer. A ride claimed or cancelled in the same instant is left untouched.
    */
-  async markNoDriver(rideId: string): Promise<RideRow | null> {
-    const updated = await this.db
-      .update(rides)
-      .set({ status: 'no_driver', updatedAt: new Date() })
-      .where(and(eq(rides.id, rideId), eq(rides.status, 'requested')))
-      .returning();
-    return updated[0] ? toRow(updated[0]) : null;
+  async markNoDriver(
+    rideId: string,
+    generation?: number,
+  ): Promise<{ row: RideRow; revokedOffers: RevokedOffer[] } | null> {
+    return this.db.transaction(async (tx) => {
+      const ride = await this.assignments.lockSoloTrip(tx, rideId);
+      if (!ride || ride.status !== 'requested' || ride.driverId) return null;
+      if (generation !== undefined && generation !== ride.dispatchGeneration) return null;
+      const updated = await tx
+        .update(rides)
+        .set({ status: 'no_driver', updatedAt: sql`now()` })
+        .where(eq(rides.id, rideId))
+        .returning();
+      const revokedOffers = await this.offers.revokeLiveForTrip(tx, { kind: 'solo', rideId });
+      return { row: toRow(updated[0]), revokedOffers };
+    });
   }
 
   /**
@@ -256,7 +246,8 @@ export class RidesRepository {
    * `not_found`, a caller who is not the bound driver is `not_owner`, and a
    * `fromStatus` that no longer matches the live row is `invalid_transition`
    * (out-of-order / already advanced). On success it stamps the timestamp
-   * column for `toStatus`. RCAB-E4.S6.
+   * column for `toStatus`. Reaching `completed` releases the driver's
+   * assignment guard in the same transaction (F06). RCAB-E4.S6.
    */
   async transition(
     rideId: string,
@@ -277,6 +268,9 @@ export class RidesRepository {
       if (tsField) patch[tsField] = now;
 
       const updated = await tx.update(rides).set(patch).where(eq(rides.id, rideId)).returning();
+      if (TERMINAL_STATUSES.has(toStatus)) {
+        await this.assignments.release(tx, { driverId, trip: { kind: 'solo', rideId } });
+      }
       return { ok: true, row: toRow(updated[0]) };
     });
   }
@@ -284,12 +278,15 @@ export class RidesRepository {
   /**
    * Guarded cancellation / no-show. Like `transition`, runs a
    * `SELECT … FOR UPDATE` inside a transaction so it can never race a forward
-   * step or a concurrent cancel. Classifies failure before writing: missing row
-   * → `not_found`; a caller who is not the bound party → `not_owner`; a current
-   * state that is not cancellable for the actor → `invalid_transition`. A no-show
-   * is only valid from `arrived` and only once `now − arrived_at ≥ noShowWaitMs`
-   * (else `no_show_too_early`). On success it stamps `cancelled_at` + records
-   * `cancelled_by` / `cancel_reason`. No fee is computed (Phase-0). RCAB-E4.S8.
+   * step, a concurrent cancel or an offer accept (the accept locks the same row
+   * first — exactly one of them commits its outcome, T21). Classifies failure
+   * before writing: missing row → `not_found`; a caller who is not the bound
+   * party → `not_owner`; a current state that is not cancellable for the actor
+   * → `invalid_transition`. A no-show is only valid from `arrived` and only once
+   * `now − arrived_at ≥ noShowWaitMs` (else `no_show_too_early`). On success it
+   * stamps `cancelled_at` + records `cancelled_by` / `cancel_reason`, revokes
+   * every live offer and releases the bound driver's guard in the same
+   * transaction. No fee is computed (Phase-0). RCAB-E4.S8.
    */
   async cancel(params: {
     rideId: string;
@@ -339,7 +336,12 @@ export class RidesRepository {
         })
         .where(eq(rides.id, rideId))
         .returning();
-      return { ok: true, row: toRow(updated[0]) };
+      const trip = { kind: 'solo', rideId } as const;
+      const revokedOffers = await this.offers.revokeLiveForTrip(tx, trip);
+      if (current.driverId) {
+        await this.assignments.release(tx, { driverId: current.driverId, trip });
+      }
+      return { ok: true, row: toRow(updated[0]), revokedOffers };
     });
   }
 

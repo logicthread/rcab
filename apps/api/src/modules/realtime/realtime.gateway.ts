@@ -18,6 +18,7 @@ import { REDIS } from '../../infra/redis/redis.module';
 import { RealtimeBus } from './realtime.bus';
 import type { JwtPayload } from '../../common/guards/auth.guard';
 import { verifyAccessToken } from '../../common/guards/access-token';
+import type { AcceptOfferResult, DeclineOfferResult } from '../dispatch/dispatch.types';
 
 export const RIDE_OFFER_RESPONSE_EVENT = 'dispatch.ride_offer_response';
 export const STOP_CONFIRM_REQUEST_EVENT = 'ride-lifecycle.stop_confirm_request';
@@ -30,15 +31,27 @@ export const RIDE_SUBSCRIBE_REQUEST_EVENT = 'realtime.ride_subscribe_request';
 /** Server → client live driver position while a ride is active. */
 export const DRIVER_LOCATION_EVENT = 'driver_location';
 
-interface RideOfferResponsePayload {
+/**
+ * Driver → server answer to a `ride_offer`. Only `offerId` (a UUID) and a
+ * strict boolean `accept` are read; any client-sent trip id (the legacy
+ * `sharedRideId`) is ignored — the trip comes from the stored offer (F05).
+ */
+export interface RideOfferResponsePayload {
   offerId: string;
-  sharedRideId?: string;
   accept: boolean;
 }
 
 export interface RideOfferResponseEvent extends RideOfferResponsePayload {
   driverId: string;
 }
+
+/** The Socket.IO ack for `ride_offer_response`. */
+export type RideOfferResponseAck =
+  | AcceptOfferResult
+  | DeclineOfferResult
+  | { ok: false; reason: 'invalid_payload' | 'forbidden' | 'unavailable' };
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 interface LocationPayload {
   lat: number;
@@ -206,21 +219,32 @@ export class RealtimeGateway
     } satisfies RideSubscribeRequestEvent);
   }
 
+  /**
+   * Accept / decline an offer. Rejects anything but a UUID `offerId` and a
+   * real boolean `accept` (`'false'`, `1`, … are not coerced). Dispatch answers
+   * through `emitAsync`, and its result is returned as the Socket.IO ack —
+   * keeping the realtime → dispatch module cycle broken.
+   */
   @SubscribeMessage('ride_offer_response')
-  handleRideOfferResponse(
-    @MessageBody() data: RideOfferResponsePayload,
+  async handleRideOfferResponse(
+    @MessageBody() data: unknown,
     @ConnectedSocket() client: Socket,
-  ): void {
+  ): Promise<RideOfferResponseAck> {
     const driverId = client.data.userId as string | undefined;
-    if (!driverId || client.data.role !== 'driver') return;
-    if (!data || typeof data.offerId !== 'string') return;
+    if (!driverId || client.data.role !== 'driver') return { ok: false, reason: 'forbidden' };
+    if (!data || typeof data !== 'object') return { ok: false, reason: 'invalid_payload' };
+    const { offerId, accept } = data as Record<string, unknown>;
+    if (typeof offerId !== 'string' || !UUID_RE.test(offerId) || typeof accept !== 'boolean') {
+      return { ok: false, reason: 'invalid_payload' };
+    }
 
-    this.events.emit(RIDE_OFFER_RESPONSE_EVENT, {
+    const results: unknown[] = await this.events.emitAsync(RIDE_OFFER_RESPONSE_EVENT, {
       driverId,
-      offerId: data.offerId,
-      sharedRideId: data.sharedRideId,
-      accept: Boolean(data.accept),
+      offerId,
+      accept,
     } satisfies RideOfferResponseEvent);
+    const answer = results.find((r) => r !== undefined) as RideOfferResponseAck | undefined;
+    return answer ?? { ok: false, reason: 'unavailable' };
   }
 
   @SubscribeMessage('stop:pickup_confirmed')

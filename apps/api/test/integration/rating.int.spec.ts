@@ -36,12 +36,18 @@ describe.skipIf(skip)('RatingService.rate — two-sided capture (real Postgres)'
       `INSERT INTO app_user (id, firebase_uid, phone_e164, role) VALUES ($1, $2, $3, 'client')`,
       [passengerId, `fb-${passengerId}`, phone],
     );
+    // The driver assignment guard (0014) references `driver`: seed a real one.
+    await pool.query(
+      `INSERT INTO app_user (id, firebase_uid, phone_e164, role) VALUES ($1, $2, $3, 'driver')`,
+      [driverId, `fb-${driverId}`, uniquePhone()],
+    );
+    await pool.query('INSERT INTO driver (user_id) VALUES ($1)', [driverId]);
   });
 
   afterAll(async () => {
     await pool.query('DELETE FROM ratings WHERE rater_id = $1 OR subject_id = $1', [passengerId]);
     await pool.query('DELETE FROM rides WHERE passenger_id = $1', [passengerId]);
-    await pool.query('DELETE FROM app_user WHERE id = $1', [passengerId]);
+    await pool.query('DELETE FROM app_user WHERE id = ANY($1::uuid[])', [[passengerId, driverId]]);
     await pool.end();
   });
 
@@ -56,7 +62,7 @@ describe.skipIf(skip)('RatingService.rate — two-sided capture (real Postgres)'
       fareCents: 18500,
       idempotencyKey: `idem-${randomUUID()}`,
     });
-    await ridesRepo.claimSolo(row.id, driverId, new Date());
+    await ridesRepo.claimSolo(row.id, driverId);
     await ridesRepo.transition(row.id, driverId, 'accepted', 'en_route');
     await ridesRepo.transition(row.id, driverId, 'en_route', 'arrived');
     await ridesRepo.transition(row.id, driverId, 'arrived', 'in_progress');

@@ -6,6 +6,9 @@ import { RealtimeModule } from '../realtime/realtime.module';
 import { RidesModule } from '../rides/rides.module';
 import { DispatchService, DISPATCH_QUEUE } from './dispatch.service';
 import { DispatchProcessor } from './dispatch.processor';
+import { DispatchOfferRepository } from './offer.repository';
+import { DriverAssignmentRepository } from './assignment.repository';
+import { DriverAssignmentProjection } from './driver-assignment.projection';
 
 @Module({
   imports: [
@@ -15,7 +18,18 @@ import { DispatchProcessor } from './dispatch.processor';
     RidesModule,
     BullModule.registerQueue({ name: DISPATCH_QUEUE }),
   ],
-  providers: [DispatchService, DispatchProcessor],
-  exports: [DispatchService],
+  providers: [
+    DispatchService,
+    DispatchProcessor,
+    DispatchOfferRepository,
+    DriverAssignmentRepository,
+    DriverAssignmentProjection,
+  ],
+  exports: [
+    DispatchService,
+    DispatchOfferRepository,
+    DriverAssignmentRepository,
+    DriverAssignmentProjection,
+  ],
 })
 export class DispatchModule {}
