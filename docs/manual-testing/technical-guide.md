@@ -1,5 +1,11 @@
 # rcab — Technical Guide (What's Built, What to Test)
 
+> ⚠️ **Superseded (2026-07-17).** This guide predates E4/E5/E6 and contains several
+> speculative names that never shipped (web port, `users`/`pools`/`dispatch_offers`
+> tables, event names). Use **`docs/ARCHITECTURE.md`** (code-verified) as the
+> authoritative architecture reference and **`docs/manual-testing/RUN-GUIDE.md`** for
+> current bring-up + demo flows. Kept for history.
+
 Read this alongside [`demo-walkthrough.md`](./demo-walkthrough.md). This doc explains **what exists**, **why it's structured this way**, and **what to probe** as you test. Source of truth for architecture lives in the Obsidian vault (`00-index/HOME.md`); this guide is a flattened, testing-focused view of just the shipped parts.
 
 ---
@@ -407,7 +413,9 @@ redis-cli ZRANGE drivers:geo 0 -1 WITHSCORES
 /pool-inspect
 
 # Watch a ride row evolve
-watch -n1 'psql postgres://postgres:postgres@localhost:5432/rcab \
+# Postgres has no host port in dev — go through the container:
+watch -n1 'docker compose --env-file .env.dev -f infra/docker/docker-compose.dev.yml \
+  exec -T postgres psql -U rcab -d rcab \
   -c "SELECT id,state,driver_id,quoted_fare FROM rides ORDER BY created_at DESC LIMIT 5"'
 
 # Tail API logs only

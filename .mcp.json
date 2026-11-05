@@ -1,10 +1,31 @@
 {
-  "$schema": "https://json.schemastore.org/claude-code-mcp-config.json",
   "mcpServers": {
     "context7": {
       "type": "stdio",
       "command": "npx",
-      "args": ["-y", "@upstash/context7-mcp"]
+      "args": [
+        "-y",
+        "@upstash/context7-mcp"
+      ]
+    },
+    "github": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-github"
+      ],
+      "env": {}
+    },
+    "redis": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@gongrzhe/server-redis-mcp",
+        "redis://localhost:6379"
+      ],
+      "env": {}
     }
   }
 }

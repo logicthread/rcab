@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/driver/driver_state.dart';
@@ -121,7 +122,23 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
     return Scaffold(
       key: const Key('home_screen'),
-      appBar: AppBar(title: const Text('rcab')),
+      appBar: AppBar(
+        title: const Text('rcab'),
+        actions: [
+          IconButton(
+            key: const Key('earnings_button'),
+            icon: const Icon(Icons.account_balance_wallet_outlined),
+            tooltip: 'Earnings',
+            onPressed: () => context.push('/earnings'),
+          ),
+          IconButton(
+            key: const Key('profile_button'),
+            icon: const Icon(Icons.person_outline),
+            tooltip: 'Profile & vehicles',
+            onPressed: () => context.push('/profile'),
+          ),
+        ],
+      ),
       body: Column(
         children: [
           const ServiceKillBanner(),

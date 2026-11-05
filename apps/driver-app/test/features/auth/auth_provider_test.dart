@@ -50,10 +50,19 @@ AuthNotifier _makeNotifier({
   );
 }
 
-Response<Map<String, dynamic>> _successResponse(Map<String, dynamic> data) =>
+Response<Map<String, dynamic>> _successResponse(
+  Map<String, dynamic> data, {
+  String? refreshCookie,
+}) =>
     Response<Map<String, dynamic>>(
       data: data,
       statusCode: 200,
+      // Mirror the API: refresh token arrives as an HttpOnly Set-Cookie.
+      headers: refreshCookie == null
+          ? null
+          : Headers.fromMap({
+              'set-cookie': ['refresh_token=$refreshCookie; Path=/; HttpOnly'],
+            }),
       requestOptions: RequestOptions(path: '/v1/auth/firebase-exchange'),
     );
 
@@ -87,11 +96,13 @@ void main() {
           data: any(named: 'data'),
         ),
       ).thenAnswer(
-        (_) async => _successResponse({
-          'rcab_jwt': 'jwt.payload.sig',
-          'refresh_token': 'refresh_abc',
-          'user': {'id': 'u1', 'role': 'driver'},
-        }),
+        (_) async => _successResponse(
+          {
+            'access_token': 'jwt.payload.sig',
+            'user': {'id': 'u1', 'role': 'driver'},
+          },
+          refreshCookie: 'refresh_abc',
+        ),
       );
 
       expect(notifier.state, isA<AuthStateUnauthenticated>());

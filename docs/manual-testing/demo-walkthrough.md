@@ -1,5 +1,12 @@
 # rcab — Demo Walkthrough & Human Testing Guide
 
+> ⚠️ **Superseded (2026-07-17, re-checked 2026-09-28).** Only covers Demos 0–1 in detail, and
+> its environment details are wrong: web is `:3002`, Grafana `:3001`, tables are `app_user`
+> (not `users`), Postgres creds are `rcab/rcab` and **Postgres + OSRM publish no host port**
+> (no `localhost:5432` / `localhost:5000`), and the dev OSRM graph covers **Guwahati**, not
+> Bengaluru. Use **`docs/manual-testing/RUN-GUIDE.md`** (Demos 0–5, code-verified) instead.
+> Kept for the demo narrative and acceptance wording.
+
 This guide walks through every demo that is **built and shippable** today (Demos 0–4 — epics E1–E5). It is the first human-facing testing pass for the project; until now everything has been gated by automated tests only.
 
 For each demo you get:

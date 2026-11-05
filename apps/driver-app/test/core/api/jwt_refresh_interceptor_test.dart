@@ -30,13 +30,16 @@ class _FakeAdapter implements HttpClientAdapter {
   void close({bool force = false}) {}
 }
 
-ResponseBody _json(int status, Map<String, dynamic> body) {
+ResponseBody _json(int status, Map<String, dynamic> body, {String? refreshCookie}) {
   final bytes = utf8.encode(jsonEncode(body));
   return ResponseBody.fromBytes(
     bytes,
     status,
     headers: {
       Headers.contentTypeHeader: [Headers.jsonContentType],
+      // Mirror the API: refresh token rotates via an HttpOnly Set-Cookie.
+      if (refreshCookie != null)
+        'set-cookie': ['refresh_token=$refreshCookie; Path=/; HttpOnly'],
     },
   );
 }
@@ -128,10 +131,7 @@ void main() {
       final refreshDio = Dio(BaseOptions(baseUrl: _baseUrl))
         ..httpClientAdapter = _FakeAdapter((opts) {
           if (opts.path == '/v1/auth/refresh') {
-            return _json(200, {
-              'rcab_jwt': 'new.jwt',
-              'refresh_token': 'new-refresh',
-            });
+            return _json(200, {'access_token': 'new.jwt'}, refreshCookie: 'new-refresh');
           }
           // Retry of the original request routes through _refreshDio.
           return _json(200, {'data': 'ok'});

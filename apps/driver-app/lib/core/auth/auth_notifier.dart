@@ -4,6 +4,7 @@ import 'package:dio/dio.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../api/cookie_util.dart';
 import 'auth_state.dart';
 import 'token_store.dart';
 
@@ -30,12 +31,13 @@ class AuthNotifier extends StateNotifier<AuthState> {
     try {
       final response = await _dio.post<Map<String, dynamic>>(
         '/v1/auth/firebase-exchange',
-        data: {'firebase_id_token': idToken},
+        data: {'id_token': idToken},
       );
       final data = response.data;
       if (data == null) return 'Sign-in failed';
-      final jwt = data['rcab_jwt'] as String;
-      final refresh = data['refresh_token'] as String;
+      final jwt = data['access_token'] as String;
+      // The refresh token comes back as an HttpOnly Set-Cookie, not in the body.
+      final refresh = cookieFromResponse(response, kRefreshCookieName) ?? '';
       final userMap = data['user'] as Map<String, dynamic>;
       await _tokenStore.saveTokens(jwt: jwt, refresh: refresh);
       state = AuthStateAuthenticated(
@@ -65,6 +67,14 @@ class AuthNotifier extends StateNotifier<AuthState> {
     final claims = _decodeJwtPayload(jwt);
     final userId = claims['sub'] as String?;
     if (userId == null || userId.isEmpty) return;
+    // Don't restore a dead session: if the stored access token has already
+    // expired, clear it and stay unauthenticated so the user re-signs in with a
+    // fresh token (proactive refresh-on-cold-start is a follow-up).
+    final exp = claims['exp'];
+    if (exp is int && DateTime.now().millisecondsSinceEpoch ~/ 1000 >= exp) {
+      await _tokenStore.clear();
+      return;
+    }
     state = AuthStateAuthenticated(
       userId: userId,
       role: (claims['role'] as String?) ?? 'driver',

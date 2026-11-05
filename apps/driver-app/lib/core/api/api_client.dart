@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
 import '../auth/token_store.dart';
+import 'cookie_util.dart';
 
 /// Builds the app-wide dio instance.
 ///
@@ -99,21 +100,31 @@ class JwtRefreshInterceptor extends Interceptor {
         return handler.next(err);
       }
 
-      final newJwt = refreshResponse.data?['rcab_jwt'] as String?;
+      final newJwt = refreshResponse.data?['access_token'] as String?;
       if (newJwt == null) {
         await _onSignOut();
         return handler.next(err);
       }
 
+      // Refresh rotates the HttpOnly cookie; read the new value from Set-Cookie,
+      // falling back to the current one if the response didn't rotate it.
       final newRefresh =
-          refreshResponse.data?['refresh_token'] as String? ?? refresh;
+          cookieFromResponse(refreshResponse, kRefreshCookieName) ?? refresh;
       await _tokenStore.saveTokens(jwt: newJwt, refresh: newRefresh);
 
       // Retry the original request with the new token.
       final retryOptions = err.requestOptions;
       retryOptions.headers['Authorization'] = 'Bearer $newJwt';
-      final retried = await _refreshDio.fetch<dynamic>(retryOptions);
-      handler.resolve(retried);
+      try {
+        final retried = await _refreshDio.fetch<dynamic>(retryOptions);
+        handler.resolve(retried);
+      } on DioException catch (retryErr) {
+        // Refreshed token was still rejected (e.g. revoked). Sign out and
+        // surface the error — never leave the request hanging (the caller's
+        // future must complete).
+        await _onSignOut();
+        handler.next(retryErr);
+      }
     } finally {
       _isRefreshing = false;
     }

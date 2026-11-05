@@ -57,11 +57,30 @@ Encodes `path:work-a-story` from `00-index/reading-paths.md`. Use this BEFORE wr
    `pnpm approve-builds` to enable native compilation (testcontainers deps: cpu-features,
    protobufjs, ssh2).
 
+## Pre-implementation checklist (run before writing code)
+
+After orientation but before writing the first line:
+
+1. **Stack health:** run `/smoke-check`. If any container is down, stop here.
+2. **OSRM stories (E4.S1+, E5.S1+):** run `/osrm-check` — OSRM must have its graph loaded, not just the container running.
+3. **Needs fixture data:** run `/seed-db --scenario=<default|shared-ride>` if the story exercises flows that need known drivers/clients.
+4. **Resource check (VPS-sensitive stories):** run `/docker-stats` if the story adds a new service or heavy background job.
+5. **Clean lint baseline:** run `/lint` so any pre-existing failures don't get attributed to this story.
+
+## Post-implementation / pre-close checklist
+
+Before calling `/close-story`:
+
+1. `/coverage` — confirm API line coverage ≥ 80%, Flutter ≥ 70%.
+2. `/lint` — zero ESLint, tsc, and Dart errors.
+3. **E5 stories only:** `/pool-inspect` — verify pool state transitions in Redis match `sm-shared-ride-pool`.
+4. **HITL `yes` stories:** run the full demo flow manually, run `/seed-db` first if needed.
+
 ## Out of scope for this skill
 
 - Writing code. That's the next step after orientation.
 - Marking the story `done`. Use `/close-story` for that.
-- Adding a new story. Use `/add-new-story` (TBD) or follow `path:add-new-story` manually.
+- Adding a new story. Use `/gen-story` or follow `path:add-new-story` manually.
 
 ## Anti-patterns
 
