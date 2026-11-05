@@ -6,6 +6,7 @@ import type {
   RideDetailResponse,
   SoloRideResponse,
 } from './types';
+import { useAuthStore } from '../auth/store';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000';
 
@@ -48,28 +49,45 @@ async function parseOrThrow<T>(res: Response): Promise<T> {
   return (await res.json()) as T;
 }
 
+/**
+ * Authenticated fetch: takes a (refreshed-if-needed) access token from the auth
+ * store, and on a 401 retries exactly once with a token from the single-flight
+ * refresh shared by every concurrent caller. A 401 means the request was not
+ * processed, so replaying it (same Idempotency-Key) is safe.
+ */
+async function authedFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  const auth = useAuthStore.getState();
+  const token = await auth.getAccessToken();
+  if (!token) throw new BookingApiError(401, 'unauthenticated', 'Not signed in');
+  const send = (t: string) =>
+    fetch(`${API_BASE}${path}`, {
+      ...init,
+      headers: { ...(init.headers as Record<string, string>), Authorization: `Bearer ${t}` },
+    });
+  const res = await send(token);
+  if (res.status !== 401) return res;
+  const fresh = await useAuthStore.getState().refreshAccessToken();
+  if (!fresh) return res;
+  return send(fresh);
+}
+
 async function postJson<T>(
   path: string,
   body: unknown,
-  jwt: string,
   extraHeaders: Record<string, string> = {},
+  signal?: AbortSignal,
 ): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await authedFetch(path, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${jwt}`,
-      ...extraHeaders,
-    },
+    headers: { 'Content-Type': 'application/json', ...extraHeaders },
     body: JSON.stringify(body),
+    signal,
   });
   return parseOrThrow<T>(res);
 }
 
-async function getJson<T>(path: string, jwt: string): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    headers: { Authorization: `Bearer ${jwt}` },
-  });
+async function getJson<T>(path: string): Promise<T> {
+  const res = await authedFetch(path);
   return parseOrThrow<T>(res);
 }
 
@@ -87,17 +105,24 @@ export function fetchQuote(
   pickup: Place,
   dropoff: Place,
   type: ApiRideType,
-  jwt: string,
+  signal?: AbortSignal,
 ): Promise<QuoteResponse> {
-  return postJson<QuoteResponse>('/v1/rides/quote', routeBody(pickup, dropoff, type), jwt);
+  return postJson<QuoteResponse>(
+    '/v1/rides/quote',
+    routeBody(pickup, dropoff, type),
+    {},
+    signal,
+  );
 }
 
 export function createSharedRide(
   pickup: Place,
   dropoff: Place,
-  jwt: string,
+  idempotencyKey: string,
 ): Promise<CreateRideResponse> {
-  return postJson<CreateRideResponse>('/v1/rides', routeBody(pickup, dropoff, 'shared'), jwt);
+  return postJson<CreateRideResponse>('/v1/rides', routeBody(pickup, dropoff, 'shared'), {
+    'Idempotency-Key': idempotencyKey,
+  });
 }
 
 /**
@@ -109,20 +134,18 @@ export function createNormalRide(
   pickup: Place,
   dropoff: Place,
   quoteToken: string,
-  jwt: string,
   idempotencyKey: string,
 ): Promise<SoloRideResponse> {
   return postJson<SoloRideResponse>(
     '/v1/rides',
     { ...routeBody(pickup, dropoff, 'normal'), quoteToken },
-    jwt,
     { 'Idempotency-Key': idempotencyKey },
   );
 }
 
 /** Fetch a ride's current state — used to rehydrate the tracking view on reload. */
-export function fetchRide(rideId: string, jwt: string): Promise<RideDetailResponse> {
-  return getJson<RideDetailResponse>(`/v1/rides/${rideId}`, jwt);
+export function fetchRide(rideId: string): Promise<RideDetailResponse> {
+  return getJson<RideDetailResponse>(`/v1/rides/${rideId}`);
 }
 
 export interface CancelRideResponse {
@@ -136,8 +159,8 @@ export interface CancelRideResponse {
  * idempotent on a terminal row, and a re-cancel just returns a 409 the UI
  * ignores (the ride is already terminal). RCAB-E4.S8.
  */
-export function cancelRide(rideId: string, jwt: string): Promise<CancelRideResponse> {
-  return postJson<CancelRideResponse>(`/v1/rides/${rideId}/cancel`, {}, jwt);
+export function cancelRide(rideId: string): Promise<CancelRideResponse> {
+  return postJson<CancelRideResponse>(`/v1/rides/${rideId}/cancel`, {});
 }
 
 export interface RatingResponse {
@@ -157,12 +180,10 @@ export function submitRating(
   rideId: string,
   stars: number,
   text: string | undefined,
-  jwt: string,
 ): Promise<RatingResponse> {
   const trimmed = text?.trim();
   return postJson<RatingResponse>(
     `/v1/rides/${rideId}/ratings`,
     { stars, ...(trimmed ? { text: trimmed } : {}) },
-    jwt,
   );
 }
