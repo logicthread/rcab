@@ -1,14 +1,21 @@
-import { Injectable, Inject, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { getNumber } from '../../common/utils/env';
-import { InjectQueue } from '@nestjs/bullmq';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { Queue } from 'bullmq';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
-import type Redis from 'ioredis';
-import { REDIS } from '../../infra/redis/redis.module';
+import { sql } from 'drizzle-orm';
+import { randomUUID } from 'node:crypto';
+import { getNumber } from '../../common/utils/env';
+import { DRIZZLE_DB, type DrizzleDb, type DrizzleTx } from '../../infra/db/drizzle.module';
 import { RealtimeBus } from '../realtime/realtime.bus';
+import { enqueueOutbox } from '../outbox/outbox.writer';
+import { OutboxTopic } from '../outbox/outbox.types';
+import { IdempotencyRepository, type IdempotencyScope } from '../rides/idempotency.repository';
+import { computeStops } from './itinerary';
+import {
+  PoolMembershipRepository,
+  type InsertMemberFailure,
+  type PoolLockRow,
+} from './pool-membership.repository';
+import { PoolProjectionService } from './pool-projection.service';
 import {
   SharedRideRepository,
   type SharedRideMember,
@@ -17,6 +24,13 @@ import {
 
 export const MATCHING_QUEUE = 'matching';
 export const POOL_EXPIRE_JOB = 'pool:expire';
+/**
+ * TRANSITIONAL (stage-c): in-process nudge kept only so the pre-outbox
+ * `DispatchService.onPoolClosed` listener still dispatches until the outbox
+ * slice replaces it with the `pool.dispatch.requested` relay. It is emitted
+ * AFTER commit and is not the durable intent (the outbox row is). Delete the
+ * export and its emit once no listener remains.
+ */
 export const POOL_CLOSED_EVENT = 'pool.closed';
 export const POOL_UPDATE_EVENT = 'pool:update';
 
@@ -40,162 +54,429 @@ export interface OpenPoolParams {
   passengerId: string;
 }
 
-export interface SlotRequestInput {
-  pool: SharedRideRow;
-  joiner: SharedRideMember;
-}
-
-export interface SlotResult {
-  slotted: boolean;
-  closedFull: boolean;
-  seatCount: number;
-}
-
 export interface PoolClosedEventPayload {
   rideId: string;
   reason: Extract<PoolCloseReason, 'closed_full' | 'closed_timeout'>;
 }
 
-const HASH_TTL_SECONDS = 600;
+/** What a committed seat looks like to the caller (and to its idempotency record). */
+export interface SeatOutcome {
+  sharedRideId: string;
+  mode: 'opened' | 'slotted';
+  poolStatus: 'open' | 'closed_full';
+  seatCount: number;
+}
 
+/**
+ * Shared-create idempotency, completed INSIDE the seat transaction: the seat
+ * row stores `scope.key`, and the claim flips to `completed` with
+ * `response(outcome)` in the same commit (closes the Stage-B TODO(R08)).
+ */
+export interface SeatIdempotency {
+  scope: IdempotencyScope;
+  response: (outcome: SeatOutcome) => unknown;
+}
+
+/**
+ * `openPool` rolled back without creating anything: the opener already holds a
+ * seat in another live pool, the idempotency key already produced a seat
+ * (`existingPoolId`), or the bounded deadlock retry was exhausted.
+ */
+export class PoolOpenRejectedError extends Error {
+  constructor(
+    readonly reason: 'passenger_has_active_pool' | 'idempotent_replay' | 'conflict',
+    readonly existingPoolId?: string,
+  ) {
+    super(`openPool rejected: ${reason}`);
+    this.name = 'PoolOpenRejectedError';
+  }
+}
+
+export type JoinPoolResult =
+  | { joined: true; closedFull: boolean; seatCount: number }
+  | {
+      joined: false;
+      reason: InsertMemberFailure | 'not_found' | 'conflict';
+      existingPoolId?: string;
+    };
+
+export type CloseIfOpenResult = 'closed' | 'not_open' | 'aborted_empty';
+
+/** 40P01 deadlock / 40001 serialization: retry the whole transaction (≤ 2 retries). */
+const RETRYABLE_TX_CODES = new Set(['40P01', '40001']);
+const MAX_TX_RETRIES = 2;
+
+function pgErrorCode(err: unknown): string | null {
+  for (let e: unknown = err, depth = 0; e && typeof e === 'object' && depth < 5; depth++) {
+    const code = (e as { code?: unknown }).code;
+    if (typeof code === 'string') return code;
+    e = (e as { cause?: unknown }).cause;
+  }
+  return null;
+}
+
+/**
+ * Pool membership, capacity and closure as ONE Postgres transaction per change
+ * (F09 / F15, R08). The `shared_rides` row lock serializes every writer of a
+ * pool; `pool_member` + triggers enforce membership/capacity/open-state even
+ * for a writer that forgot to lock. Closure is a guarded `open → closed_*`
+ * transition that, in the same commit, bumps the dispatch generation, persists
+ * the itinerary to `ride_stops` and records the `pool.dispatch.requested`
+ * outbox intent. Redis (`pool:<id>`), socket rooms and `pool:update` emits are
+ * post-commit, best-effort, and rebuilt from Postgres when they fail.
+ */
 @Injectable()
 export class PoolLifecycleService {
   private readonly log = new Logger(PoolLifecycleService.name);
   private readonly poolTimeoutMs: number;
-  private readonly poolSlotScript: string;
 
   constructor(
+    @Inject(DRIZZLE_DB) private readonly db: DrizzleDb,
     private readonly repo: SharedRideRepository,
-    @InjectQueue(MATCHING_QUEUE) private readonly queue: Queue,
-    @Inject(REDIS) private readonly redis: Redis,
+    private readonly members: PoolMembershipRepository,
+    private readonly projection: PoolProjectionService,
+    private readonly idempotency: IdempotencyRepository,
     private readonly events: EventEmitter2,
     private readonly bus: RealtimeBus,
     @Inject(ConfigService) config: ConfigService,
   ) {
-    this.poolTimeoutMs = getNumber(config, 'MATCHING_POOL_TIMEOUT_MS', 60_000, { integer: true, min: 1 });
-    this.poolSlotScript = readFileSync(join(__dirname, 'lua', 'pool_slot.lua'), 'utf-8');
+    this.poolTimeoutMs = getNumber(config, 'MATCHING_POOL_TIMEOUT_MS', 60_000, {
+      integer: true,
+      min: 1,
+    });
   }
 
-  async openPool(params: OpenPoolParams): Promise<SharedRideRow> {
-    const opener: SharedRideMember = {
-      passenger_id: params.passengerId,
-      origin_lat: params.originLat,
-      origin_lng: params.originLng,
-      dest_lat: params.destLat,
-      dest_lng: params.destLng,
-      joined_at: new Date().toISOString(),
-    };
+  /**
+   * ONE txn: INSERT the open pool (seat_count 0, planned close = now() +
+   * MATCHING_POOL_TIMEOUT_MS on the DB clock) → seat the opener → outbox
+   * `pool.expire.schedule` g0 → idempotency complete. A rejected opener (already
+   * holds an active seat / replayed key) rolls the whole pool back and throws
+   * `PoolOpenRejectedError`. Returns the committed row (re-read after commit).
+   */
+  async openPool(
+    p: OpenPoolParams & {
+      quotedFareCents: number | null;
+      idempotency?: SeatIdempotency;
+      /** Pre-generated id (lets the caller quote against it); random otherwise. */
+      poolId?: string;
+    },
+  ): Promise<SharedRideRow> {
+    const poolId = p.poolId ?? randomUUID();
+    const committed = await this.inTx<{ seatCount: number; poolClosedAt: Date } | null>(
+      async (tx) => {
+        const { poolClosedAt } = await this.repo.insertOpenPool(tx, {
+          rideId: poolId,
+          originLat: p.originLat,
+          originLng: p.originLng,
+          destLat: p.destLat,
+          destLng: p.destLng,
+          maxSeats: p.maxSeats,
+          detourBudgetM: p.detourBudgetM,
+          timeoutMs: this.poolTimeoutMs,
+        });
+        const seat = await this.members.insertMember(tx, {
+          poolId,
+          passengerId: p.passengerId,
+          originLat: p.originLat,
+          originLng: p.originLng,
+          destLat: p.destLat,
+          destLng: p.destLng,
+          quotedFareCents: p.quotedFareCents,
+          idempotencyKey: p.idempotency?.scope.key ?? null,
+        });
+        if (!seat.ok) {
+          if (seat.reason === 'passenger_has_active_pool' || seat.reason === 'idempotent_replay') {
+            throw new PoolOpenRejectedError(seat.reason, seat.existingPoolId);
+          }
+          // pool_full / pool_closed / already_member cannot happen for a pool
+          // this transaction just created — treat as a bug.
+          throw new Error(`openPool: unexpected opener rejection ${seat.reason}`);
+        }
+        await enqueueOutbox(tx, {
+          topic: OutboxTopic.PoolExpireSchedule,
+          aggregateType: 'shared_ride',
+          aggregateId: poolId,
+          generation: 0,
+          payload: { expireAt: poolClosedAt.toISOString() },
+        });
+        if (p.idempotency) {
+          await this.idempotency.completeIn(
+            tx,
+            p.idempotency.scope,
+            poolId,
+            p.idempotency.response({
+              sharedRideId: poolId,
+              mode: 'opened',
+              poolStatus: 'open',
+              seatCount: seat.seatCount,
+            }),
+          );
+        }
+        return { seatCount: seat.seatCount, poolClosedAt };
+      },
+      () => null,
+    );
+    if (committed === null) throw new PoolOpenRejectedError('conflict');
 
-    const pool = await this.repo.create({
-      originLat: params.originLat,
-      originLng: params.originLng,
-      destLat: params.destLat,
-      destLng: params.destLng,
-      maxSeats: params.maxSeats,
-      detourBudgetM: params.detourBudgetM,
-      opener,
-    });
-    const jobId = expiryJobId(pool.rideId);
+    const row = await this.afterCommit(poolId, { joinPassengerId: p.passengerId, closed: null });
+    return (
+      row ?? {
+        // Post-commit re-read failed: describe the committed pool from the txn.
+        rideId: poolId,
+        seatCount: committed.seatCount,
+        maxSeats: p.maxSeats,
+        poolState: 'open',
+        poolClosedAt: committed.poolClosedAt,
+        detourBudgetM: p.detourBudgetM,
+        originLat: p.originLat,
+        originLng: p.originLng,
+        destLat: p.destLat,
+        destLng: p.destLng,
+        members: [
+          {
+            passenger_id: p.passengerId,
+            origin_lat: p.originLat,
+            origin_lng: p.originLng,
+            dest_lat: p.destLat,
+            dest_lng: p.destLng,
+            joined_at: new Date().toISOString(),
+          },
+        ],
+        claimedByDriverId: null,
+        claimedAt: null,
+        dispatchGeneration: 0,
+        stateVersion: 0,
+      }
+    );
+  }
 
-    await this.queue.add(
-      POOL_EXPIRE_JOB,
-      { rideId: pool.rideId },
-      { jobId, delay: this.poolTimeoutMs, removeOnComplete: true, removeOnFail: 100 },
+  /**
+   * ONE txn: lock the pool → re-validate open + free capacity (candidate
+   * discovery was advisory) → insert the member (the DB re-checks everything)
+   * → close `closed_full` in the same txn when this seat filled it →
+   * idempotency complete. Typed failures leave the pool untouched.
+   */
+  async joinPool(p: {
+    poolId: string;
+    joiner: SharedRideMember;
+    quotedFareCents: number | null;
+    idempotency?: SeatIdempotency;
+  }): Promise<JoinPoolResult> {
+    const result = await this.inTx<JoinPoolResult>(
+      async (tx) => {
+        const pool = await this.members.lockPool(tx, p.poolId);
+        if (!pool) return { joined: false, reason: 'not_found' };
+        if (pool.poolState !== 'open') return { joined: false, reason: 'pool_closed' };
+        if (pool.seatCount >= pool.maxSeats) return { joined: false, reason: 'pool_full' };
+
+        const seat = await this.members.insertMember(tx, {
+          poolId: p.poolId,
+          passengerId: p.joiner.passenger_id,
+          originLat: p.joiner.origin_lat,
+          originLng: p.joiner.origin_lng,
+          destLat: p.joiner.dest_lat,
+          destLng: p.joiner.dest_lng,
+          quotedFareCents: p.quotedFareCents,
+          idempotencyKey: p.idempotency?.scope.key ?? null,
+        });
+        if (!seat.ok) {
+          return { joined: false, reason: seat.reason, existingPoolId: seat.existingPoolId };
+        }
+
+        let closedFull = false;
+        if (seat.seatCount >= pool.maxSeats) {
+          closedFull = (await this.closeInTxn(tx, pool, 'closed_full')) !== null;
+        }
+        if (p.idempotency) {
+          await this.idempotency.completeIn(
+            tx,
+            p.idempotency.scope,
+            p.poolId,
+            p.idempotency.response({
+              sharedRideId: p.poolId,
+              mode: 'slotted',
+              poolStatus: closedFull ? 'closed_full' : 'open',
+              seatCount: seat.seatCount,
+            }),
+          );
+        }
+        return { joined: true, closedFull, seatCount: seat.seatCount };
+      },
+      () => ({ joined: false, reason: 'conflict' }),
     );
 
-    await this.writeHash(pool.rideId, {
-      state: 'open',
-      seat_count: String(pool.seatCount),
-      max_seats: String(pool.maxSeats),
-      expiry_job_id: jobId,
-    });
-
-    await this.bus.joinPool(params.passengerId, pool.rideId);
-    this.emitPoolUpdate(pool.rideId, pool.seatCount, 'open');
-
-    return pool;
-  }
-
-  async slotRequest(input: SlotRequestInput): Promise<SlotResult> {
-    const { pool, joiner } = input;
-    const key = `pool:${pool.rideId}:seats`;
-    const result = Number(
-      await this.redis.eval(
-        this.poolSlotScript,
-        1,
-        key,
-        String(pool.maxSeats),
-        String(pool.seatCount),
-      ),
-    );
-
-    if (result < 0) {
-      return { slotted: false, closedFull: false, seatCount: pool.seatCount };
-    }
-
-    await this.repo.incrementSeats(pool.rideId, result);
-    await this.repo.appendMember(pool.rideId, joiner);
-    await this.writeHash(pool.rideId, { seat_count: String(result) });
-    await this.bus.joinPool(joiner.passenger_id, pool.rideId);
-
-    if (result >= pool.maxSeats) {
-      await this.closePool(pool.rideId, 'closed_full');
-      return { slotted: true, closedFull: true, seatCount: result };
-    }
-
-    this.emitPoolUpdate(pool.rideId, result, 'open');
-    return { slotted: true, closedFull: false, seatCount: result };
-  }
-
-  async closePool(rideId: string, reason: PoolCloseReason): Promise<void> {
-    await this.repo.closePool(rideId, reason);
-    await this.writeHash(rideId, {
-      state: reason,
-      closed_at: new Date().toISOString(),
-    });
-
-    if (reason !== 'closed_timeout') {
-      await this.queue.remove(expiryJobId(rideId)).catch((err: unknown) => {
-        this.log.warn({ err, rideId }, 'queue.remove failed for expiry job');
+    if (result.joined) {
+      await this.afterCommit(p.poolId, {
+        joinPassengerId: p.joiner.passenger_id,
+        closed: result.closedFull ? 'closed_full' : null,
       });
     }
+    return result;
+  }
 
+  /**
+   * Timeout close (the `pool:expire` worker). Takes the same pool lock as
+   * joiners; a stale timeout on a pool that is already closed/started/finished
+   * is a no-op. Errors propagate so the job retries.
+   */
+  async closeIfOpen(poolId: string, reason: 'closed_timeout'): Promise<CloseIfOpenResult> {
+    const result = await this.inTx<CloseIfOpenResult | 'conflict'>(
+      async (tx) => {
+        const pool = await this.members.lockPool(tx, poolId);
+        if (!pool || pool.poolState !== 'open') return 'not_open';
+        if (pool.seatCount === 0) {
+          return (await this.repo.abortEmptyOpen(tx, poolId)) ? 'aborted_empty' : 'not_open';
+        }
+        return (await this.closeInTxn(tx, pool, reason)) === null ? 'not_open' : 'closed';
+      },
+      () => 'conflict',
+    );
+    if (result === 'conflict') {
+      throw new Error(`closeIfOpen(${poolId}): transaction retries exhausted`);
+    }
+    if (result === 'closed') {
+      await this.afterCommit(poolId, { joinPassengerId: null, closed: reason });
+    } else if (result === 'aborted_empty') {
+      this.log.warn({ poolId }, 'open pool with no members timed out → aborted');
+      await this.afterCommit(poolId, { joinPassengerId: null, closed: null });
+    }
+    return result;
+  }
+
+  /**
+   * @deprecated TRANSITIONAL (stage-c). Kept only for callers that predate the
+   * transactional API: `closed_full`/`closed_timeout` route through the guarded
+   * closure; `aborted` is the pre-assignment hard-fail abort (unclaimed,
+   * closed, not yet started) until the offers-assignment slice moves it to
+   * `abortUnclaimedPool`. Never overwrites a started/terminal pool.
+   */
+  async closePool(rideId: string, reason: PoolCloseReason): Promise<void> {
     if (reason === 'closed_full' || reason === 'closed_timeout') {
-      const seatCount = await this.readSeatCount(rideId);
-      this.emitPoolUpdate(rideId, seatCount, reason);
-      this.events.emit(POOL_CLOSED_EVENT, { rideId, reason } satisfies PoolClosedEventPayload);
+      const result = await this.inTx<'closed' | 'not_open' | 'conflict'>(
+        async (tx) => {
+          const pool = await this.members.lockPool(tx, rideId);
+          if (!pool || pool.poolState !== 'open') return 'not_open';
+          return (await this.closeInTxn(tx, pool, reason)) === null ? 'not_open' : 'closed';
+        },
+        () => 'conflict',
+      );
+      if (result === 'closed') {
+        await this.afterCommit(rideId, { joinPassengerId: null, closed: reason });
+      }
+      return;
+    }
+    if (reason === 'aborted') {
+      const res = await this.db.execute(sql`
+        UPDATE shared_rides
+           SET pool_state = 'aborted', updated_at = now()
+         WHERE ride_id = ${rideId}
+           AND pool_state IN ('closed_full', 'closed_timeout')
+           AND claimed_by_driver_id IS NULL
+      `);
+      if ((res.rowCount ?? 0) > 0)
+        await this.afterCommit(rideId, { joinPassengerId: null, closed: null });
+      return;
+    }
+    this.log.warn({ rideId, reason }, 'closePool: transition not owned by pool lifecycle; ignored');
+  }
+
+  /**
+   * Guarded `open → closed_*` inside the caller's txn (pool row already
+   * locked): bump generation, persist the itinerary from the committed member
+   * set, record the dispatch intent. Returns the new generation, or null when
+   * the pool was not open.
+   */
+  private async closeInTxn(
+    tx: DrizzleTx,
+    pool: PoolLockRow,
+    reason: 'closed_full' | 'closed_timeout',
+  ): Promise<number | null> {
+    const closed = await this.repo.closeOpen(tx, pool.poolId, reason);
+    if (!closed) return null;
+    const members = await this.members.listMembers(tx, pool.poolId);
+    const stops = computeStops({ originLat: pool.originLat, originLng: pool.originLng, members });
+    await this.members.insertItinerary(tx, pool.poolId, stops);
+    await enqueueOutbox(tx, {
+      topic: OutboxTopic.PoolDispatchRequested,
+      aggregateType: 'shared_ride',
+      aggregateId: pool.poolId,
+      generation: closed.generation,
+      payload: { poolId: pool.poolId, reason },
+    });
+    return closed.generation;
+  }
+
+  /** db.transaction with bounded retry on deadlock / serialization failure. */
+  private async inTx<T>(fn: (tx: DrizzleTx) => Promise<T>, onConflict: () => T): Promise<T> {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await this.db.transaction(fn);
+      } catch (err) {
+        const code = pgErrorCode(err);
+        if (code === null || !RETRYABLE_TX_CODES.has(code)) throw err;
+        if (attempt >= MAX_TX_RETRIES) {
+          this.log.warn({ code, attempt }, 'pool transaction retries exhausted');
+          return onConflict();
+        }
+      }
     }
   }
 
-  private async writeHash(rideId: string, fields: Record<string, string>): Promise<void> {
-    const key = `pool:${rideId}`;
-    await this.redis.hset(key, fields);
-    await this.redis.expire(key, HASH_TTL_SECONDS);
-  }
-
-  private async readSeatCount(rideId: string): Promise<number> {
-    const raw = await this.redis.hget(`pool:${rideId}`, 'seat_count');
-    const n = Number(raw);
-    return Number.isFinite(n) && n > 0 ? n : 0;
-  }
-
-  private emitPoolUpdate(
-    rideId: string,
-    seatCount: number,
-    poolStatus: PoolUpdatePayload['poolStatus'],
-  ): void {
+  /**
+   * Post-commit, best-effort: project Redis from the committed row, join the
+   * passenger's sockets to the pool room, emit `pool:update` from the committed
+   * row. Nothing here may turn a committed success into an error.
+   */
+  private async afterCommit(
+    poolId: string,
+    opts: {
+      joinPassengerId: string | null;
+      closed: 'closed_full' | 'closed_timeout' | null;
+    },
+  ): Promise<SharedRideRow | null> {
+    let row: SharedRideRow | null = null;
     try {
-      this.bus.toPool(rideId, POOL_UPDATE_EVENT, {
-        sharedRideId: rideId,
-        seatCount,
-        poolStatus,
+      row = await this.repo.findById(poolId);
+    } catch (err) {
+      this.log.warn({ err, poolId }, 'post-commit pool re-read failed');
+    }
+    if (row) {
+      try {
+        await this.projection.write(row);
+      } catch (err) {
+        this.log.warn({ err, poolId }, 'pool projection failed; rebuild will repair');
+      }
+    }
+    if (opts.joinPassengerId) {
+      await this.bus.joinPool(opts.joinPassengerId, poolId).catch((err: unknown) => {
+        this.log.warn({ err, poolId }, 'joinPool socket room failed');
+      });
+    }
+    if (row) this.emitPoolUpdate(row);
+    if (opts.closed) {
+      try {
+        this.events.emit(POOL_CLOSED_EVENT, {
+          rideId: poolId,
+          reason: opts.closed,
+        } satisfies PoolClosedEventPayload);
+      } catch (err) {
+        this.log.warn({ err, poolId }, 'pool.closed nudge failed (outbox intent is durable)');
+      }
+    }
+    return row;
+  }
+
+  private emitPoolUpdate(row: SharedRideRow): void {
+    const status = row.poolState;
+    if (status !== 'open' && status !== 'closed_full' && status !== 'closed_timeout') return;
+    try {
+      this.bus.toPool(row.rideId, POOL_UPDATE_EVENT, {
+        sharedRideId: row.rideId,
+        seatCount: row.seatCount,
+        poolStatus: status,
       } satisfies PoolUpdatePayload);
     } catch (err) {
-      this.log.warn({ err, rideId, poolStatus }, 'emitPoolUpdate failed');
+      this.log.warn({ err, poolId: row.rideId }, 'emitPoolUpdate failed');
     }
   }
-}
-
-function expiryJobId(rideId: string): string {
-  return `pool:expire:${rideId}`;
 }

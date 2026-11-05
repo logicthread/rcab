@@ -1,10 +1,16 @@
-import { describe, it, expect, vi } from 'vitest';
+import { beforeEach, describe, it, expect, vi } from 'vitest';
 import {
   PoolLifecycleService,
+  PoolOpenRejectedError,
   POOL_CLOSED_EVENT,
   POOL_UPDATE_EVENT,
+  type SeatIdempotency,
 } from './pool-lifecycle.service';
+import type { PoolLockRow } from './pool-membership.repository';
 import type { SharedRideMember, SharedRideRow } from './shared-ride.repository';
+
+const enqueueOutbox = vi.hoisted(() => vi.fn());
+vi.mock('../outbox/outbox.writer', () => ({ enqueueOutbox }));
 
 function member(overrides: Partial<SharedRideMember> = {}): SharedRideMember {
   return {
@@ -18,7 +24,7 @@ function member(overrides: Partial<SharedRideMember> = {}): SharedRideMember {
   };
 }
 
-function pool(overrides: Partial<SharedRideRow> = {}): SharedRideRow {
+function row(overrides: Partial<SharedRideRow> = {}): SharedRideRow {
   return {
     rideId: 'pool-1',
     seatCount: 1,
@@ -33,325 +39,501 @@ function pool(overrides: Partial<SharedRideRow> = {}): SharedRideRow {
     members: [member()],
     claimedByDriverId: null,
     claimedAt: null,
-    dispatchGeneration: 1,
-    stateVersion: 0,
+    dispatchGeneration: 0,
+    stateVersion: 1,
     ...overrides,
   };
 }
 
-function buildRepo(createdPool?: SharedRideRow) {
+function lockRow(overrides: Partial<PoolLockRow> = {}): PoolLockRow {
   return {
-    create: vi.fn().mockResolvedValue(createdPool ?? pool({ rideId: 'new-pool', seatCount: 1 })),
-    incrementSeats: vi.fn().mockResolvedValue(undefined),
-    appendMember: vi.fn().mockResolvedValue(undefined),
-    closePool: vi.fn().mockResolvedValue(undefined),
-    findCandidates: vi.fn(),
-    findById: vi.fn(),
-    setClaimed: vi.fn(),
+    poolId: 'pool-1',
+    poolState: 'open',
+    seatCount: 1,
+    maxSeats: 3,
+    dispatchGeneration: 0,
+    stateVersion: 1,
+    claimedByDriverId: null,
+    originLat: 22.5727,
+    originLng: 88.364,
+    destLat: 22.5801,
+    destLng: 88.3701,
+    ...overrides,
   };
 }
 
-function buildQueue() {
-  return {
-    add: vi.fn().mockResolvedValue({ id: 'job-id' }),
-    remove: vi.fn().mockResolvedValue(1),
+const JOINER = member({ passenger_id: 'p-joiner', origin_lat: 22.573, dest_lat: 22.581 });
+const TX = { tx: true };
+
+function pgError(code: string): Error {
+  return Object.assign(new Error(code), { code });
+}
+
+function makeService(opts: { config?: Record<string, unknown> } = {}) {
+  const db = {
+    transaction: vi.fn(async (fn: (tx: unknown) => Promise<unknown>) => fn(TX)),
+    execute: vi.fn().mockResolvedValue({ rows: [], rowCount: 1 }),
   };
-}
-
-function buildRedis(evalResult: number = 2, seatCount: number = 0) {
-  return {
-    eval: vi.fn().mockResolvedValue(evalResult),
-    hset: vi.fn().mockResolvedValue(1),
-    expire: vi.fn().mockResolvedValue(1),
-    hget: vi.fn().mockResolvedValue(String(seatCount)),
+  const repo = {
+    insertOpenPool: vi.fn().mockResolvedValue({ poolClosedAt: new Date('2026-11-06T10:01:00Z') }),
+    closeOpen: vi.fn().mockResolvedValue({ generation: 1 }),
+    abortEmptyOpen: vi.fn().mockResolvedValue(true),
+    findById: vi.fn().mockResolvedValue(row()),
   };
-}
-
-function buildEvents() {
-  return { emit: vi.fn() };
-}
-
-function buildBus() {
-  return {
-    toPool: vi.fn(),
-    joinPool: vi.fn().mockResolvedValue(undefined),
+  const members = {
+    lockPool: vi.fn().mockResolvedValue(lockRow()),
+    insertMember: vi.fn().mockResolvedValue({ ok: true, seatCount: 1 }),
+    listMembers: vi.fn().mockResolvedValue([member(), JOINER]),
+    insertItinerary: vi.fn().mockResolvedValue(undefined),
   };
-}
-
-function buildConfig(overrides: Record<string, unknown> = {}) {
-  return { get: vi.fn((key: string) => overrides[key] ?? undefined) };
-}
-
-function makeService(
-  opts: {
-    evalResult?: number;
-    createdPool?: SharedRideRow;
-    config?: Record<string, unknown>;
-    seatCount?: number;
-  } = {},
-) {
-  const repo = buildRepo(opts.createdPool);
-  const queue = buildQueue();
-  const redis = buildRedis(opts.evalResult ?? 2, opts.seatCount ?? 0);
-  const events = buildEvents();
-  const bus = buildBus();
-  const config = buildConfig(opts.config ?? {});
+  const projection = { write: vi.fn().mockResolvedValue(true) };
+  const idempotency = { completeIn: vi.fn().mockResolvedValue(undefined) };
+  const events = { emit: vi.fn() };
+  const bus = { toPool: vi.fn(), joinPool: vi.fn().mockResolvedValue(undefined) };
+  const config = { get: vi.fn((key: string) => (opts.config ?? {})[key] ?? undefined) };
   const svc = new PoolLifecycleService(
+    db as never,
     repo as never,
-    queue as never,
-    redis as never,
+    members as never,
+    projection as never,
+    idempotency as never,
     events as never,
     bus as never,
     config as never,
   );
-  return { svc, repo, queue, redis, events, bus };
+  return { svc, db, repo, members, projection, idempotency, events, bus };
 }
 
+const OPEN = {
+  passengerId: 'p-opener',
+  originLat: 22.5727,
+  originLng: 88.364,
+  destLat: 22.5801,
+  destLng: 88.3701,
+  maxSeats: 3,
+  detourBudgetM: 800,
+  quotedFareCents: 12_000,
+};
+
+const SCOPE = { principalId: 'p-x', operation: 'ride.create.shared' as const, key: 'k-1' };
+
+beforeEach(() => {
+  enqueueOutbox.mockReset().mockResolvedValue(true);
+});
+
 describe('PoolLifecycleService.openPool', () => {
-  it('creates the DB row, enqueues pool:expire with 60s delay, writes Redis HASH', async () => {
-    const { svc, repo, queue, redis } = makeService({
-      createdPool: pool({ rideId: 'fresh-pool', seatCount: 1, maxSeats: 3 }),
+  it('inserts pool + opener + expiry intent + idempotency completion in ONE transaction', async () => {
+    const { svc, db, repo, members, idempotency } = makeService({
+      config: { MATCHING_POOL_TIMEOUT_MS: '45000' },
     });
+    repo.findById.mockResolvedValueOnce(row({ rideId: 'pool-new' }));
+    const response = vi.fn().mockReturnValue({ stored: 1 });
+    const idem: SeatIdempotency = { scope: SCOPE, response };
 
-    const p = await svc.openPool({
-      passengerId: 'p-1',
-      originLat: 22.5727,
-      originLng: 88.364,
-      destLat: 22.5801,
-      destLng: 88.3701,
-      maxSeats: 3,
-      detourBudgetM: 800,
-    });
+    const res = await svc.openPool({ ...OPEN, poolId: 'pool-new', idempotency: idem });
 
-    expect(p.rideId).toBe('fresh-pool');
-    expect(repo.create).toHaveBeenCalledTimes(1);
-    expect(repo.create).toHaveBeenCalledWith(
+    expect(res).toMatchObject({ rideId: 'pool-new', seatCount: 1, poolState: 'open' });
+    expect(db.transaction).toHaveBeenCalledTimes(1);
+    expect(repo.insertOpenPool).toHaveBeenCalledWith(
+      TX,
       expect.objectContaining({
-        opener: expect.objectContaining({
-          passenger_id: 'p-1',
-          origin_lat: 22.5727,
-        }),
+        rideId: 'pool-new',
+        maxSeats: 3,
+        detourBudgetM: 800,
+        timeoutMs: 45_000,
       }),
     );
-    expect(queue.add).toHaveBeenCalledWith(
-      'pool:expire',
-      { rideId: 'fresh-pool' },
+    expect(members.insertMember).toHaveBeenCalledWith(
+      TX,
       expect.objectContaining({
-        delay: 60_000,
-        jobId: 'pool:expire:fresh-pool',
+        poolId: 'pool-new',
+        passengerId: 'p-opener',
+        quotedFareCents: 12_000,
+        idempotencyKey: 'k-1',
       }),
     );
-    expect(redis.hset).toHaveBeenCalledWith(
-      'pool:fresh-pool',
-      expect.objectContaining({
-        state: 'open',
-        seat_count: '1',
-        max_seats: '3',
-        expiry_job_id: 'pool:expire:fresh-pool',
-      }),
+    expect(enqueueOutbox).toHaveBeenCalledWith(TX, {
+      topic: 'pool.expire.schedule',
+      aggregateType: 'shared_ride',
+      aggregateId: 'pool-new',
+      generation: 0,
+      payload: { expireAt: '2026-11-06T10:01:00.000Z' },
+    });
+    expect(response).toHaveBeenCalledWith({
+      sharedRideId: 'pool-new',
+      mode: 'opened',
+      poolStatus: 'open',
+      seatCount: 1,
+    });
+    expect(idempotency.completeIn).toHaveBeenCalledWith(TX, SCOPE, 'pool-new', { stored: 1 });
+  });
+
+  it('generates an id when none is given and stores a null key without idempotency', async () => {
+    const { svc, members, idempotency, repo } = makeService();
+    repo.findById.mockImplementationOnce(async (id: string) => row({ rideId: id }));
+    const res = await svc.openPool(OPEN);
+    expect(res.rideId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(members.insertMember).toHaveBeenCalledWith(
+      TX,
+      expect.objectContaining({ idempotencyKey: null }),
     );
-    expect(redis.expire).toHaveBeenCalledWith('pool:fresh-pool', 600);
+    expect(idempotency.completeIn).not.toHaveBeenCalled();
   });
 
-  it('respects MATCHING_POOL_TIMEOUT_MS override', async () => {
-    const { svc, queue } = makeService({
-      createdPool: pool({ rideId: 'p', seatCount: 1 }),
-      config: { MATCHING_POOL_TIMEOUT_MS: 90_000 },
-    });
+  it.each(['passenger_has_active_pool', 'idempotent_replay'] as const)(
+    'rolls the whole pool back and throws a typed %s rejection',
+    async (reason) => {
+      const { svc, members, projection, bus } = makeService();
+      members.insertMember.mockResolvedValueOnce({ ok: false, reason, existingPoolId: 'p-old' });
 
-    await svc.openPool({
-      passengerId: 'p-1',
-      originLat: 0,
-      originLng: 0,
-      destLat: 0,
-      destLng: 0,
-      maxSeats: 3,
-      detourBudgetM: 800,
-    });
+      const err = await svc.openPool(OPEN).catch((e: unknown) => e);
 
-    expect(queue.add).toHaveBeenCalledWith(
-      'pool:expire',
-      expect.anything(),
-      expect.objectContaining({ delay: 90_000 }),
-    );
-  });
-});
+      expect(err).toBeInstanceOf(PoolOpenRejectedError);
+      expect(err).toMatchObject({ reason, existingPoolId: 'p-old' });
+      expect(enqueueOutbox).not.toHaveBeenCalled();
+      expect(projection.write).not.toHaveBeenCalled();
+      expect(bus.joinPool).not.toHaveBeenCalled();
+    },
+  );
 
-describe('PoolLifecycleService.slotRequest', () => {
-  it('claims a seat via Lua, increments DB, appends member, writes HASH seat_count', async () => {
-    const { svc, repo, redis } = makeService({ evalResult: 2 });
-    const joiner = member({ passenger_id: 'p-joiner' });
-    const result = await svc.slotRequest({
-      pool: pool({ rideId: 'p1', seatCount: 1, maxSeats: 3 }),
-      joiner,
-    });
-
-    expect(result).toEqual({ slotted: true, closedFull: false, seatCount: 2 });
-    expect(redis.eval).toHaveBeenCalledWith(expect.any(String), 1, 'pool:p1:seats', '3', '1');
-    expect(repo.incrementSeats).toHaveBeenCalledWith('p1', 2);
-    expect(repo.appendMember).toHaveBeenCalledWith('p1', joiner);
-    expect(redis.hset).toHaveBeenCalledWith('pool:p1', { seat_count: '2' });
+  it('treats an impossible opener rejection as a bug (throws)', async () => {
+    const { svc, members } = makeService();
+    members.insertMember.mockResolvedValueOnce({ ok: false, reason: 'pool_full' });
+    await expect(svc.openPool(OPEN)).rejects.toThrow(/unexpected opener rejection pool_full/);
   });
 
-  it('returns slotted:false when Lua returns -1 (pool full)', async () => {
-    const { svc, repo, redis } = makeService({ evalResult: -1 });
-    const result = await svc.slotRequest({
-      pool: pool({ rideId: 'full', seatCount: 3, maxSeats: 3 }),
-      joiner: member(),
-    });
+  it('after commit: projects the committed row, joins the opener room, emits pool:update', async () => {
+    const { svc, projection, bus, repo } = makeService();
+    const committed = row({ rideId: 'pool-new', seatCount: 1 });
+    repo.findById.mockResolvedValueOnce(committed);
 
-    expect(result).toEqual({ slotted: false, closedFull: false, seatCount: 3 });
-    expect(repo.incrementSeats).not.toHaveBeenCalled();
-    expect(repo.appendMember).not.toHaveBeenCalled();
-    expect(redis.hset).not.toHaveBeenCalled();
-  });
+    await svc.openPool({ ...OPEN, poolId: 'pool-new' });
 
-  it('auto-closes the pool (closed_full) when the slot filled it; removes expiry job; emits pool.closed', async () => {
-    const { svc, repo, queue, redis, events } = makeService({ evalResult: 3 });
-    const result = await svc.slotRequest({
-      pool: pool({ rideId: 'last-seat', seatCount: 2, maxSeats: 3 }),
-      joiner: member({ passenger_id: 'p-last' }),
-    });
-
-    expect(result).toEqual({ slotted: true, closedFull: true, seatCount: 3 });
-    expect(repo.closePool).toHaveBeenCalledWith('last-seat', 'closed_full');
-    expect(queue.remove).toHaveBeenCalledWith('pool:expire:last-seat');
-    expect(redis.hset).toHaveBeenCalledWith(
-      'pool:last-seat',
-      expect.objectContaining({ state: 'closed_full' }),
-    );
-    expect(events.emit).toHaveBeenCalledWith(POOL_CLOSED_EVENT, {
-      rideId: 'last-seat',
-      reason: 'closed_full',
-    });
-  });
-});
-
-describe('PoolLifecycleService.closePool', () => {
-  it('writes DB state, Redis state, removes expiry job, emits pool.closed for closed_full', async () => {
-    const { svc, repo, queue, redis, events } = makeService();
-    await svc.closePool('p-x', 'closed_full');
-
-    expect(repo.closePool).toHaveBeenCalledWith('p-x', 'closed_full');
-    expect(redis.hset).toHaveBeenCalledWith(
-      'pool:p-x',
-      expect.objectContaining({ state: 'closed_full', closed_at: expect.any(String) }),
-    );
-    expect(queue.remove).toHaveBeenCalledWith('pool:expire:p-x');
-    expect(events.emit).toHaveBeenCalledWith(POOL_CLOSED_EVENT, {
-      rideId: 'p-x',
-      reason: 'closed_full',
-    });
-  });
-
-  it('does NOT remove the expiry job for closed_timeout but still emits pool.closed', async () => {
-    const { svc, repo, queue, redis, events } = makeService();
-    await svc.closePool('p-y', 'closed_timeout');
-
-    expect(repo.closePool).toHaveBeenCalledWith('p-y', 'closed_timeout');
-    expect(redis.hset).toHaveBeenCalledWith(
-      'pool:p-y',
-      expect.objectContaining({ state: 'closed_timeout' }),
-    );
-    expect(queue.remove).not.toHaveBeenCalled();
-    expect(events.emit).toHaveBeenCalledWith(POOL_CLOSED_EVENT, {
-      rideId: 'p-y',
-      reason: 'closed_timeout',
-    });
-  });
-
-  it('does NOT emit pool.closed for terminal reasons (closed_started, aborted)', async () => {
-    const { svc, events } = makeService();
-    await svc.closePool('p-started', 'closed_started');
-    await svc.closePool('p-aborted', 'aborted');
-
-    expect(events.emit).not.toHaveBeenCalled();
-  });
-
-  it('swallows queue.remove errors (job may already be gone)', async () => {
-    const { svc, queue } = makeService();
-    queue.remove.mockRejectedValueOnce(new Error('boom'));
-
-    await expect(svc.closePool('p-z', 'aborted')).resolves.not.toThrow();
-  });
-});
-
-describe('PoolLifecycleService realtime emissions', () => {
-  it('openPool joins the opener room and emits pool:update {open, 1}', async () => {
-    const { svc, bus } = makeService({
-      createdPool: pool({ rideId: 'rt-open', seatCount: 1, maxSeats: 3 }),
-    });
-
-    await svc.openPool({
-      passengerId: 'p-open',
-      originLat: 0,
-      originLng: 0,
-      destLat: 0,
-      destLng: 0,
-      maxSeats: 3,
-      detourBudgetM: 800,
-    });
-
-    expect(bus.joinPool).toHaveBeenCalledWith('p-open', 'rt-open');
-    expect(bus.toPool).toHaveBeenCalledWith('rt-open', POOL_UPDATE_EVENT, {
-      sharedRideId: 'rt-open',
+    expect(repo.findById).toHaveBeenCalledWith('pool-new');
+    expect(projection.write).toHaveBeenCalledWith(committed);
+    expect(bus.joinPool).toHaveBeenCalledWith('p-opener', 'pool-new');
+    expect(bus.toPool).toHaveBeenCalledWith('pool-new', POOL_UPDATE_EVENT, {
+      sharedRideId: 'pool-new',
       seatCount: 1,
       poolStatus: 'open',
     });
   });
 
-  it('slotRequest joins joiner room and emits pool:update {open, seatCount}', async () => {
-    const { svc, bus } = makeService({ evalResult: 2 });
-    await svc.slotRequest({
-      pool: pool({ rideId: 'rt-slot', seatCount: 1, maxSeats: 3 }),
-      joiner: member({ passenger_id: 'p-joiner' }),
-    });
+  it('post-commit failures never fail a committed open (row described from the txn)', async () => {
+    const { svc, repo, bus } = makeService();
+    repo.findById.mockRejectedValueOnce(new Error('db blip'));
+    bus.joinPool.mockRejectedValueOnce(new Error('ws down'));
 
-    expect(bus.joinPool).toHaveBeenCalledWith('p-joiner', 'rt-slot');
-    expect(bus.toPool).toHaveBeenCalledWith('rt-slot', POOL_UPDATE_EVENT, {
-      sharedRideId: 'rt-slot',
-      seatCount: 2,
-      poolStatus: 'open',
-    });
-  });
-
-  it('slotRequest that fills the pool emits pool:update {closed_full, maxSeats}', async () => {
-    const { svc, bus } = makeService({ evalResult: 3, seatCount: 3 });
-    await svc.slotRequest({
-      pool: pool({ rideId: 'rt-last', seatCount: 2, maxSeats: 3 }),
-      joiner: member({ passenger_id: 'p-last' }),
-    });
-
-    expect(bus.toPool).toHaveBeenCalledWith('rt-last', POOL_UPDATE_EVENT, {
-      sharedRideId: 'rt-last',
-      seatCount: 3,
-      poolStatus: 'closed_full',
-    });
-  });
-
-  it('closePool(closed_timeout) emits pool:update {closed_timeout, current seatCount}', async () => {
-    const { svc, bus } = makeService({ seatCount: 1 });
-    await svc.closePool('rt-timeout', 'closed_timeout');
-
-    expect(bus.toPool).toHaveBeenCalledWith('rt-timeout', POOL_UPDATE_EVENT, {
-      sharedRideId: 'rt-timeout',
+    const res = await svc.openPool({ ...OPEN, poolId: 'pool-new' });
+    expect(res).toMatchObject({
+      rideId: 'pool-new',
       seatCount: 1,
-      poolStatus: 'closed_timeout',
+      poolState: 'open',
+      poolClosedAt: new Date('2026-11-06T10:01:00Z'),
+      dispatchGeneration: 0,
+      members: [expect.objectContaining({ passenger_id: 'p-opener' })],
     });
-  });
-
-  it('closePool(aborted) does NOT emit pool:update', async () => {
-    const { svc, bus } = makeService();
-    await svc.closePool('rt-abort', 'aborted');
-
     expect(bus.toPool).not.toHaveBeenCalled();
   });
 
-  it('emitPoolUpdate swallows bus errors (no throw)', async () => {
-    const { svc, bus } = makeService();
-    bus.toPool.mockImplementationOnce(() => {
-      throw new Error('bus down');
+  it('a failed Redis projection write is swallowed', async () => {
+    const { svc, projection, bus } = makeService();
+    projection.write.mockRejectedValueOnce(new Error('redis down'));
+    await expect(svc.openPool(OPEN)).resolves.toMatchObject({ poolState: 'open' });
+    expect(bus.toPool).toHaveBeenCalled();
+  });
+
+  it('retries a deadlocked transaction at most twice, then throws a typed conflict', async () => {
+    const { svc, db } = makeService();
+    db.transaction.mockRejectedValue(pgError('40P01'));
+    await expect(svc.openPool(OPEN)).rejects.toMatchObject({ reason: 'conflict' });
+    expect(db.transaction).toHaveBeenCalledTimes(3);
+  });
+
+  it('a retried serialization failure that then succeeds commits once', async () => {
+    const { svc, db } = makeService();
+    db.transaction.mockRejectedValueOnce({ cause: pgError('40001') });
+    await expect(svc.openPool(OPEN)).resolves.toMatchObject({ poolState: 'open' });
+    expect(db.transaction).toHaveBeenCalledTimes(2);
+  });
+
+  it('non-retryable database errors propagate', async () => {
+    const { svc, db } = makeService();
+    db.transaction.mockRejectedValueOnce(pgError('23503'));
+    await expect(svc.openPool(OPEN)).rejects.toMatchObject({ code: '23503' });
+  });
+});
+
+describe('PoolLifecycleService.joinPool', () => {
+  it('locks, re-validates, inserts the member and commits with the idempotency record', async () => {
+    const { svc, members, idempotency, repo } = makeService();
+    members.insertMember.mockResolvedValueOnce({ ok: true, seatCount: 2 });
+    const response = vi.fn().mockReturnValue('stored');
+
+    const res = await svc.joinPool({
+      poolId: 'pool-1',
+      joiner: JOINER,
+      quotedFareCents: 9_000,
+      idempotency: { scope: SCOPE, response },
     });
-    await expect(svc.closePool('rt-err', 'closed_timeout')).resolves.not.toThrow();
+
+    expect(res).toEqual({ joined: true, closedFull: false, seatCount: 2 });
+    expect(members.lockPool).toHaveBeenCalledWith(TX, 'pool-1');
+    expect(members.insertMember).toHaveBeenCalledWith(
+      TX,
+      expect.objectContaining({
+        poolId: 'pool-1',
+        passengerId: 'p-joiner',
+        quotedFareCents: 9_000,
+        idempotencyKey: 'k-1',
+      }),
+    );
+    expect(repo.closeOpen).not.toHaveBeenCalled();
+    expect(response).toHaveBeenCalledWith({
+      sharedRideId: 'pool-1',
+      mode: 'slotted',
+      poolStatus: 'open',
+      seatCount: 2,
+    });
+    expect(idempotency.completeIn).toHaveBeenCalledWith(TX, SCOPE, 'pool-1', 'stored');
+  });
+
+  it.each([
+    ['not_found', null],
+    ['pool_closed', lockRow({ poolState: 'closed_timeout' })],
+    ['pool_full', lockRow({ seatCount: 3 })],
+  ] as const)('fast-fails with %s under the lock without inserting', async (reason, lock) => {
+    const { svc, members, projection } = makeService();
+    members.lockPool.mockResolvedValueOnce(lock);
+
+    const res = await svc.joinPool({ poolId: 'pool-1', joiner: JOINER, quotedFareCents: null });
+
+    expect(res).toEqual({ joined: false, reason });
+    expect(members.insertMember).not.toHaveBeenCalled();
+    expect(projection.write).not.toHaveBeenCalled();
+  });
+
+  it('passes typed insert rejections through and writes nothing else', async () => {
+    const { svc, members, idempotency } = makeService();
+    members.insertMember.mockResolvedValueOnce({
+      ok: false,
+      reason: 'passenger_has_active_pool',
+      existingPoolId: 'p-other',
+    });
+
+    const res = await svc.joinPool({
+      poolId: 'pool-1',
+      joiner: JOINER,
+      quotedFareCents: null,
+      idempotency: { scope: SCOPE, response: () => 'x' },
+    });
+
+    expect(res).toEqual({
+      joined: false,
+      reason: 'passenger_has_active_pool',
+      existingPoolId: 'p-other',
+    });
+    expect(idempotency.completeIn).not.toHaveBeenCalled();
+    expect(enqueueOutbox).not.toHaveBeenCalled();
+  });
+
+  it('the seat that fills the pool closes it in the SAME txn: generation, itinerary, dispatch intent', async () => {
+    const { svc, members, repo, bus, events } = makeService();
+    members.lockPool.mockResolvedValueOnce(lockRow({ seatCount: 1, maxSeats: 2 }));
+    members.insertMember.mockResolvedValueOnce({ ok: true, seatCount: 2 });
+    repo.closeOpen.mockResolvedValueOnce({ generation: 1 });
+    repo.findById.mockResolvedValueOnce(
+      row({ poolState: 'closed_full', seatCount: 2, maxSeats: 2 }),
+    );
+
+    const res = await svc.joinPool({ poolId: 'pool-1', joiner: JOINER, quotedFareCents: null });
+
+    expect(res).toEqual({ joined: true, closedFull: true, seatCount: 2 });
+    expect(repo.closeOpen).toHaveBeenCalledWith(TX, 'pool-1', 'closed_full');
+    expect(members.listMembers).toHaveBeenCalledWith(TX, 'pool-1');
+    const stops = members.insertItinerary.mock.calls[0][2] as Array<{
+      type: string;
+      passengerId: string;
+    }>;
+    expect(stops).toHaveLength(4);
+    expect(
+      stops
+        .filter((s) => s.type === 'pickup')
+        .map((s) => s.passengerId)
+        .sort(),
+    ).toEqual(['p-joiner', 'p-opener']);
+    expect(enqueueOutbox).toHaveBeenCalledWith(TX, {
+      topic: 'pool.dispatch.requested',
+      aggregateType: 'shared_ride',
+      aggregateId: 'pool-1',
+      generation: 1,
+      payload: { poolId: 'pool-1', reason: 'closed_full' },
+    });
+    expect(bus.toPool).toHaveBeenCalledWith('pool-1', POOL_UPDATE_EVENT, {
+      sharedRideId: 'pool-1',
+      seatCount: 2,
+      poolStatus: 'closed_full',
+    });
+    expect(events.emit).toHaveBeenCalledWith(POOL_CLOSED_EVENT, {
+      rideId: 'pool-1',
+      reason: 'closed_full',
+    });
+  });
+
+  it('a non-filling join emits pool:update {open} and no close nudge', async () => {
+    const { svc, members, bus, events, repo } = makeService();
+    members.insertMember.mockResolvedValueOnce({ ok: true, seatCount: 2 });
+    repo.findById.mockResolvedValueOnce(row({ seatCount: 2 }));
+
+    await svc.joinPool({ poolId: 'pool-1', joiner: JOINER, quotedFareCents: null });
+
+    expect(bus.joinPool).toHaveBeenCalledWith('p-joiner', 'pool-1');
+    expect(bus.toPool).toHaveBeenCalledWith('pool-1', POOL_UPDATE_EVENT, {
+      sharedRideId: 'pool-1',
+      seatCount: 2,
+      poolStatus: 'open',
+    });
+    expect(events.emit).not.toHaveBeenCalled();
+  });
+
+  it('reports conflict after bounded deadlock retries', async () => {
+    const { svc, db } = makeService();
+    db.transaction.mockRejectedValue(pgError('40P01'));
+    await expect(
+      svc.joinPool({ poolId: 'pool-1', joiner: JOINER, quotedFareCents: null }),
+    ).resolves.toEqual({ joined: false, reason: 'conflict' });
+    expect(db.transaction).toHaveBeenCalledTimes(3);
+  });
+
+  it('does not emit pool:update for a committed row that is no longer joinable-visible', async () => {
+    const { svc, bus, events, repo } = makeService();
+    repo.findById.mockResolvedValueOnce(row({ poolState: 'closed_started' }));
+    events.emit.mockImplementation(() => {
+      throw new Error('listener blew up');
+    });
+    await svc.joinPool({ poolId: 'pool-1', joiner: JOINER, quotedFareCents: null });
+    expect(bus.toPool).not.toHaveBeenCalled();
+  });
+
+  it('a throwing socket emit never fails a committed join', async () => {
+    const { svc, bus } = makeService();
+    bus.toPool.mockImplementation(() => {
+      throw new Error('io down');
+    });
+    await expect(
+      svc.joinPool({ poolId: 'pool-1', joiner: JOINER, quotedFareCents: null }),
+    ).resolves.toMatchObject({ joined: true });
+  });
+});
+
+describe('PoolLifecycleService.closeIfOpen', () => {
+  it('closes an open pool (closed_timeout) with itinerary + dispatch intent', async () => {
+    const { svc, repo, events, bus } = makeService();
+    repo.closeOpen.mockResolvedValueOnce({ generation: 1 });
+    repo.findById.mockResolvedValueOnce(row({ poolState: 'closed_timeout', seatCount: 1 }));
+
+    await expect(svc.closeIfOpen('pool-1', 'closed_timeout')).resolves.toBe('closed');
+
+    expect(repo.closeOpen).toHaveBeenCalledWith(TX, 'pool-1', 'closed_timeout');
+    expect(enqueueOutbox).toHaveBeenCalledWith(
+      TX,
+      expect.objectContaining({
+        topic: 'pool.dispatch.requested',
+        generation: 1,
+        payload: { poolId: 'pool-1', reason: 'closed_timeout' },
+      }),
+    );
+    expect(bus.toPool).toHaveBeenCalledWith('pool-1', POOL_UPDATE_EVENT, {
+      sharedRideId: 'pool-1',
+      seatCount: 1,
+      poolStatus: 'closed_timeout',
+    });
+    expect(events.emit).toHaveBeenCalledWith(POOL_CLOSED_EVENT, {
+      rideId: 'pool-1',
+      reason: 'closed_timeout',
+    });
+    expect(bus.joinPool).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['missing', null],
+    ['closed_full', lockRow({ poolState: 'closed_full' })],
+    ['closed_started', lockRow({ poolState: 'closed_started' })],
+    ['completed', lockRow({ poolState: 'completed' })],
+  ] as const)('a stale timeout on a %s pool is a no-op', async (_label, lock) => {
+    const { svc, members, repo, projection } = makeService();
+    members.lockPool.mockResolvedValueOnce(lock);
+    await expect(svc.closeIfOpen('pool-1', 'closed_timeout')).resolves.toBe('not_open');
+    expect(repo.closeOpen).not.toHaveBeenCalled();
+    expect(enqueueOutbox).not.toHaveBeenCalled();
+    expect(projection.write).not.toHaveBeenCalled();
+  });
+
+  it('a lost guarded UPDATE is not_open and records nothing', async () => {
+    const { svc, repo, members } = makeService();
+    repo.closeOpen.mockResolvedValueOnce(null);
+    await expect(svc.closeIfOpen('pool-1', 'closed_timeout')).resolves.toBe('not_open');
+    expect(members.insertItinerary).not.toHaveBeenCalled();
+    expect(enqueueOutbox).not.toHaveBeenCalled();
+  });
+
+  it('an EMPTY open pool (legacy data) is aborted instead of dispatched', async () => {
+    const { svc, members, repo, events } = makeService();
+    members.lockPool.mockResolvedValueOnce(lockRow({ seatCount: 0 }));
+    await expect(svc.closeIfOpen('pool-1', 'closed_timeout')).resolves.toBe('aborted_empty');
+    expect(repo.abortEmptyOpen).toHaveBeenCalledWith(TX, 'pool-1');
+    expect(repo.closeOpen).not.toHaveBeenCalled();
+    expect(repo.findById).toHaveBeenCalledWith('pool-1');
+    expect(events.emit).not.toHaveBeenCalled();
+
+    members.lockPool.mockResolvedValueOnce(lockRow({ seatCount: 0 }));
+    repo.abortEmptyOpen.mockResolvedValueOnce(false);
+    await expect(svc.closeIfOpen('pool-1', 'closed_timeout')).resolves.toBe('not_open');
+  });
+
+  it('throws (so the job retries) when deadlock retries are exhausted', async () => {
+    const { svc, db } = makeService();
+    db.transaction.mockRejectedValue(pgError('40P01'));
+    await expect(svc.closeIfOpen('pool-1', 'closed_timeout')).rejects.toThrow(/retries exhausted/);
+  });
+});
+
+describe('PoolLifecycleService.closePool (deprecated transitional shim)', () => {
+  it('closed_full / closed_timeout route through the guarded closure', async () => {
+    const { svc, repo, events } = makeService();
+    await svc.closePool('pool-1', 'closed_full');
+    expect(repo.closeOpen).toHaveBeenCalledWith(TX, 'pool-1', 'closed_full');
+    expect(events.emit).toHaveBeenCalledWith(POOL_CLOSED_EVENT, {
+      rideId: 'pool-1',
+      reason: 'closed_full',
+    });
+  });
+
+  it('is a no-op for a pool that is not open', async () => {
+    const { svc, repo, members, projection } = makeService();
+    members.lockPool.mockResolvedValueOnce(lockRow({ poolState: 'closed_full' }));
+    await svc.closePool('pool-1', 'closed_timeout');
+    expect(repo.closeOpen).not.toHaveBeenCalled();
+    expect(projection.write).not.toHaveBeenCalled();
+  });
+
+  it('aborted only touches an unclaimed closed pool and projects when it changed', async () => {
+    const { svc, db, projection, repo } = makeService();
+    db.execute.mockResolvedValueOnce({ rows: [], rowCount: 1 });
+    await svc.closePool('pool-1', 'aborted');
+    expect(db.execute).toHaveBeenCalledTimes(1);
+    expect(repo.findById).toHaveBeenCalledWith('pool-1');
+
+    projection.write.mockClear();
+    db.execute.mockResolvedValueOnce({ rows: [], rowCount: 0 });
+    await svc.closePool('pool-1', 'aborted');
+    expect(projection.write).not.toHaveBeenCalled();
+  });
+
+  it('ignores transitions it does not own', async () => {
+    const { svc, db, repo } = makeService();
+    await svc.closePool('pool-1', 'closed_started');
+    expect(db.execute).not.toHaveBeenCalled();
+    expect(repo.closeOpen).not.toHaveBeenCalled();
   });
 });

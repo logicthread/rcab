@@ -398,51 +398,7 @@ describe.skipIf(skip)('DispatchService — integration (Postgres + Redis + BullM
     expect(bus.toUser).toHaveBeenCalledWith(passengerId, 'ride_no_driver', { rideId: row.id });
   });
 
-  // ── Concurrency invariants (RCAB-E1.S12) ────────────────────────────────────
-
-  it('concurrent slotRequest: atomic Lua never over-seats the pool', async () => {
-    const pool = await lifecycle.openPool({
-      passengerId: 'p-seat-race',
-      originLat: 22.57,
-      originLng: 88.36,
-      destLat: 22.58,
-      destLng: 88.37,
-      maxSeats: 3,
-      detourBudgetM: 800,
-    });
-    // The opener already holds a seat; only maxSeats − seatCount remain.
-    const available = pool.maxSeats - pool.seatCount;
-    expect(available).toBeGreaterThan(0);
-
-    const joiner = (i: number): SharedRideMember => ({
-      passenger_id: `seat-joiner-${i}`,
-      origin_lat: 22.57,
-      origin_lng: 88.36,
-      dest_lat: 22.58,
-      dest_lng: 88.37,
-      joined_at: new Date().toISOString(),
-    });
-
-    // More joiners than free seats, all racing at once.
-    const results = await Promise.all(
-      Array.from({ length: available + 2 }, (_, i) => lifecycle.slotRequest({ pool, joiner: joiner(i) })),
-    );
-
-    // Exactly `available` seats granted; the atomic Lua rejects the rest.
-    expect(results.filter((r) => r.slotted)).toHaveLength(available);
-    expect(results.filter((r) => r.closedFull)).toHaveLength(1);
-
-    // Redis seat counter is the atomic source of truth — never exceeds maxSeats.
-    expect(Number(await redis.get(`pool:${pool.rideId}:seats`))).toBe(pool.maxSeats);
-
-    // Every granted member landed (jsonb `||` append is row-atomic → no lost write):
-    // opener + `available` joiners.
-    const { rows } = await pgClient.query<{ members: SharedRideMember[] }>(
-      'SELECT members FROM shared_rides WHERE ride_id = $1',
-      [pool.rideId],
-    );
-    expect(rows[0].members).toHaveLength(1 + available);
-  });
+  // The pool seat-race block moved to pool-membership.int.spec.ts (Stage C, T27).
 
   it('scheduled wake → ride.requested → dispatchSolo, end-to-end (RCAB-E6.S3)', async () => {
     bus.toDriver.mockClear();

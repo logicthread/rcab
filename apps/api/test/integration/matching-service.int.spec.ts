@@ -1,149 +1,173 @@
-import { Client } from 'pg';
+import { Pool } from 'pg';
 import Redis from 'ioredis';
-import { Queue } from 'bullmq';
-import { drizzle } from 'drizzle-orm/node-postgres';
-import { EventEmitter2 } from '@nestjs/event-emitter';
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
-import * as schema from '../../src/db/schema';
-import { MatchingService } from '../../src/modules/matching/matching.service';
-import { SharedRideRepository } from '../../src/modules/matching/shared-ride.repository';
-import { PoolLifecycleService, MATCHING_QUEUE } from '../../src/modules/matching/pool-lifecycle.service';
 import { randomUUID } from 'node:crypto';
-
-function parseRedis(url: string) {
-  const u = new URL(url);
-  return {
-    host: u.hostname,
-    port: Number(u.port || 6379),
-    username: u.username || undefined,
-    password: u.password || undefined,
-  };
-}
+import type { MatchingService } from '../../src/modules/matching/matching.service';
+import {
+  buildPoolStack,
+  cleanupPools,
+  poolInvariantViolations,
+  seedPassenger,
+  snapshot,
+  type PoolStack,
+} from './pool-harness';
 
 const skip = process.env.RCAB_INT_SKIPPED === '1';
 
 // ── Coords ────────────────────────────────────────────────────────────────────
 // Kolkata city centre — two corridors, one close to the request, one further.
 const REQUEST_ORIGIN = { lat: 22.5726, lng: 88.3639 };
-const REQUEST_DEST   = { lat: 22.5800, lng: 88.3700 };
+const REQUEST_DEST = { lat: 22.58, lng: 88.37 };
 
 // Pool A: very close to the request corridor (within 200 m)
-const POOL_A_ORIGIN  = { lat: 22.5727, lng: 88.3640 };
-const POOL_A_DEST    = { lat: 22.5801, lng: 88.3701 };
+const POOL_A_ORIGIN = { lat: 22.5727, lng: 88.364 };
+const POOL_A_DEST = { lat: 22.5801, lng: 88.3701 };
 
 // Pool B: origin 4 km away — outside the 1500 m spatial pre-filter
-const POOL_B_ORIGIN  = { lat: 22.610,  lng: 88.380  };
-const POOL_B_DEST    = { lat: 22.620,  lng: 88.390  };
+const POOL_B_ORIGIN = { lat: 22.61, lng: 88.38 };
+const POOL_B_DEST = { lat: 22.62, lng: 88.39 };
 
 describe.skipIf(skip)('MatchingService — integration (Postgres + Redis)', () => {
-  let pgClient: Client;
+  let admin: Pool;
   let redis: Redis;
-  let queue: Queue;
+  let s: PoolStack;
   let svc: MatchingService;
   let poolAId: string;
+  const poolIds: string[] = [];
+  const passengers: string[] = [];
+
+  const passenger = async () => {
+    const id = await seedPassenger(admin);
+    passengers.push(id);
+    return id;
+  };
+  const request = (passengerId: string) => ({
+    passengerId,
+    originLat: REQUEST_ORIGIN.lat,
+    originLng: REQUEST_ORIGIN.lng,
+    destLat: REQUEST_DEST.lat,
+    destLng: REQUEST_DEST.lng,
+  });
 
   beforeAll(async () => {
-    pgClient = new Client({ connectionString: process.env.TEST_POSTGRES_URI });
-    await pgClient.connect();
+    admin = new Pool({ connectionString: process.env.TEST_POSTGRES_URI, max: 2 });
     redis = new Redis(process.env.TEST_REDIS_URL!, { maxRetriesPerRequest: null });
+    s = buildPoolStack(redis, { max: 2 });
 
-    const pool = { query: (text: string, values?: unknown[]) => pgClient.query(text, values as never) };
-    const db = drizzle(pool as never, { schema });
-
-    const repo   = new SharedRideRepository(db as never);
-    const config = { get: vi.fn().mockReturnValue(undefined) };
-
-    const conn = parseRedis(process.env.TEST_REDIS_URL!);
-    queue = new Queue(MATCHING_QUEUE, { connection: conn });
-    const events = new EventEmitter2();
-    const bus = {
-      toUser: vi.fn(),
-      toRide: vi.fn(),
-      toPool: vi.fn(),
-      joinPool: vi.fn().mockResolvedValue(undefined),
-      broadcast: vi.fn(),
-    };
-    const lifecycle = new PoolLifecycleService(
-      repo, queue as never, redis, events, bus as never, config as never,
-    );
-
-    // Mock RouteSimilarityService: return 0.95 for requests near pool A, 0.1 for pool B
+    // Mock RouteSimilarityService: 0.95 for pool A's corridor, 0.1 elsewhere.
     const scorer = {
-      scoreRoutes: vi.fn().mockImplementation(
-        async (_a: unknown, b: { originLat: number }) =>
+      scoreRoutes: vi
+        .fn()
+        .mockImplementation(async (_a: unknown, b: { originLat: number }) =>
           Math.abs(b.originLat - POOL_A_ORIGIN.lat) < 0.01 ? 0.95 : 0.1,
-      ),
+        ),
     };
+    svc = s.matching(scorer);
 
-    svc = new MatchingService(repo as never, scorer as never, lifecycle, config as never);
-
-    // Seed pool A (close, open)
-    poolAId = randomUUID();
-    await pgClient.query(`
-      INSERT INTO shared_rides
-        (ride_id, seat_count, max_seats, pool_state, pool_closed_at,
-         detour_budget_m, origin_lat, origin_lng, dest_lat, dest_lng)
-      VALUES ($1, 1, 3, 'open', now() + interval '60s', 800,
-              $2, $3, $4, $5)
-    `, [poolAId, POOL_A_ORIGIN.lat, POOL_A_ORIGIN.lng, POOL_A_DEST.lat, POOL_A_DEST.lng]);
-
-    // Seed pool B (far away, open — should be filtered by spatial pre-filter)
-    await pgClient.query(`
-      INSERT INTO shared_rides
-        (ride_id, seat_count, max_seats, pool_state, pool_closed_at,
-         detour_budget_m, origin_lat, origin_lng, dest_lat, dest_lng)
-      VALUES ($1, 1, 3, 'open', now() + interval '60s', 800,
-              $2, $3, $4, $5)
-    `, [randomUUID(), POOL_B_ORIGIN.lat, POOL_B_ORIGIN.lng, POOL_B_DEST.lat, POOL_B_DEST.lng]);
+    // Pool A (close, open) and pool B (far, open), each with a real opener seat.
+    for (const [origin, dest] of [
+      [POOL_A_ORIGIN, POOL_A_DEST],
+      [POOL_B_ORIGIN, POOL_B_DEST],
+    ]) {
+      const res = await s.lifecycle.openPool({
+        originLat: origin.lat,
+        originLng: origin.lng,
+        destLat: dest.lat,
+        destLng: dest.lng,
+        maxSeats: 3,
+        detourBudgetM: 800,
+        passengerId: await passenger(),
+        quotedFareCents: null,
+      });
+      poolIds.push(res.rideId);
+    }
+    poolAId = poolIds[0];
   });
 
   afterAll(async () => {
-    await pgClient.query('DELETE FROM shared_rides').catch(() => {});
-    await queue?.obliterate({ force: true }).catch(() => {});
-    await queue?.close().catch(() => {});
-    await pgClient.end();
+    await cleanupPools(admin, poolIds, passengers).catch(() => {});
+    await s.close();
+    await admin.end();
     await redis.quit();
   });
 
-  it('slots the request into pool A and returns its ID', async () => {
-    const result = await svc.findOrCreatePool({
-      passengerId: randomUUID(),
-      originLat: REQUEST_ORIGIN.lat, originLng: REQUEST_ORIGIN.lng,
-      destLat:   REQUEST_DEST.lat,   destLng:   REQUEST_DEST.lng,
+  it('joins the request into pool A (spatial pre-filter excludes B) and stores the quoted fare', async () => {
+    const quote = vi.fn().mockResolvedValue({
+      perSeatPrice: { amount: 6_100, currency: 'INR' },
+      seatMultiplier: 0.75,
+      detourFactor: 1,
     });
+    const pId = await passenger();
+    const result = await svc.findOrCreatePool(request(pId), { quote });
 
-    expect(result.mode).toBe('slotted');
-    expect(result.sharedRideId).toBe(poolAId);
+    expect(result).toMatchObject({
+      mode: 'slotted',
+      sharedRideId: poolAId,
+      poolStatus: 'open',
+      seatCount: 2,
+    });
+    expect(quote).toHaveBeenCalledWith(expect.objectContaining({ rideId: poolAId, seatCount: 2 }));
+    const seat = await admin.query(
+      'SELECT quoted_fare_cents FROM pool_member WHERE pool_id = $1 AND passenger_id = $2',
+      [poolAId, pId],
+    );
+    expect(seat.rows).toEqual([{ quoted_fare_cents: 6_100 }]);
   });
 
-  it('increments seat_count in Postgres after slotting', async () => {
-    const { rows } = await pgClient.query<{ seat_count: number }>(
-      'SELECT seat_count FROM shared_rides WHERE ride_id = $1',
-      [poolAId],
-    );
-    expect(rows[0].seat_count).toBe(2);
+  it('seat_count in Postgres is derived from membership', async () => {
+    const db = await snapshot(admin, poolAId);
+    expect(db.seatCount).toBe(2);
+    expect(db.members).toHaveLength(2);
   });
 
-  it('opens a new pool when no candidate qualifies', async () => {
-    // Mark pool A full so it no longer qualifies
-    await pgClient.query(
-      "UPDATE shared_rides SET seat_count = max_seats WHERE ride_id = $1",
-      [poolAId],
-    );
-
-    const result = await svc.findOrCreatePool({
-      passengerId: randomUUID(),
-      originLat: REQUEST_ORIGIN.lat, originLng: REQUEST_ORIGIN.lng,
-      destLat:   REQUEST_DEST.lat,   destLng:   REQUEST_DEST.lng,
+  it('the seat that fills pool A closes it; the next request opens a new pool', async () => {
+    const filler = await svc.findOrCreatePool(request(await passenger()));
+    expect(filler).toMatchObject({
+      mode: 'slotted',
+      sharedRideId: poolAId,
+      poolStatus: 'closed_full',
     });
 
+    const result = await svc.findOrCreatePool(request(await passenger()));
     expect(result.mode).toBe('opened');
-    const { rows } = await pgClient.query<{ seat_count: number; pool_state: string }>(
-      'SELECT seat_count, pool_state FROM shared_rides WHERE ride_id = $1',
-      [result.sharedRideId],
-    );
-    expect(rows).toHaveLength(1);
-    expect(rows[0].seat_count).toBe(1);
-    expect(rows[0].pool_state).toBe('open');
+    const newId = (result as { sharedRideId: string }).sharedRideId;
+    poolIds.push(newId);
+    const db = await snapshot(admin, newId);
+    expect(db).toMatchObject({ poolState: 'open', seatCount: 1, expireIntents: 1 });
+    expect(await poolInvariantViolations(admin, poolIds)).toEqual({ I5: [], I6: [], I7: [] });
+  });
+
+  it('a candidate that filled since it was scored is skipped (advisory discovery)', async () => {
+    // A stale view of an open pool that is in fact full by the time we join.
+    const reqA = request(await passenger());
+    const fresh = await svc.findOrCreatePool(reqA);
+    const target = (fresh as { sharedRideId: string }).sharedRideId;
+    const real = (await s.repo.findById(target))!;
+    const scorer = { scoreRoutes: vi.fn().mockResolvedValue(0.95) };
+    const stale = s.matching(scorer);
+    vi.spyOn(s.repo, 'findCandidates').mockResolvedValueOnce([
+      { ...real, poolState: 'open', seatCount: 0 },
+    ]);
+    await admin.query(`UPDATE shared_rides SET pool_state = 'closed_timeout' WHERE ride_id = $1`, [
+      target,
+    ]);
+
+    const out = await stale.findOrCreatePool(request(await passenger()));
+    expect(out.mode).toBe('opened');
+    expect((out as { sharedRideId: string }).sharedRideId).not.toBe(target);
+    poolIds.push((out as { sharedRideId: string }).sharedRideId);
+  });
+
+  it('an unknown pool id from a stale candidate list is skipped too', async () => {
+    const ghost = {
+      ...(await s.repo.findById(poolAId))!,
+      rideId: randomUUID(),
+      poolState: 'open',
+      seatCount: 0,
+    };
+    vi.spyOn(s.repo, 'findCandidates').mockResolvedValueOnce([ghost]);
+    const out = await svc.findOrCreatePool(request(await passenger()));
+    expect(out.mode).toBe('opened');
+    poolIds.push((out as { sharedRideId: string }).sharedRideId);
   });
 });

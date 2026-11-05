@@ -17,13 +17,14 @@ import {
 } from '@nestjs/common';
 import type { Request } from 'express';
 import { AuthGuard, type JwtPayload } from '../../common/guards/auth.guard';
-import { MatchingService, type MatchResult } from '../matching/matching.service';
+import { MatchingService, type SeatMatch } from '../matching/matching.service';
+import type { PoolStatus } from '../matching/pool-lifecycle.service';
 import { SharedRideRepository } from '../matching/shared-ride.repository';
 import { RideStopRepository } from '../matching/ride-stop.repository';
 import { RouteSimilarityService, type RouteGeometry } from '../matching/route-similarity.service';
 import { PricingService } from '../pricing/pricing.service';
 import type { Money } from '../pricing/money';
-import type { SeatQuote } from '../pricing/pricing.types';
+import type { PoolForPricing, SeatQuote } from '../pricing/pricing.types';
 import { CreateRideDto, RideType } from './dto/create-ride.dto';
 import { QuoteRideDto } from './dto/quote-ride.dto';
 import { TransitionRideDto } from './dto/transition-ride.dto';
@@ -54,8 +55,8 @@ const SCHEDULED_MAX_LEAD_MS = 24 * 60 * 60 * 1000;
 export interface CreateRideResponse {
   sharedRideId: string;
   passengerId: string;
-  mode: MatchResult['mode'];
-  poolStatus: MatchResult['poolStatus'];
+  mode: SeatMatch['mode'];
+  poolStatus: PoolStatus;
   perSeatPrice?: Money;
   seatMultiplier?: number;
   detourFactor?: number;
@@ -222,18 +223,21 @@ export class RidesController {
   /**
    * Shared (pooled) booking request. Honors `Idempotency-Key` with the same
    * account-scoped contract as solo (F15): the key is claimed durably BEFORE a
-   * seat is allocated, so a retried identical request replays the original
-   * result instead of taking a second seat, and a concurrent duplicate gets 409
+   * seat is allocated, so a concurrent duplicate gets 409
    * `idempotency_request_in_progress` rather than racing the allocation.
    *
+   * Since Stage C (R08) the claim is COMPLETED in the same transaction that
+   * inserts the seat (`pool_member.idempotency_key` = the key), so a committed
+   * seat always has its replayable response and a retried identical request
+   * replays it. A `pending` claim older than `PENDING_RECLAIM_AFTER_MS` is
+   * reclaimed by a same-fingerprint retry, which looks the seat up by its exact
+   * key (no passenger + time heuristic). A passenger already holding a seat in
+   * another live pool under a different (or no) key gets 409
+   * `passenger_has_active_pool`.
+   *
    * The header is optional here only because the web client does not send it
-   * for shared yet; without it the request is not retry-safe (legacy).
-   * A `pending` claim older than `PENDING_RECLAIM_AFTER_MS` is reclaimed by a
-   * same-fingerprint retry, which first looks for a seat the dead attempt
-   * already took. TODO(R08): that lookup is best effort (passenger + time, not a
-   * durable link) — folding claim/complete into the pool-membership transaction
-   * would close the remaining gap (e.g. a seat taken but not yet visible, or a
-   * live first request still running past the bound).
+   * for shared yet; without it a duplicate is still prevented by the one-active-
+   * pool constraint, and a keyless duplicate in the same pool gets that seat back.
    */
   private async createShared(
     passengerId: string,
@@ -255,16 +259,16 @@ export class RidesController {
       throw idempotencyRequestInProgress();
     }
 
-    let response: CreateRideResponse;
     try {
-      // A reclaimed claim means a previous attempt died (or failed to record
-      // its result) after possibly taking a seat: return that seat if it exists.
-      response =
-        (claim.kind === 'reclaimed'
-          ? await this.existingSharedSeat(passengerId, dto, claim.previousAttemptAt)
-          : null) ?? (await this.allocateSharedSeat(passengerId, dto));
+      // A reclaimed claim means a previous attempt died (or is still running
+      // past the bound): if its seat committed, that seat is the answer.
+      const held =
+        claim.kind === 'reclaimed' ? await this.existingSharedSeat(passengerId, scope) : null;
+      return held ?? (await this.allocateSharedSeat(passengerId, dto, scope));
     } catch (err) {
-      // Allocation failed: free the key so the client's retry can proceed.
+      // Nothing committed under this key (seat + completion are one commit):
+      // free the key so the client's retry can proceed. A no-op if the claim
+      // was completed (release only deletes `pending`).
       await this.idempotency
         .release(scope)
         .catch((releaseErr: unknown) =>
@@ -272,16 +276,13 @@ export class RidesController {
         );
       throw err;
     }
-    await this.completeClaim(scope, response);
-    return response;
   }
 
   /**
-   * Records the replayable result. The seat is already allocated, so a failure
-   * here must not fail the request; it is retried briefly, and if it still
-   * fails the claim stays `pending` until `PENDING_RECLAIM_AFTER_MS` lets the
-   * next retry reclaim it and find the seat via `existingSharedSeat` (rather
-   * than 409-ing forever).
+   * Records the replayable result OUTSIDE the seat transaction — only for a
+   * seat that was not produced by this attempt (a legacy pre-Stage-C seat found
+   * on reclaim). Retried briefly; a failure leaves the claim `pending` for the
+   * next reclaim, which finds the same seat by its key.
    */
   private async completeClaim(
     scope: IdempotencyScope,
@@ -304,56 +305,88 @@ export class RidesController {
     );
   }
 
-  /** Seat the passenger already holds from a dead earlier attempt, if any. */
+  /**
+   * The seat this key already produced, if any: the completed record's own
+   * response when it exists (exact replay), else one rebuilt from the seat row
+   * (its stored quote) and recorded.
+   */
   private async existingSharedSeat(
     passengerId: string,
-    dto: CreateRideDto,
-    since: Date,
+    scope: IdempotencyScope,
   ): Promise<CreateRideResponse | null> {
-    const held = await this.ridesRepo.findRecentPoolMembership(passengerId, since);
-    if (!held) return null;
-    const result: MatchResult = held.opened
-      ? { mode: 'opened', sharedRideId: held.sharedRideId, poolStatus: 'open' }
-      : {
-          mode: 'slotted',
-          sharedRideId: held.sharedRideId,
-          poolStatus: held.poolState === 'closed_full' ? 'closed_full' : 'open',
-        };
-    const seatQuote = await this.priceMatchedSeat(result, dto);
-    return {
-      sharedRideId: result.sharedRideId,
-      passengerId,
-      mode: result.mode,
-      poolStatus: result.poolStatus,
-      perSeatPrice: seatQuote?.perSeatPrice,
-      seatMultiplier: seatQuote?.seatMultiplier,
-      detourFactor: seatQuote?.detourFactor,
-    };
+    const record = await this.idempotency.find(scope);
+    if (record?.state === 'completed' && record.response) {
+      return record.response as CreateRideResponse;
+    }
+    const seat = await this.matching.findSeatByIdempotencyKey(passengerId, scope.key);
+    if (!seat) return null;
+    const response = seatResponse(passengerId, seat);
+    await this.completeClaim(scope, response);
+    return response;
   }
 
+  /**
+   * Quote (OSRM, outside any transaction) → seat in one transaction that also
+   * completes the idempotency claim when a scope is given.
+   */
   private async allocateSharedSeat(
     passengerId: string,
     dto: CreateRideDto,
+    scope?: IdempotencyScope,
   ): Promise<CreateRideResponse> {
-    const result = await this.matching.findOrCreatePool({
+    const toResponse = (m: SeatMatch): CreateRideResponse => ({
+      sharedRideId: m.sharedRideId,
       passengerId,
-      originLat: dto.originLat,
-      originLng: dto.originLng,
-      destLat: dto.destLat,
-      destLng: dto.destLng,
+      mode: m.mode,
+      poolStatus: m.poolStatus,
+      perSeatPrice: m.quote?.perSeatPrice,
+      seatMultiplier: m.quote?.seatMultiplier,
+      detourFactor: m.quote?.detourFactor,
     });
 
-    const seatQuote = await this.priceMatchedSeat(result, dto);
+    const result = await this.matching.findOrCreatePool(
+      {
+        passengerId,
+        originLat: dto.originLat,
+        originLng: dto.originLng,
+        destLat: dto.destLat,
+        destLng: dto.destLng,
+      },
+      {
+        quote: (target) => this.priceMatchedSeat(target, dto),
+        idempotency: scope ? { scope, response: toResponse } : undefined,
+      },
+    );
 
-    return {
-      sharedRideId: result.sharedRideId,
-      passengerId,
-      mode: result.mode,
-      poolStatus: result.poolStatus,
-      perSeatPrice: seatQuote?.perSeatPrice,
-      seatMultiplier: seatQuote?.seatMultiplier,
-      detourFactor: seatQuote?.detourFactor,
-    };
+    switch (result.mode) {
+      case 'opened':
+      case 'slotted':
+        return toResponse(result);
+      case 'existing': {
+        if (scope && result.reason === 'idempotent_replay') {
+          const replay = await this.existingSharedSeat(passengerId, scope);
+          if (replay) return replay;
+        }
+        const seat = await this.matching.findSeat(result.sharedRideId, passengerId);
+        if (seat) return seatResponse(passengerId, seat);
+        throw new ConflictException({
+          code: 'pool_conflict',
+          message: 'The shared booking changed concurrently; retry the request',
+        });
+      }
+      case 'conflict':
+        if (result.reason === 'passenger_has_active_pool') {
+          throw new ConflictException({
+            code: 'passenger_has_active_pool',
+            message: 'You already hold a seat in an active shared ride',
+            sharedRideId: result.existingPoolId ?? null,
+          });
+        }
+        throw new ConflictException({
+          code: 'pool_conflict',
+          message: 'The shared booking changed concurrently; retry the request',
+        });
+    }
   }
 
   /**
@@ -709,14 +742,13 @@ export class RidesController {
     }
   }
 
+  /** Seat price for joining `target`; a pricing failure yields no quote (F15: policy open). */
   private async priceMatchedSeat(
-    result: MatchResult,
+    target: PoolForPricing,
     dto: CreateRideDto,
   ): Promise<SeatQuote | null> {
     try {
-      const pool = await this.repo.findById(result.sharedRideId);
-      if (!pool) return null;
-      return await this.pricing.quoteSeat(pool, {
+      return await this.pricing.quoteSeat(target, {
         route: {
           originLat: dto.originLat,
           originLng: dto.originLng,
@@ -725,10 +757,25 @@ export class RidesController {
         },
       });
     } catch (err) {
-      this.log.warn({ err, sharedRideId: result.sharedRideId }, 'seat pricing failed');
+      this.log.warn({ err, sharedRideId: target.rideId }, 'seat pricing failed');
       return null;
     }
   }
+}
+
+/** Response for a seat that already exists (built from its committed row + stored quote). */
+function seatResponse(
+  passengerId: string,
+  seat: { poolId: string; poolState: string; opened: boolean; quotedFareCents: number | null },
+): CreateRideResponse {
+  return {
+    sharedRideId: seat.poolId,
+    passengerId,
+    mode: seat.opened ? 'opened' : 'slotted',
+    poolStatus: seat.poolState as PoolStatus,
+    perSeatPrice:
+      seat.quotedFareCents === null ? undefined : { amount: seat.quotedFareCents, currency: 'INR' },
+  };
 }
 
 function soloResponse(row: RideRow): SoloRideResponse {

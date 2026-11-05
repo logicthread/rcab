@@ -5,6 +5,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import * as schema from '../../src/db/schema';
 import { RidesRepository } from '../../src/modules/rides/rides.repository';
 import { IdempotencyRepository } from '../../src/modules/rides/idempotency.repository';
+import { PoolMembershipRepository } from '../../src/modules/matching/pool-membership.repository';
 
 const skip = process.env.RCAB_INT_SKIPPED === '1';
 
@@ -305,39 +306,51 @@ describe.skipIf(skip)('RidesRepository — idempotency (real Postgres)', () => {
     expect((await idem.claim(scope, 'fp')).kind).toBe('existing');
   });
 
-  it('findRecentPoolMembership finds the passenger seat in an open pool, only if recent', async () => {
-    const rideId = randomUUID();
-    const joinedAt = new Date();
-    await pool.query(
-      `INSERT INTO shared_rides (ride_id, seat_count, max_seats, pool_state, pool_closed_at,
-         detour_budget_m, origin_lat, origin_lng, dest_lat, dest_lng, members)
-       VALUES ($1, 1, 3, 'open', now() + interval '1 minute', 1500, 26.1, 91.7, 26.2, 91.8, $2::jsonb)`,
-      [
-        rideId,
-        JSON.stringify([
-          {
-            passenger_id: passengerId,
-            origin_lat: 26.1,
-            origin_lng: 91.7,
-            dest_lat: 26.2,
-            dest_lng: 91.8,
-            joined_at: joinedAt.toISOString(),
-          },
-        ]),
-      ],
-    );
+  it('a shared-create key resolves to EXACTLY the seat it produced (pool_member.idempotency_key, R08)', async () => {
+    const members = new PoolMembershipRepository();
+    const db = drizzle(pool, { schema });
+    const older = randomUUID();
+    const newer = randomUUID();
+    for (const id of [older, newer]) {
+      await pool.query(
+        `INSERT INTO shared_rides (ride_id, seat_count, max_seats, pool_state, pool_closed_at,
+           detour_budget_m, origin_lat, origin_lng, dest_lat, dest_lng)
+         VALUES ($1, 0, 3, 'open', now() + interval '1 minute', 1500, 26.1, 91.7, 26.2, 91.8)`,
+        [id],
+      );
+    }
     try {
-      const found = await repo.findRecentPoolMembership(passengerId, new Date(Date.now() - 30_000));
-      expect(found).toEqual({ sharedRideId: rideId, poolState: 'open', opened: true });
-      // Membership older than the dead attempt's start is not "its" seat.
-      expect(
-        await repo.findRecentPoolMembership(passengerId, new Date(Date.now() + 60_000)),
-      ).toBeNull();
-      expect(
-        await repo.findRecentPoolMembership(otherPassengerId, new Date(Date.now() - 30_000)),
-      ).toBeNull();
+      // The passenger's older seat (pool now finished) under key k-old, the
+      // live seat under k-new; another passenger joins the live pool first.
+      const seat = (poolId: string, passenger: string, key: string | null) =>
+        pool.query(
+          `INSERT INTO pool_member (pool_id, passenger_id, origin_lat, origin_lng, dest_lat, dest_lng,
+             quoted_fare_cents, idempotency_key)
+           VALUES ($1, $2, 26.1, 91.7, 26.2, 91.8, 4200, $3)`,
+          [poolId, passenger, key],
+        );
+      await seat(older, passengerId, 'k-old');
+      await pool.query(`UPDATE shared_rides SET pool_state = 'completed' WHERE ride_id = $1`, [older]);
+      await seat(newer, otherPassengerId, null);
+      await seat(newer, passengerId, 'k-new');
+
+      expect(await members.findByIdempotencyKey(db as never, passengerId, 'k-new')).toEqual({
+        poolId: newer,
+        poolState: 'open',
+        opened: false,
+        quotedFareCents: 4200,
+      });
+      expect(await members.findByIdempotencyKey(db as never, passengerId, 'k-old')).toEqual({
+        poolId: older,
+        poolState: 'completed',
+        opened: true,
+        quotedFareCents: 4200,
+      });
+      // No time heuristic: an unknown key, or another passenger's key, finds nothing.
+      expect(await members.findByIdempotencyKey(db as never, passengerId, 'k-none')).toBeNull();
+      expect(await members.findByIdempotencyKey(db as never, otherPassengerId, 'k-new')).toBeNull();
     } finally {
-      await pool.query('DELETE FROM shared_rides WHERE ride_id = $1', [rideId]);
+      await pool.query('DELETE FROM shared_rides WHERE ride_id = ANY($1)', [[older, newer]]);
     }
   });
 });

@@ -1,184 +1,233 @@
-import { Client } from 'pg';
+import { Pool } from 'pg';
 import Redis from 'ioredis';
-import { Queue } from 'bullmq';
-import { drizzle } from 'drizzle-orm/node-postgres';
-import { EventEmitter2 } from '@nestjs/event-emitter';
-import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
-import * as schema from '../../src/db/schema';
-import { SharedRideRepository } from '../../src/modules/matching/shared-ride.repository';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import type { Job } from 'bullmq';
 import {
-  PoolLifecycleService,
-  MATCHING_QUEUE,
+  POOL_EXPIRE_JOB,
+  POOL_UPDATE_EVENT,
 } from '../../src/modules/matching/pool-lifecycle.service';
 import { PoolExpireProcessor } from '../../src/modules/matching/pool-expire.processor';
-import type { Job } from 'bullmq';
+import {
+  ROUTE,
+  buildPoolStack,
+  cleanupPools,
+  memberAt,
+  poolInvariantViolations,
+  seedPassenger,
+  snapshot,
+  type PoolStack,
+} from './pool-harness';
 
 const skip = process.env.RCAB_INT_SKIPPED === '1';
 
-function parseRedis(url: string) {
-  const u = new URL(url);
-  return {
-    host: u.hostname,
-    port: Number(u.port || 6379),
-    username: u.username || undefined,
-    password: u.password || undefined,
-  };
-}
-
-describe.skipIf(skip)('PoolLifecycleService — integration (Postgres + Redis + BullMQ)', () => {
-  let pgClient: Client;
+describe.skipIf(skip)('PoolLifecycleService — integration (Postgres + Redis)', () => {
+  let admin: Pool;
   let redis: Redis;
-  let queue: Queue;
-  let lifecycle: PoolLifecycleService;
+  let s: PoolStack;
   let processor: PoolExpireProcessor;
+  const poolIds: string[] = [];
+  const passengers: string[] = [];
+
+  const passenger = async () => {
+    const id = await seedPassenger(admin);
+    passengers.push(id);
+    return id;
+  };
 
   beforeAll(async () => {
-    pgClient = new Client({ connectionString: process.env.TEST_POSTGRES_URI });
-    await pgClient.connect();
+    admin = new Pool({ connectionString: process.env.TEST_POSTGRES_URI, max: 2 });
     redis = new Redis(process.env.TEST_REDIS_URL!, { maxRetriesPerRequest: null });
-
-    const pool = {
-      query: (text: string, values?: unknown[]) => pgClient.query(text, values as never),
-    };
-    const db = drizzle(pool as never, { schema });
-    const repo = new SharedRideRepository(db as never);
-
-    const conn = parseRedis(process.env.TEST_REDIS_URL!);
-    queue = new Queue(MATCHING_QUEUE, { connection: conn });
-
-    const config = { get: vi.fn().mockReturnValue(undefined) };
-    const events = new EventEmitter2();
-    const bus = {
-      toDriver: vi.fn(),
-      toUser: vi.fn(),
-      toRide: vi.fn(),
-      toPool: vi.fn(),
-      joinPool: vi.fn().mockResolvedValue(undefined),
-      broadcast: vi.fn(),
-    };
-    lifecycle = new PoolLifecycleService(
-      repo,
-      queue as never,
-      redis,
-      events,
-      bus as never,
-      config as never,
-    );
-    processor = new PoolExpireProcessor(lifecycle);
+    s = buildPoolStack(redis, { max: 2, config: { MATCHING_POOL_TIMEOUT_MS: '45000' } });
+    processor = new PoolExpireProcessor(s.lifecycle);
   });
 
   afterAll(async () => {
-    await pgClient.query('DELETE FROM shared_rides').catch(() => {});
-    await queue?.obliterate({ force: true }).catch(() => {});
-    await queue?.close().catch(() => {});
-    await pgClient.end();
+    await cleanupPools(admin, poolIds, passengers).catch(() => {});
+    await s.close();
+    await admin.end();
     await redis.quit();
   });
 
-  it('openPool writes DB row + members[0] opener, Redis HASH, and enqueues delayed pool:expire', async () => {
-    const pool = await lifecycle.openPool({
-      passengerId: 'p-opener-1',
-      originLat: 22.5727,
-      originLng: 88.364,
-      destLat: 22.5801,
-      destLng: 88.3701,
+  it('openPool commits pool + opener seat + expiry intent together; projection + room after commit', async () => {
+    const opener = await passenger();
+    const res = await s.lifecycle.openPool({
+      ...ROUTE,
       maxSeats: 3,
       detourBudgetM: 800,
+      passengerId: opener,
+      quotedFareCents: 12_345,
+    });
+    expect(res).toMatchObject({
+      poolState: 'open',
+      seatCount: 1,
+      maxSeats: 3,
+      dispatchGeneration: 0,
+    });
+    expect(res.members.map((m) => m.passenger_id)).toEqual([opener]);
+    const poolId = res.rideId;
+    poolIds.push(poolId);
+
+    const db = await snapshot(admin, poolId);
+    expect(db).toMatchObject({
+      poolState: 'open',
+      seatCount: 1,
+      maxSeats: 3,
+      generation: 0,
+      members: [opener],
+      stops: 0,
+      dispatchIntents: [],
+      expireIntents: 1,
     });
 
-    const { rows } = await pgClient.query<{
-      pool_state: string;
-      seat_count: number;
-      members: unknown;
-    }>('SELECT pool_state, seat_count, members FROM shared_rides WHERE ride_id = $1', [
-      pool.rideId,
+    // Planned close on the DB clock (MATCHING_POOL_TIMEOUT_MS) and the expiry
+    // intent carries exactly that instant, at generation 0.
+    const { rows } = await admin.query<{
+      pool_closed_at: Date;
+      lead_s: number;
+      payload: { expireAt: string };
+      aggregate_generation: number;
+      dedupe_key: string;
+      aggregate_type: string;
+    }>(
+      `SELECT s.pool_closed_at, extract(epoch FROM s.pool_closed_at - s.pool_opened_at)::float8 AS lead_s,
+              o.payload, o.aggregate_generation, o.dedupe_key, o.aggregate_type
+         FROM shared_rides s JOIN outbox o ON o.aggregate_id = s.ride_id
+        WHERE s.ride_id = $1 AND o.topic = 'pool.expire.schedule'`,
+      [poolId],
+    );
+    expect(rows[0].lead_s).toBeCloseTo(45, 0);
+    expect(new Date(rows[0].payload.expireAt).getTime()).toBe(rows[0].pool_closed_at.getTime());
+    expect(rows[0]).toMatchObject({
+      aggregate_generation: 0,
+      aggregate_type: 'shared_ride',
+      dedupe_key: `pool.expire.schedule:${poolId}:g0`,
+    });
+    const fare = await admin.query('SELECT quoted_fare_cents FROM pool_member WHERE pool_id = $1', [
+      poolId,
     ]);
-    expect(rows[0].pool_state).toBe('open');
-    expect(rows[0].seat_count).toBe(1);
-    const members = rows[0].members as Array<{ passenger_id: string }>;
-    expect(members).toHaveLength(1);
-    expect(members[0].passenger_id).toBe('p-opener-1');
+    expect(fare.rows).toEqual([{ quoted_fare_cents: 12_345 }]);
 
-    const hash = await redis.hgetall(`pool:${pool.rideId}`);
-    expect(hash.state).toBe('open');
-    expect(hash.seat_count).toBe('1');
-    expect(hash.max_seats).toBe('3');
-    expect(hash.expiry_job_id).toBe(`pool:expire:${pool.rideId}`);
-
-    const job = await queue.getJob(`pool:expire:${pool.rideId}`);
-    expect(job).toBeDefined();
-    expect(job?.opts.delay).toBe(60_000);
+    expect(await redis.hgetall(`pool:${poolId}`)).toMatchObject({
+      state: 'open',
+      seat_count: '1',
+      max_seats: '3',
+      version: String(db.stateVersion),
+    });
+    expect(await redis.ttl(`pool:${poolId}`)).toBeGreaterThan(0);
+    expect(await redis.exists(`pool:${poolId}:seats`)).toBe(0); // removed Redis seat counter
+    expect(s.bus.joinPool).toHaveBeenCalledWith(opener, poolId);
+    expect(s.bus.toPool).toHaveBeenCalledWith(poolId, POOL_UPDATE_EVENT, {
+      sharedRideId: poolId,
+      seatCount: 1,
+      poolStatus: 'open',
+    });
   });
 
-  it('slotRequest filling the last seat transitions pool to closed_full and removes the expiry job', async () => {
-    const pool = await lifecycle.openPool({
-      passengerId: 'p-opener-2',
-      originLat: 22.6,
-      originLng: 88.4,
-      destLat: 22.61,
-      destLng: 88.41,
+  it('the filling join closes closed_full in the same commit: itinerary persisted, gen 1 intent', async () => {
+    const opener = await passenger();
+    const joiner = await passenger();
+    const res = await s.lifecycle.openPool({
+      ...ROUTE,
       maxSeats: 2,
       detourBudgetM: 800,
+      passengerId: opener,
+      quotedFareCents: null,
     });
+    const poolId = res.rideId;
+    poolIds.push(poolId);
 
-    // Pool starts at seat_count=1. Slotting once should fill it (max=2).
-    const result = await lifecycle.slotRequest({
-      pool,
-      joiner: {
-        passenger_id: 'p-joiner-2',
-        origin_lat: 22.6005,
-        origin_lng: 88.4005,
-        dest_lat: 22.6105,
-        dest_lng: 88.4105,
-        joined_at: new Date().toISOString(),
-      },
-    });
-    expect(result).toEqual({ slotted: true, closedFull: true, seatCount: 2 });
+    await expect(
+      s.lifecycle.joinPool({ poolId, joiner: memberAt(joiner, 1), quotedFareCents: 8_000 }),
+    ).resolves.toEqual({ joined: true, closedFull: true, seatCount: 2 });
 
-    const { rows } = await pgClient.query<{ pool_state: string; seat_count: number }>(
-      'SELECT pool_state, seat_count FROM shared_rides WHERE ride_id = $1',
-      [pool.rideId],
+    const db = await snapshot(admin, poolId);
+    expect(db).toMatchObject({ poolState: 'closed_full', seatCount: 2, generation: 1, stops: 4 });
+    expect(db.dispatchIntents).toEqual([
+      { generation: 1, payload: { poolId, reason: 'closed_full' } },
+    ]);
+
+    const stops = await admin.query<{ sequence_index: number; type: string; passenger_id: string }>(
+      'SELECT sequence_index, type, passenger_id FROM ride_stops WHERE ride_id = $1 ORDER BY sequence_index',
+      [poolId],
     );
-    expect(rows[0].pool_state).toBe('closed_full');
-    expect(rows[0].seat_count).toBe(2);
-
-    const hash = await redis.hgetall(`pool:${pool.rideId}`);
-    expect(hash.state).toBe('closed_full');
-    expect(hash.closed_at).toBeDefined();
-
-    // The expiry job must have been removed.
-    const job = await queue.getJob(`pool:expire:${pool.rideId}`);
-    expect(job).toBeUndefined();
+    expect(stops.rows.map((r) => r.type)).toEqual(['pickup', 'pickup', 'dropoff', 'dropoff']);
+    expect(new Set(stops.rows.map((r) => r.passenger_id))).toEqual(new Set([opener, joiner]));
+    expect(await redis.hget(`pool:${poolId}`, 'state')).toBe('closed_full');
+    expect(await poolInvariantViolations(admin, poolIds)).toEqual({ I5: [], I6: [], I7: [] });
   });
 
-  it('PoolExpireProcessor → closePool(closed_timeout): DB + HASH updated; job NOT explicitly removed', async () => {
-    const pool = await lifecycle.openPool({
-      passengerId: 'p-opener-3',
-      originLat: 22.55,
-      originLng: 88.35,
-      destLat: 22.56,
-      destLng: 88.36,
+  it('PoolExpireProcessor → guarded timeout close; a redelivered / stale job is a no-op', async () => {
+    const opener = await passenger();
+    const res = await s.lifecycle.openPool({
+      ...ROUTE,
       maxSeats: 3,
       detourBudgetM: 800,
+      passengerId: opener,
+      quotedFareCents: null,
     });
+    const poolId = res.rideId;
+    poolIds.push(poolId);
 
-    // The processor would normally be invoked by BullMQ when the delayed job fires.
-    // We simulate the fire by calling its process() method directly with a Job-like.
-    const fakeJob = {
-      name: 'pool:expire',
-      data: { rideId: pool.rideId },
-    } as unknown as Job<{ rideId: string }>;
+    const job = { name: POOL_EXPIRE_JOB, data: { rideId: poolId } } as Job<{ rideId: string }>;
+    await processor.process(job);
+    let db = await snapshot(admin, poolId);
+    expect(db).toMatchObject({
+      poolState: 'closed_timeout',
+      seatCount: 1,
+      generation: 1,
+      stops: 2,
+    });
+    expect(db.dispatchIntents).toEqual([
+      { generation: 1, payload: { poolId, reason: 'closed_timeout' } },
+    ]);
+    expect(await redis.hget(`pool:${poolId}`, 'state')).toBe('closed_timeout');
 
-    await processor.process(fakeJob);
+    // Redelivery (or a legacy `pool:expire:<id>` job) after the close.
+    await processor.process(job);
+    db = await snapshot(admin, poolId);
+    expect(db.generation).toBe(1);
+    expect(db.dispatchIntents).toHaveLength(1);
 
-    const { rows } = await pgClient.query<{ pool_state: string }>(
-      'SELECT pool_state FROM shared_rides WHERE ride_id = $1',
-      [pool.rideId],
+    // Unknown job names are ignored.
+    await expect(
+      processor.process({ name: 'other', data: { rideId: poolId } } as Job<{ rideId: string }>),
+    ).resolves.toBeUndefined();
+    expect(await poolInvariantViolations(admin, poolIds)).toEqual({ I5: [], I6: [], I7: [] });
+  });
+
+  it('a timeout on an EMPTY legacy open pool aborts it instead of dispatching nothing', async () => {
+    const { rows } = await admin.query<{ ride_id: string }>(
+      `INSERT INTO shared_rides (ride_id, seat_count, max_seats, pool_state, pool_closed_at,
+         detour_budget_m, origin_lat, origin_lng, dest_lat, dest_lng)
+       VALUES (gen_random_uuid(), 0, 3, 'open', now(), 800, 1, 2, 3, 4) RETURNING ride_id`,
     );
-    expect(rows[0].pool_state).toBe('closed_timeout');
+    const poolId = rows[0].ride_id;
+    poolIds.push(poolId);
+    await expect(s.lifecycle.closeIfOpen(poolId, 'closed_timeout')).resolves.toBe('aborted_empty');
+    const db = await snapshot(admin, poolId);
+    expect(db).toMatchObject({
+      poolState: 'aborted',
+      generation: 0,
+      stops: 0,
+      dispatchIntents: [],
+    });
+  });
 
-    const hash = await redis.hgetall(`pool:${pool.rideId}`);
-    expect(hash.state).toBe('closed_timeout');
-    expect(hash.closed_at).toBeDefined();
+  it('rebuildAll re-projects every non-terminal pool after Redis loss', async () => {
+    const live = poolIds.slice();
+    for (const id of live) await redis.del(`pool:${id}`);
+    await s.projection.rebuildAll();
+    for (const id of live) {
+      const db = await snapshot(admin, id);
+      if (['aborted', 'completed'].includes(db.poolState)) {
+        expect(await redis.exists(`pool:${id}`)).toBe(0);
+      } else {
+        expect(await redis.hgetall(`pool:${id}`)).toMatchObject({
+          state: db.poolState,
+          seat_count: String(db.seatCount),
+          version: String(db.stateVersion),
+        });
+      }
+    }
   });
 });

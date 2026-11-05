@@ -432,17 +432,68 @@ describe('RidesController.create — normal (solo) path', () => {
   });
 
   it('routes type=shared to the matching service (no regression)', async () => {
-    const { ctrl, matching, repo } = makeController({ ride: ride({ poolState: 'open' }) });
+    const { ctrl, matching } = makeController({ ride: ride({ poolState: 'open' }) });
     matching.findOrCreatePool.mockResolvedValue({
       sharedRideId: 'pool-1',
       mode: 'opened',
       poolStatus: 'open',
+      seatCount: 1,
+      quote: null,
     });
-    repo.findById.mockResolvedValue(null); // priceMatchedSeat → null path
     const sharedDto = { ...(dto as object), type: RideType.Shared } as never;
     const res = await ctrl.create(clientReq as never, sharedDto, undefined);
     expect(matching.findOrCreatePool).toHaveBeenCalled();
     expect((res as { sharedRideId: string }).sharedRideId).toBe('pool-1');
+  });
+
+  it('shared: the seat quote is priced BEFORE the seat txn and returned with the seat', async () => {
+    const { ctrl, matching, pricing } = makeController();
+    const quote = {
+      perSeatPrice: { amount: 7_500, currency: 'INR' },
+      seatMultiplier: 0.75,
+      detourFactor: 1,
+    };
+    pricing.quoteSeat.mockResolvedValue(quote);
+    matching.findOrCreatePool.mockImplementation(
+      async (_req: unknown, opts: { quote: (t: unknown) => Promise<unknown> }) => ({
+        sharedRideId: 'pool-2',
+        mode: 'slotted',
+        poolStatus: 'closed_full',
+        seatCount: 2,
+        quote: await opts.quote({ rideId: 'pool-2', seatCount: 2 }),
+      }),
+    );
+    const sharedDto = { ...(dto as object), type: RideType.Shared } as never;
+    const res = await ctrl.create(clientReq as never, sharedDto, undefined);
+    expect(pricing.quoteSeat).toHaveBeenCalledWith(
+      { rideId: 'pool-2', seatCount: 2 },
+      { route: expect.objectContaining({ originLat: expect.any(Number) }) },
+    );
+    expect(res).toMatchObject({
+      sharedRideId: 'pool-2',
+      mode: 'slotted',
+      poolStatus: 'closed_full',
+      perSeatPrice: quote.perSeatPrice,
+      seatMultiplier: 0.75,
+      detourFactor: 1,
+    });
+  });
+
+  it('shared: a pricing failure yields a seat without a price (F15 policy still open)', async () => {
+    const { ctrl, matching, pricing } = makeController();
+    pricing.quoteSeat.mockRejectedValue(new Error('osrm down'));
+    matching.findOrCreatePool.mockImplementation(
+      async (_req: unknown, opts: { quote: (t: unknown) => Promise<unknown> }) => ({
+        sharedRideId: 'pool-3',
+        mode: 'opened',
+        poolStatus: 'open',
+        seatCount: 1,
+        quote: await opts.quote({ rideId: 'pool-3', seatCount: 1 }),
+      }),
+    );
+    const sharedDto = { ...(dto as object), type: RideType.Shared } as never;
+    const res = await ctrl.create(clientReq as never, sharedDto, undefined);
+    expect(res).toMatchObject({ sharedRideId: 'pool-3', perSeatPrice: undefined });
   });
 });
 

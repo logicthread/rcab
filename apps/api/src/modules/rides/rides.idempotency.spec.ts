@@ -129,6 +129,17 @@ class FakeIdempotencyStore {
   readonly release = vi.fn(async (s: IdempotencyScope) => {
     if (this.records.get(this.k(s))?.state === 'pending') this.records.delete(this.k(s));
   });
+
+  /** In-transaction completion (shared seat txn, R08): same effect as `complete`. */
+  readonly completeIn = vi.fn(
+    async (_tx: unknown, s: IdempotencyScope, resourceId: string, response: unknown) =>
+      this.complete(s, resourceId, response),
+  );
+
+  readonly find = vi.fn(async (s: IdempotencyScope) => {
+    const hit = this.records.get(this.k(s));
+    return hit ? { ...hit } : null;
+  });
 }
 
 function rideRow(o: Partial<RideRow>): RideRow {
@@ -155,17 +166,52 @@ function rideRow(o: Partial<RideRow>): RideRow {
   };
 }
 
-const membership = vi.fn();
+/**
+ * Pool seats keyed by passenger|key — what `pool_member` (passenger_id,
+ * idempotency_key) holds. The matching fake commits a seat and its idempotency
+ * completion together, as the real seat transaction does (R08).
+ */
+type FakeSeat = {
+  poolId: string;
+  poolState: string;
+  opened: boolean;
+  quotedFareCents: number | null;
+};
+const seats = new Map<string, FakeSeat>();
+type FindOpts = {
+  quote?: (t: unknown) => Promise<unknown>;
+  idempotency?: { scope: IdempotencyScope; response: (m: unknown) => unknown };
+};
 function harness(stores?: { rides: FakeRidesStore; idem: FakeIdempotencyStore }) {
   const rides = stores?.rides ?? new FakeRidesStore();
   const idem = stores?.idem ?? new FakeIdempotencyStore();
   let poolSeq = 0;
   const matching = {
-    findOrCreatePool: vi.fn(async () => ({
-      mode: 'opened' as const,
-      sharedRideId: `pool-${++poolSeq}`,
-      poolStatus: 'open' as const,
-    })),
+    findOrCreatePool: vi.fn(
+      async (req: { passengerId: string }, opts?: FindOpts): Promise<unknown> => {
+        const sharedRideId = `pool-${++poolSeq}`;
+        const match = {
+          mode: 'opened' as const,
+          sharedRideId,
+          poolStatus: 'open' as const,
+          seatCount: 1,
+          quote: null,
+        };
+        if (opts?.idempotency) {
+          const { scope, response } = opts.idempotency;
+          seats.set(`${req.passengerId}|${scope.key}`, {
+            poolId: sharedRideId,
+            poolState: 'open',
+            opened: true,
+            quotedFareCents: null,
+          });
+          await idem.completeIn(null, scope, sharedRideId, response(match));
+        }
+        return match;
+      },
+    ),
+    findSeatByIdempotencyKey: vi.fn(async (p: string, k: string) => seats.get(`${p}|${k}`) ?? null),
+    findSeat: vi.fn(async (): Promise<FakeSeat | null> => null),
   };
   const quoteToken = { sign: vi.fn(), verify: vi.fn().mockReturnValue(CLAIMS) };
   const events = { emit: vi.fn() };
@@ -177,7 +223,7 @@ function harness(stores?: { rides: FakeRidesStore; idem: FakeIdempotencyStore })
     {} as never,
     {} as never,
     quoteToken as never,
-    Object.assign(rides, { findRecentPoolMembership: membership }) as never,
+    rides as never,
     {} as never,
     { joinRide: vi.fn().mockResolvedValue(undefined) } as never,
     events as never,
@@ -194,7 +240,7 @@ const shared = (o: object = {}) => ({ type: RideType.Shared, ...ROUTE, ...o }) a
 const scheduledDto = (scheduledFor: string, o: object = {}) =>
   ({ type: RideType.Scheduled, ...ROUTE, quoteToken: QUOTE, scheduledFor, ...o }) as never;
 
-beforeEach(() => membership.mockReset().mockResolvedValue(null));
+beforeEach(() => seats.clear());
 
 describe('ride create idempotency — account scope (F07)', () => {
   it("another account's identical key never replays the first account's ride", async () => {
@@ -359,17 +405,39 @@ describe('ride create idempotency — account scope (F07)', () => {
   });
 });
 
-describe('shared create idempotency (F15)', () => {
+describe('shared create idempotency (F15 / R08)', () => {
   let h: ReturnType<typeof harness>;
   beforeEach(() => {
     h = harness();
   });
+
+  const scopeOf = (sub: string, key: string) => ({
+    principalId: sub,
+    operation: IdempotencyOperation.Shared,
+    key,
+  });
+
+  /** A first attempt that took the claim and then died before its seat txn committed. */
+  async function deadAttempt(sub: string, key: string): Promise<void> {
+    h.matching.findOrCreatePool.mockImplementationOnce(() => new Promise(() => {}));
+    void h.ctrl.create(as(sub), shared(), key);
+    await vi.waitFor(() => expect(h.matching.findOrCreatePool).toHaveBeenCalled());
+  }
 
   it('a retried identical shared request replays the original seat — one allocation', async () => {
     const first = await h.ctrl.create(as(ALICE), shared(), 'sk');
     const retry = await h.ctrl.create(as(ALICE), shared(), 'sk');
     expect(retry).toEqual(first);
     expect(h.matching.findOrCreatePool).toHaveBeenCalledTimes(1);
+  });
+
+  it('the seat and its idempotency record commit together (no out-of-txn complete)', async () => {
+    const res = await h.ctrl.create(as(ALICE), shared(), 'sk');
+    expect(h.idem.completeIn).toHaveBeenCalledTimes(1);
+    expect(h.idem.completeIn).toHaveBeenCalledWith(null, scopeOf(ALICE, 'sk'), 'pool-1', res);
+    expect(h.idem.complete).toHaveBeenCalledTimes(1); // via completeIn only
+    const passed = h.matching.findOrCreatePool.mock.calls[0][1] as FindOpts;
+    expect(passed.idempotency?.scope).toEqual(scopeOf(ALICE, 'sk'));
   });
 
   it('two accounts using the same key each get their own seat', async () => {
@@ -397,7 +465,14 @@ describe('shared create idempotency (F15)', () => {
     h.matching.findOrCreatePool.mockImplementationOnce(
       () =>
         new Promise((resolve) => {
-          finish = () => resolve({ mode: 'opened', sharedRideId: 'pool-x', poolStatus: 'open' });
+          finish = () =>
+            resolve({
+              mode: 'opened',
+              sharedRideId: 'pool-x',
+              poolStatus: 'open',
+              seatCount: 1,
+              quote: null,
+            });
         }),
     );
     const inFlight = h.ctrl.create(as(ALICE), shared(), 'sk');
@@ -419,15 +494,8 @@ describe('shared create idempotency (F15)', () => {
     expect(h.idem.release).toHaveBeenCalledTimes(1);
   });
 
-  const scopeOf = (sub: string, key: string) => ({
-    principalId: sub,
-    operation: IdempotencyOperation.Shared,
-    key,
-  });
-
   it('a pending claim younger than the bound still 409s', async () => {
-    h.idem.complete.mockRejectedValue(new Error('db blip'));
-    await h.ctrl.create(as(ALICE), shared(), 'sk'); // complete() fails → stays pending
+    await deadAttempt(ALICE, 'sk');
     h.idem.age(scopeOf(ALICE, 'sk'), PENDING_RECLAIM_AFTER_MS - 5_000);
     await expect(h.ctrl.create(as(ALICE), shared(), 'sk')).rejects.toMatchObject({
       status: 409,
@@ -436,40 +504,76 @@ describe('shared create idempotency (F15)', () => {
   });
 
   it('a stale pending claim is reclaimed and re-allocates when no seat was taken', async () => {
-    h.idem.complete.mockRejectedValue(new Error('db blip'));
-    await h.ctrl.create(as(ALICE), shared(), 'sk');
-    h.idem.complete.mockReset();
+    await deadAttempt(ALICE, 'sk');
     h.idem.age(scopeOf(ALICE, 'sk'), PENDING_RECLAIM_AFTER_MS + 1_000);
 
     const retry = (await h.ctrl.create(as(ALICE), shared(), 'sk')) as { sharedRideId: string };
-    expect(membership).toHaveBeenCalledTimes(1);
-    expect(retry.sharedRideId).toBe('pool-2'); // nothing held → fresh allocation
+    expect(h.matching.findSeatByIdempotencyKey).toHaveBeenCalledWith(ALICE, 'sk');
+    expect(retry.sharedRideId).toBe('pool-1'); // nothing held → fresh allocation (the dead one never committed)
     expect(h.matching.findOrCreatePool).toHaveBeenCalledTimes(2);
     // …and the record is now completed, so a further retry replays it.
     await expect(h.ctrl.create(as(ALICE), shared(), 'sk')).resolves.toEqual(retry);
     expect(h.matching.findOrCreatePool).toHaveBeenCalledTimes(2);
   });
 
-  it('a stale pending claim returns the seat the dead attempt already took (no second seat)', async () => {
-    h.idem.complete.mockRejectedValue(new Error('db blip'));
-    await h.ctrl.create(as(ALICE), shared(), 'sk'); // allocated pool-1, record stuck pending
-    h.idem.complete.mockReset();
+  it('a stale claim whose (legacy) seat exists returns that exact seat — no second seat', async () => {
+    await deadAttempt(ALICE, 'sk');
     h.idem.age(scopeOf(ALICE, 'sk'), PENDING_RECLAIM_AFTER_MS + 1_000);
-    membership.mockResolvedValueOnce({
-      sharedRideId: 'pool-1',
-      poolState: 'open',
-      opened: true,
+    seats.set(`${ALICE}|sk`, {
+      poolId: 'pool-legacy',
+      poolState: 'closed_full',
+      opened: false,
+      quotedFareCents: 4_200,
     });
 
     const retry = await h.ctrl.create(as(ALICE), shared(), 'sk');
-    expect(retry).toMatchObject({ sharedRideId: 'pool-1', mode: 'opened', passengerId: ALICE });
-    expect(h.matching.findOrCreatePool).toHaveBeenCalledTimes(1);
+    expect(retry).toEqual({
+      sharedRideId: 'pool-legacy',
+      passengerId: ALICE,
+      mode: 'slotted',
+      poolStatus: 'closed_full',
+      perSeatPrice: { amount: 4_200, currency: 'INR' },
+    });
+    expect(h.matching.findOrCreatePool).toHaveBeenCalledTimes(1); // only the dead attempt
     expect(h.idem.complete).toHaveBeenCalledTimes(1);
+    await expect(h.ctrl.create(as(ALICE), shared(), 'sk')).resolves.toEqual(retry);
+  });
+
+  it('records a legacy seat even after a transient complete() failure (bounded retry)', async () => {
+    await deadAttempt(ALICE, 'sk');
+    h.idem.age(scopeOf(ALICE, 'sk'), PENDING_RECLAIM_AFTER_MS + 1_000);
+    seats.set(`${ALICE}|sk`, {
+      poolId: 'pool-legacy',
+      poolState: 'open',
+      opened: true,
+      quotedFareCents: null,
+    });
+    h.idem.complete.mockRejectedValueOnce(new Error('blip'));
+
+    const retry = await h.ctrl.create(as(ALICE), shared(), 'sk');
+    expect(retry).toMatchObject({ sharedRideId: 'pool-legacy', mode: 'opened' });
+    expect(h.idem.complete).toHaveBeenCalledTimes(2);
+  });
+
+  it('gives up recording after bounded retries but still answers with the seat', async () => {
+    await deadAttempt(ALICE, 'sk');
+    h.idem.age(scopeOf(ALICE, 'sk'), PENDING_RECLAIM_AFTER_MS + 1_000);
+    seats.set(`${ALICE}|sk`, {
+      poolId: 'pool-legacy',
+      poolState: 'open',
+      opened: true,
+      quotedFareCents: null,
+    });
+    h.idem.complete.mockRejectedValue(new Error('db down'));
+
+    await expect(h.ctrl.create(as(ALICE), shared(), 'sk')).resolves.toMatchObject({
+      sharedRideId: 'pool-legacy',
+    });
+    expect(h.idem.complete).toHaveBeenCalledTimes(3);
   });
 
   it('a stale claim with a different fingerprint is a 422, never reclaimed', async () => {
-    h.idem.complete.mockRejectedValue(new Error('db blip'));
-    await h.ctrl.create(as(ALICE), shared(), 'sk');
+    await deadAttempt(ALICE, 'sk');
     h.idem.age(scopeOf(ALICE, 'sk'), PENDING_RECLAIM_AFTER_MS + 1_000);
     await expect(h.ctrl.create(as(ALICE), shared({ destLat: 26.3 }), 'sk')).rejects.toMatchObject({
       response: { code: 'idempotency_key_conflict' },
@@ -477,18 +581,84 @@ describe('shared create idempotency (F15)', () => {
     expect(h.matching.findOrCreatePool).toHaveBeenCalledTimes(1);
   });
 
-  it('a transient complete() failure is retried and the record still completes', async () => {
-    h.idem.complete.mockRejectedValueOnce(new Error('blip'));
-    const first = await h.ctrl.create(as(ALICE), shared(), 'sk');
-    expect(h.idem.complete).toHaveBeenCalledTimes(2);
-    await expect(h.ctrl.create(as(ALICE), shared(), 'sk')).resolves.toEqual(first);
-    expect(h.matching.findOrCreatePool).toHaveBeenCalledTimes(1);
+  it('a reclaim racing its own still-live first attempt replays the winner’s record', async () => {
+    await deadAttempt(ALICE, 'sk');
+    h.idem.age(scopeOf(ALICE, 'sk'), PENDING_RECLAIM_AFTER_MS + 1_000);
+    // The "dead" first attempt commits (seat + record) while the reclaim allocates.
+    const winner = {
+      sharedRideId: 'pool-w',
+      passengerId: ALICE,
+      mode: 'opened',
+      poolStatus: 'open',
+    };
+    h.matching.findOrCreatePool.mockImplementationOnce(async () => {
+      await h.idem.completeIn(null, scopeOf(ALICE, 'sk'), 'pool-w', winner);
+      return { mode: 'existing', reason: 'idempotent_replay', sharedRideId: 'pool-w' };
+    });
+
+    await expect(h.ctrl.create(as(ALICE), shared(), 'sk')).resolves.toEqual(winner);
+  });
+
+  it('a different key while holding a live seat → 409 passenger_has_active_pool; key released', async () => {
+    h.matching.findOrCreatePool.mockResolvedValueOnce({
+      mode: 'conflict',
+      reason: 'passenger_has_active_pool',
+      existingPoolId: 'pool-held',
+    });
+    await expect(h.ctrl.create(as(ALICE), shared(), 'sk-2')).rejects.toMatchObject({
+      status: 409,
+      response: { code: 'passenger_has_active_pool', sharedRideId: 'pool-held' },
+    });
+    expect(h.idem.release).toHaveBeenCalledWith(scopeOf(ALICE, 'sk-2'));
+  });
+
+  it('an exhausted-retry conflict is a retryable 409 pool_conflict', async () => {
+    h.matching.findOrCreatePool.mockResolvedValueOnce({ mode: 'conflict', reason: 'conflict' });
+    await expect(h.ctrl.create(as(ALICE), shared(), 'sk')).rejects.toMatchObject({
+      status: 409,
+      response: { code: 'pool_conflict' },
+    });
+  });
+
+  it('a keyless duplicate in the same pool gets that seat back (already_member)', async () => {
+    h.matching.findOrCreatePool.mockResolvedValueOnce({
+      mode: 'existing',
+      reason: 'already_member',
+      sharedRideId: 'pool-mine',
+    });
+    h.matching.findSeat.mockResolvedValueOnce({
+      poolId: 'pool-mine',
+      poolState: 'open',
+      opened: true,
+      quotedFareCents: 900,
+    });
+    await expect(h.ctrl.create(as(ALICE), shared(), undefined)).resolves.toEqual({
+      sharedRideId: 'pool-mine',
+      passengerId: ALICE,
+      mode: 'opened',
+      poolStatus: 'open',
+      perSeatPrice: { amount: 900, currency: 'INR' },
+    });
+  });
+
+  it('an existing seat that vanished concurrently is a retryable 409', async () => {
+    h.matching.findOrCreatePool.mockResolvedValueOnce({
+      mode: 'existing',
+      reason: 'already_member',
+      sharedRideId: 'pool-gone',
+    });
+    await expect(h.ctrl.create(as(ALICE), shared(), undefined)).rejects.toMatchObject({
+      status: 409,
+      response: { code: 'pool_conflict' },
+    });
   });
 
   it('without a key the legacy (non-idempotent) path still works', async () => {
     await h.ctrl.create(as(ALICE), shared(), undefined);
     expect(h.idem.claim).not.toHaveBeenCalled();
     expect(h.matching.findOrCreatePool).toHaveBeenCalledTimes(1);
+    const passed = h.matching.findOrCreatePool.mock.calls[0][1] as FindOpts;
+    expect(passed.idempotency).toBeUndefined();
   });
 });
 

@@ -17,7 +17,6 @@ const require = createRequire(import.meta.url);
 
 const required = [
   'modules/dispatch/lua/pool_claim.lua',
-  'modules/matching/lua/pool_slot.lua',
 ];
 for (const rel of required) {
   const p = join(dist, rel);
@@ -36,9 +35,5 @@ const stub = {};
 const { DispatchService } = require(join(dist, 'modules/dispatch/dispatch.service.js'));
 const dispatch = new DispatchService(stub, stub, stub, stub, stub, stub, stub, stub, config);
 assert.match(dispatch.poolClaimScript, /redis\.call/, 'dispatch pool_claim script not loaded');
-
-const { PoolLifecycleService } = require(join(dist, 'modules/matching/pool-lifecycle.service.js'));
-const lifecycle = new PoolLifecycleService(stub, stub, stub, stub, stub, config);
-assert.match(lifecycle.poolSlotScript, /redis\.call/, 'matching pool_slot script not loaded');
 
 console.log('check-artifact: dist Lua assets present and readable by compiled services');

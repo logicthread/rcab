@@ -1,7 +1,7 @@
 import { Injectable, Inject } from '@nestjs/common';
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { DRIZZLE_DB, type DrizzleDb } from '../../infra/db/drizzle.module';
-import { rides, type SharedRideMember } from '../../db/schema';
+import { rides } from '../../db/schema';
 import { IdempotencyOperation } from './idempotency';
 
 /** The idempotency operations that persist as a `rides` row. */
@@ -11,14 +11,6 @@ export type RideIdempotencyOperation =
 
 function operationForType(type: string): RideIdempotencyOperation {
   return type === 'scheduled' ? IdempotencyOperation.Scheduled : IdempotencyOperation.Solo;
-}
-
-/** A pool seat the passenger already holds (idempotency reclaim, F15). */
-export interface PoolMembershipRow {
-  sharedRideId: string;
-  poolState: string;
-  /** True when the passenger is the sole member, i.e. they opened the pool. */
-  opened: boolean;
 }
 
 export interface RideRow {
@@ -341,47 +333,5 @@ export class RidesRepository {
         .returning();
       return { ok: true, row: toRow(updated[0]) };
     });
-  }
-
-  /**
-   * The newest pool (open or already full) in which `passengerId` holds a seat
-   * joined at/after `since`. Used when a stale shared-create claim is reclaimed:
-   * if the dead attempt got as far as taking a seat, the retry returns it
-   * instead of allocating a second one. Best effort — it matches by passenger +
-   * time, not by a durable claim↔seat link (TODO(R08)).
-   */
-  async findRecentPoolMembership(
-    passengerId: string,
-    since: Date,
-  ): Promise<PoolMembershipRow | null> {
-    const result = await this.db.execute<{
-      ride_id: string;
-      pool_state: string;
-      members: SharedRideMember[] | string | null;
-    }>(sql`
-      SELECT ride_id, pool_state, members
-        FROM shared_rides
-       WHERE pool_state IN ('open', 'closed_full')
-         AND members @> ${JSON.stringify([{ passenger_id: passengerId }])}::jsonb
-       ORDER BY created_at DESC
-       LIMIT 20
-    `);
-    // joined_at is stamped by the app clock, `since` by the DB clock: allow a
-    // little skew rather than miss the dead attempt's own seat.
-    const floorMs = since.getTime() - 2_000;
-    for (const r of result.rows) {
-      const members: SharedRideMember[] =
-        typeof r.members === 'string'
-          ? (JSON.parse(r.members) as SharedRideMember[])
-          : (r.members ?? []);
-      const mine = members.find((m) => m.passenger_id === passengerId);
-      if (!mine || new Date(mine.joined_at).getTime() < floorMs) continue;
-      return {
-        sharedRideId: r.ride_id,
-        poolState: r.pool_state,
-        opened: members.length === 1,
-      };
-    }
-    return null;
   }
 }
