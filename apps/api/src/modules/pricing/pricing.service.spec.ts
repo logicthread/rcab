@@ -87,6 +87,27 @@ describe('PricingService — quoteSoloFromMetrics', () => {
     const m = svc.quoteSoloFromMetrics({ distanceM: 5_000, durationS: 600 });
     expect(m).toEqual({ amount: 11_000, currency: 'INR' });
   });
+
+  it('accepts string env values (ConfigService returns strings) and yields a numeric quote (F16)', () => {
+    const svc = makeService(
+      buildHttp(() => null),
+      buildRedis(),
+      buildConfig({
+        FARE_BASE_CENTS: '4000',
+        FARE_PER_KM_CENTS: '1500',
+        FARE_PER_MIN_CENTS: '200',
+      }),
+    );
+    const m = svc.quoteSoloFromMetrics({ distanceM: 10_000, durationS: 1800 });
+    expect(typeof m.amount).toBe('number');
+    expect(m).toEqual({ amount: 25_000, currency: 'INR' });
+  });
+
+  it.each(['', 'abc', '-5', 'Infinity'])('rejects invalid FARE_BASE_CENTS %j at construction', (bad) => {
+    expect(() =>
+      makeService(buildHttp(() => null), buildRedis(), buildConfig({ FARE_BASE_CENTS: bad })),
+    ).toThrow(/FARE_BASE_CENTS/);
+  });
 });
 
 describe('PricingService — quoteSeatFromMetrics (clamp formula)', () => {

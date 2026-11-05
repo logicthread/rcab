@@ -1,6 +1,7 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
+import { getNumber } from '../../common/utils/env';
 import { firstValueFrom } from 'rxjs';
 import type Redis from 'ioredis';
 import { REDIS } from '../../infra/redis/redis.module';
@@ -129,7 +130,7 @@ export class RouteSimilarityService {
   ) {
     this.osrmBase =
       config.get<string>('OSRM_BASE_URL') ?? config.get<string>('OSRM_URL') ?? 'http://osrm:5000';
-    this.saturation = config.get<number>('ROUTE_SIMILARITY_SATURATION_M') ?? 1200;
+    this.saturation = getNumber(config, 'ROUTE_SIMILARITY_SATURATION_M', 1200, { min: 1 });
   }
 
   async scoreRoutes(a: RouteInput, b: RouteInput): Promise<number> {

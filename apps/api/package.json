@@ -3,12 +3,15 @@
   "version": "0.0.0",
   "private": true,
   "scripts": {
-    "build": "tsc",
-    "dev": "tsx watch src/main.ts",
+    "build": "tsc && node scripts/copy-assets.mjs",
+    "dev": "node --watch-path=./src -r ./scripts/dev-register.cjs src/main.ts",
     "start": "node dist/main.js",
+    "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:cov": "vitest run --coverage",
     "test:int": "vitest run --config vitest.config.int.ts",
+    "test:artifact": "pnpm run build && node scripts/check-artifact.mjs",
+    "test:dev-loader": "node -r ./scripts/dev-register.cjs scripts/check-dev-loader.cjs",
     "lint": "eslint src/"
   },
   "dependencies": {

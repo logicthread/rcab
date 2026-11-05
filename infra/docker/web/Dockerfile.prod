@@ -26,6 +26,32 @@ COPY --from=deps /workspace ./
 COPY packages ./packages
 COPY apps/web ./apps/web
 
+# Next.js inlines NEXT_PUBLIC_* into the client bundle at `next build` time;
+# setting them on the running container has no effect (F13). They are PUBLIC
+# values (never put a server secret here) and become part of the image identity.
+ARG NEXT_PUBLIC_API_URL
+ARG NEXT_PUBLIC_FIREBASE_API_KEY
+ARG NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN
+ARG NEXT_PUBLIC_FIREBASE_PROJECT_ID
+ARG NEXT_PUBLIC_FIREBASE_APP_ID
+ARG NEXT_PUBLIC_NOMINATIM_URL=https://nominatim.openstreetmap.org
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL \
+    NEXT_PUBLIC_FIREBASE_API_KEY=$NEXT_PUBLIC_FIREBASE_API_KEY \
+    NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=$NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN \
+    NEXT_PUBLIC_FIREBASE_PROJECT_ID=$NEXT_PUBLIC_FIREBASE_PROJECT_ID \
+    NEXT_PUBLIC_FIREBASE_APP_ID=$NEXT_PUBLIC_FIREBASE_APP_ID \
+    NEXT_PUBLIC_NOMINATIM_URL=$NEXT_PUBLIC_NOMINATIM_URL
+
+# Fail the build rather than ship a bundle pointing at localhost / a blank Firebase app.
+RUN for v in NEXT_PUBLIC_API_URL NEXT_PUBLIC_FIREBASE_API_KEY NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN \
+             NEXT_PUBLIC_FIREBASE_PROJECT_ID NEXT_PUBLIC_FIREBASE_APP_ID; do \
+      eval "val=\$$v"; \
+      if [ -z "$val" ]; then echo "build-arg $v is required for the production web image" >&2; exit 1; fi; \
+    done; \
+    case "$NEXT_PUBLIC_API_URL" in \
+      *localhost*|*127.0.0.1*) echo "NEXT_PUBLIC_API_URL must not point at localhost" >&2; exit 1;; \
+    esac
+
 RUN pnpm --filter @rcab/shared --filter @rcab/api-client build \
   && pnpm --filter @rcab/web build
 

@@ -15,6 +15,7 @@ COPY tsconfig.base.json ./
 COPY apps/api/package.json ./apps/api/
 COPY packages/shared/package.json ./packages/shared/
 COPY packages/api-client/package.json ./packages/api-client/
+COPY packages/test-fixtures/package.json ./packages/test-fixtures/
 
 RUN pnpm install --frozen-lockfile
 
@@ -26,8 +27,11 @@ COPY --from=deps /workspace ./
 COPY packages ./packages
 COPY apps/api ./apps/api
 
+# `pnpm build` copies the Lua assets next to the compiled services (F03);
+# check-artifact fails the image build if they are missing or unreadable.
 RUN pnpm --filter @rcab/shared --filter @rcab/api-client build \
-  && pnpm --filter @rcab/api build
+  && pnpm --filter @rcab/api build \
+  && node apps/api/scripts/check-artifact.mjs
 
 FROM base AS deploy
 

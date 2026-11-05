@@ -4,9 +4,10 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import type { Job } from 'bullmq';
 import { SCHEDULED_DISPATCH_QUEUE, SCHEDULED_WAKE_JOB, type ScheduledWakeJob } from './scheduled.service';
 import { RIDE_REQUESTED_EVENT, type RideRequestedEventPayload } from '../dispatch/dispatch.service';
+import { envNumber } from '../../common/utils/env';
 
 // Concurrency is env-tunable per the Phase-0 VPS budget; default modest.
-const CONCURRENCY = Number(process.env.SCHEDULED_DISPATCH_CONCURRENCY ?? 5);
+const CONCURRENCY = envNumber('SCHEDULED_DISPATCH_CONCURRENCY', 5, { integer: true, min: 1 });
 
 /**
  * Worker for the scheduled-booking wake queue (RCAB-E6.S3). On wake it emits the

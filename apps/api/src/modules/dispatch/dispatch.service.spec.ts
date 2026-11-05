@@ -274,6 +274,30 @@ describe('computeStops', () => {
     expect(pickups[0].passengerId).toBe('near');
     expect(pickups[1].passengerId).toBe('far');
   });
+
+  it('orders dropoffs by destination coordinates, not pickup coordinates (F16)', () => {
+    // Identical origins; only the destinations differ. Swapping the two
+    // destinations must swap the dropoff order.
+    const near = { dest_lat: 22.5802, dest_lng: 88.3702 };
+    const far = { dest_lat: 22.65, dest_lng: 88.45 };
+    const base = { origin_lat: 22.5727, origin_lng: 88.364 };
+    const build = (aDest: typeof near, bDest: typeof near) =>
+      computeStops(
+        pool({
+          destLat: 22.5801,
+          destLng: 88.3701,
+          members: [
+            member({ passenger_id: 'a', ...base, ...aDest }),
+            member({ passenger_id: 'b', ...base, ...bDest }),
+          ],
+        }),
+      )
+        .filter((s) => s.type === 'dropoff')
+        .map((s) => s.passengerId);
+
+    expect(build(near, far)).toEqual(['a', 'b']);
+    expect(build(far, near)).toEqual(['b', 'a']);
+  });
 });
 
 // ── dispatchPool / runWave ───────────────────────────────────────────────────
