@@ -21,6 +21,10 @@ export interface SharedRideRow {
   members: SharedRideMember[];
   claimedByDriverId: string | null;
   claimedAt: Date | null;
+  /** 0014: generation every offer/dispatch job for this pool must match. */
+  dispatchGeneration: number;
+  /** 0016: trigger-bumped on every UPDATE; Redis projections carry it. */
+  stateVersion: number;
 }
 
 interface CandidateDbRow extends Record<string, unknown> {
@@ -37,6 +41,8 @@ interface CandidateDbRow extends Record<string, unknown> {
   members: SharedRideMember[] | string | null;
   claimed_by_driver_id: string | null;
   claimed_at: Date | null;
+  dispatch_generation: number | string;
+  state_version: number | string;
 }
 
 function parseMembers(raw: SharedRideMember[] | string | null): SharedRideMember[] {
@@ -65,6 +71,8 @@ function rowFromDb(r: CandidateDbRow): SharedRideRow {
     members: parseMembers(r.members),
     claimedByDriverId: r.claimed_by_driver_id ?? null,
     claimedAt: r.claimed_at ?? null,
+    dispatchGeneration: Number(r.dispatch_generation),
+    stateVersion: Number(r.state_version),
   };
 }
 
@@ -81,7 +89,8 @@ export class SharedRideRepository {
     const result = await this.db.execute<CandidateDbRow>(sql`
       SELECT ride_id, seat_count, max_seats, pool_state, pool_closed_at,
              detour_budget_m, origin_lat, origin_lng, dest_lat, dest_lng,
-             members, claimed_by_driver_id, claimed_at
+             members, claimed_by_driver_id, claimed_at,
+             dispatch_generation, state_version
       FROM   shared_rides
       WHERE  ST_DWithin(
                origin_centroid,
@@ -104,7 +113,8 @@ export class SharedRideRepository {
     const result = await this.db.execute<CandidateDbRow>(sql`
       SELECT ride_id, seat_count, max_seats, pool_state, pool_closed_at,
              detour_budget_m, origin_lat, origin_lng, dest_lat, dest_lng,
-             members, claimed_by_driver_id, claimed_at
+             members, claimed_by_driver_id, claimed_at,
+             dispatch_generation, state_version
       FROM   shared_rides
       WHERE  ride_id = ${rideId}
       LIMIT  1
@@ -154,6 +164,8 @@ export class SharedRideRepository {
       members,
       claimedByDriverId: null,
       claimedAt: null,
+      dispatchGeneration: 0,
+      stateVersion: 0,
     };
   }
 

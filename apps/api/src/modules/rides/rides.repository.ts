@@ -42,6 +42,8 @@ export interface RideRow {
   cancelledAt: Date | null;
   cancelledBy: string | null;
   cancelReason: string | null;
+  /** 0014: generation every offer/dispatch job for this ride must match. */
+  dispatchGeneration: number;
 }
 
 /**
@@ -118,6 +120,7 @@ function toRow(r: typeof rides.$inferSelect): RideRow {
     cancelledAt: r.cancelledAt,
     cancelledBy: r.cancelledBy,
     cancelReason: r.cancelReason,
+    dispatchGeneration: Number(r.dispatchGeneration),
   };
 }
 

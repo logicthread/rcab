@@ -150,6 +150,7 @@ function rideRow(o: Partial<RideRow>): RideRow {
     cancelledAt: null,
     cancelledBy: null,
     cancelReason: null,
+    dispatchGeneration: 1,
     ...o,
   };
 }

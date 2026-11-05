@@ -29,6 +29,8 @@ function pool(overrides: Partial<SharedRideRow> = {}): SharedRideRow {
     }],
     claimedByDriverId: null,
     claimedAt:         null,
+    dispatchGeneration: 1,
+    stateVersion: 0,
     ...overrides,
   };
 }

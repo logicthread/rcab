@@ -36,6 +36,8 @@ function shared(overrides: Partial<SharedRideRow> = {}): SharedRideRow {
     members: [],
     claimedByDriverId: 'd-1',
     claimedAt: new Date(),
+    dispatchGeneration: 1,
+    stateVersion: 0,
     ...overrides,
   };
 }

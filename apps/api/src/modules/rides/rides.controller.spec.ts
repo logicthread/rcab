@@ -36,6 +36,8 @@ function ride(overrides: Partial<SharedRideRow> = {}): SharedRideRow {
     members: [],
     claimedByDriverId: DRIVER_ID,
     claimedAt: new Date(),
+    dispatchGeneration: 1,
+    stateVersion: 0,
     ...overrides,
   };
 }
@@ -75,6 +77,7 @@ function soloRideRow(overrides: Partial<RideRow> = {}): RideRow {
     cancelledAt: null,
     cancelledBy: null,
     cancelReason: null,
+    dispatchGeneration: 1,
     ...overrides,
   };
 }
