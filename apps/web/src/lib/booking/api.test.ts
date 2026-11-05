@@ -137,17 +137,20 @@ describe('idempotency error handling (API contract)', () => {
   it.each([
     ['solo', () => createNormalRide(place, place, 'qt', 'k-1')],
     ['shared', () => createSharedRide(place, place, 'k-1')],
-  ])('%s: 409 in-progress is replayed once with the same key after a short delay', async (_n, call) => {
-    vi.mocked(fetch)
-      .mockResolvedValueOnce(inProgress())
-      .mockResolvedValueOnce(json(200, { rideId: 'r1' }));
-    const p = call();
-    await vi.advanceTimersByTimeAsync(IDEMPOTENCY_IN_PROGRESS_RETRY_MS - 1);
-    expect(rideCalls()).toHaveLength(1);
-    await vi.advanceTimersByTimeAsync(1);
-    await expect(p).resolves.toEqual({ rideId: 'r1' });
-    expect(rideCalls().map(idemKeyOf)).toEqual(['k-1', 'k-1']);
-  });
+  ])(
+    '%s: 409 in-progress is replayed once with the same key after a short delay',
+    async (_n, call) => {
+      vi.mocked(fetch)
+        .mockResolvedValueOnce(inProgress())
+        .mockResolvedValueOnce(json(200, { rideId: 'r1' }));
+      const p = call();
+      await vi.advanceTimersByTimeAsync(IDEMPOTENCY_IN_PROGRESS_RETRY_MS - 1);
+      expect(rideCalls()).toHaveLength(1);
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(p).resolves.toEqual({ rideId: 'r1' });
+      expect(rideCalls().map(idemKeyOf)).toEqual(['k-1', 'k-1']);
+    },
+  );
 
   it('a second 409 in-progress is surfaced, not retried again', async () => {
     vi.mocked(fetch).mockImplementation(async () => inProgress());
@@ -170,6 +173,16 @@ describe('idempotency error handling (API contract)', () => {
     expect(err).toBeInstanceOf(BookingApiError);
     expect(err.isIdempotencyConflict).toBe(true);
     expect(rideCalls()).toHaveLength(1);
+  });
+
+  it('400 quote_expired is classified', async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      json(400, { error: { code: 'quote_expired', message: 'Quote expired — please re-quote' } }),
+    );
+    const err = await createNormalRide(place, place, 'qt', 'k-1').catch((e) => e);
+    expect(err).toBeInstanceOf(BookingApiError);
+    expect(err.isQuoteExpired).toBe(true);
+    expect(err.isIdempotencyKeyInvalid).toBe(false);
   });
 
   it('400 idempotency_key_invalid is not retried and is classified', async () => {

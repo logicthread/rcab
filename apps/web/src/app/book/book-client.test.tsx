@@ -22,9 +22,8 @@ vi.mock('../../lib/booking/ws', () => ({
   })),
 }));
 vi.mock('../../lib/booking/api', async () => {
-  const actual = await vi.importActual<typeof import('../../lib/booking/api')>(
-    '../../lib/booking/api',
-  );
+  const actual =
+    await vi.importActual<typeof import('../../lib/booking/api')>('../../lib/booking/api');
   return {
     ...actual,
     fetchQuote: vi.fn(),
@@ -190,6 +189,64 @@ describe('BookPage quote flow (F01)', () => {
   });
 });
 
+describe('BookPage re-quotes when the quote is cleared without a coordinate change (F01)', () => {
+  it('re-applying the same preset clears the quote and fetches a fresh one, exactly once', async () => {
+    fetchQuote.mockResolvedValueOnce(quote('q1')).mockResolvedValueOnce(quote('q2'));
+    render(<BookClient />);
+    pickPreset(0);
+    await waitFor(() => expect(useBookingStore.getState().quote?.quoteToken).toBe('q1'));
+    expect(fetchQuote).toHaveBeenCalledTimes(1);
+
+    // Same coordinates -> same quoteKey; the store still wipes the quote.
+    pickPreset(0);
+    await waitFor(() => expect(useBookingStore.getState().quote?.quoteToken).toBe('q2'));
+    await waitFor(() => expect(screen.getByTestId('submit-shared')).toBeEnabled());
+    expect(fetchQuote).toHaveBeenCalledTimes(2);
+    expect(useBookingStore.getState().stage).toBe('quoted');
+  });
+
+  it('a direct store invalidation never strands the page without a quote or a request', async () => {
+    fetchQuote.mockResolvedValueOnce(quote('q1')).mockResolvedValueOnce(quote('q2'));
+    render(<BookClient />);
+    pickPreset(0);
+    await waitFor(() => expect(screen.getByTestId('submit-shared')).toBeEnabled());
+
+    act(() => useBookingStore.getState().invalidateQuote());
+
+    await waitFor(() => expect(useBookingStore.getState().quote?.quoteToken).toBe('q2'));
+    expect(fetchQuote).toHaveBeenCalledTimes(2);
+  });
+
+  it('private: quote_expired at submit re-quotes, rotates the key and books with the new token', async () => {
+    fetchQuote.mockResolvedValueOnce(quote('q-old')).mockResolvedValueOnce(quote('q-new'));
+    createNormalRide
+      .mockRejectedValueOnce(
+        new api.BookingApiError(400, 'quote_expired', 'Quote expired — please re-quote'),
+      )
+      .mockResolvedValueOnce({
+        rideId: 'r1',
+        passengerId: 'u1',
+        status: 'requested',
+        fare: { amount: 5000, currency: 'INR' as const },
+      });
+    render(<BookClient />);
+    fireEvent.click(screen.getByRole('radio', { name: 'Private' }));
+    pickPreset(0);
+    await waitFor(() => expect(screen.getByTestId('submit-private')).toBeEnabled());
+
+    fireEvent.click(screen.getByTestId('submit-private'));
+    await screen.findByText(/quote expired/i);
+    await waitFor(() => expect(useBookingStore.getState().quote?.quoteToken).toBe('q-new'));
+    expect(fetchQuote).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(screen.getByTestId('submit-private')).toBeEnabled());
+
+    fireEvent.click(screen.getByTestId('submit-private'));
+    await waitFor(() => expect(createNormalRide).toHaveBeenCalledTimes(2));
+    expect(createNormalRide.mock.calls[1][2]).toBe('q-new');
+    expect(createNormalRide.mock.calls[1][3]).not.toBe(createNormalRide.mock.calls[0][3]);
+  });
+});
+
 describe('BookPage idempotency key per booking intent (F18a)', () => {
   it('private: a failed submit retried for the same intent reuses the key; success rotates it', async () => {
     fetchQuote.mockResolvedValue(quote('q1'));
@@ -272,7 +329,11 @@ describe('BookPage idempotency error recovery', () => {
     fetchQuote.mockResolvedValue(quote('q1'));
     createNormalRide
       .mockRejectedValueOnce(
-        new api.BookingApiError(422, 'idempotency_key_conflict', 'key used for a different request'),
+        new api.BookingApiError(
+          422,
+          'idempotency_key_conflict',
+          'key used for a different request',
+        ),
       )
       .mockResolvedValueOnce(ride);
     render(<BookClient />);

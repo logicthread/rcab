@@ -145,6 +145,32 @@ describe('useBookingStore', () => {
     expect(useBookingStore.getState().poolStatus).toBe('closed_full');
   });
 
+  it('every quote-clearing action bumps quoteEpoch, even with unchanged coordinates', () => {
+    const st = () => useBookingStore.getState();
+    st().applyPreset(PRESET_TRIPS[0]);
+    const e1 = st().quoteEpoch;
+    st().setQuote(quoteFixture());
+    expect(st().quoteEpoch).toBe(e1); // quoting/quoted never bump it
+    st().applyPreset(PRESET_TRIPS[0]);
+    expect(st().quote).toBeNull();
+    expect(st().quoteEpoch).toBeGreaterThan(e1);
+    const e2 = st().quoteEpoch;
+    st().setQuote(quoteFixture());
+    st().invalidateQuote();
+    expect(st().quote).toBeNull();
+    expect(st().stage).toBe('idle');
+    expect(st().quoteEpoch).toBeGreaterThan(e2);
+  });
+
+  it('label-only setPoint does not bump quoteEpoch', () => {
+    const st = () => useBookingStore.getState();
+    st().applyPreset(PRESET_TRIPS[0]);
+    st().setQuote(quoteFixture());
+    const e = st().quoteEpoch;
+    st().setPoint('pickup', { ...st().pickup!, label: 'Renamed' });
+    expect(st().quoteEpoch).toBe(e);
+  });
+
   it('reset returns the store to initial values', () => {
     useBookingStore.getState().setOpened('ride-1', 1, 'open');
     useBookingStore.getState().setRideType('private');

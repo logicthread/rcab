@@ -65,6 +65,9 @@ const IDEMPOTENCY_IN_PROGRESS_MSG =
   'Your previous request is still being processed. Please wait a moment and try again.';
 const IDEMPOTENCY_INVALID_MSG = 'Something went wrong preparing your request. Please try again.';
 
+const QUOTE_EXPIRED_MSG =
+  'Your fare quote expired, so we are refreshing it. Please review the new fare and confirm again.';
+
 const ROUTING_UNAVAILABLE_MSG =
   "We can't route between these points yet — try pickup and drop within the city.";
 
@@ -82,6 +85,7 @@ function BookPage() {
     stage,
     quote,
     quoteError,
+    quoteEpoch,
     sharedRideId,
     seatCount,
     poolStatus,
@@ -95,6 +99,7 @@ function BookPage() {
     setPoint,
     applyPreset,
     swapPoints,
+    invalidateQuote,
     startQuoting,
     setQuote,
     setQuoteError,
@@ -120,7 +125,12 @@ function BookPage() {
   // Bumped by "Retry" to re-quote an unchanged route after an error/expiry.
   const [quoteNonce, setQuoteNonce] = useState(0);
 
-  // Quote whenever both endpoints are set and the route (or ride type) changes.
+  // Quote whenever both endpoints are set and the route (or ride type) changes,
+  // or whenever the store invalidated the quote (quoteEpoch) — a clear that
+  // leaves the coordinates untouched must still re-quote, otherwise the page
+  // is left with no quote, no request and no retry control. quoteEpoch is only
+  // bumped by clears, never by startQuoting/setQuote, so there is no loop and
+  // the in-flight request is not aborted by its own stage change.
   // One AbortController per effect run: a superseded run (route change, unmount,
   // StrictMode double-invoke) aborts its fetch and can no longer apply state.
   useEffect(() => {
@@ -146,7 +156,7 @@ function BookPage() {
       superseded = true;
       controller.abort();
     };
-  }, [quoteKey, quoteNonce, authed, tracking, startQuoting, setQuote, setQuoteError]);
+  }, [quoteKey, quoteNonce, quoteEpoch, authed, tracking, startQuoting, setQuote, setQuoteError]);
 
   // One idempotency key per booking intent (ride type + route), reused across
   // retries and rotated only on a changed intent or a confirmed success.
@@ -162,6 +172,13 @@ function BookPage() {
   const createErrorMessage = useCallback(
     (err: unknown): string => {
       if (!(err instanceof BookingApiError)) return 'Request failed';
+      if (err.isQuoteExpired) {
+        // The quote token lapsed before submit: the booking was never created,
+        // so rotate the key (the retry carries a new token) and re-quote.
+        intentKeys.clear();
+        invalidateQuote();
+        return QUOTE_EXPIRED_MSG;
+      }
       if (err.isIdempotencyConflict) {
         intentKeys.clear();
         setQuoteNonce((n) => n + 1);
@@ -174,7 +191,7 @@ function BookPage() {
       if (err.isIdempotencyInProgress) return IDEMPOTENCY_IN_PROGRESS_MSG;
       return err.message;
     },
-    [intentKeys],
+    [intentKeys, invalidateQuote],
   );
 
   useEffect(() => {

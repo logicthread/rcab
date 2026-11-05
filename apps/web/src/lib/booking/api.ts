@@ -25,6 +25,11 @@ export class BookingApiError extends Error {
     return this.code === 'routing_unavailable' || this.status === 503;
   }
 
+  /** 400: the quote token behind a private booking has expired. Re-quote. */
+  get isQuoteExpired(): boolean {
+    return this.code === 'quote_expired';
+  }
+
   /** 422: this Idempotency-Key was already used for a *different* request. Rotate the key. */
   get isIdempotencyConflict(): boolean {
     return this.status === 422 && this.code === 'idempotency_key_conflict';
@@ -112,11 +117,7 @@ export const IDEMPOTENCY_IN_PROGRESS_RETRY_MS = 1000;
  * second 409 is surfaced to the caller. 422 / 400 are not retried here: they need
  * a new key, which only the caller (which owns the key) can mint.
  */
-async function postIdempotent<T>(
-  path: string,
-  body: unknown,
-  idempotencyKey: string,
-): Promise<T> {
+async function postIdempotent<T>(path: string, body: unknown, idempotencyKey: string): Promise<T> {
   const headers = { 'Idempotency-Key': idempotencyKey };
   try {
     return await postJson<T>(path, body, headers);
@@ -148,12 +149,7 @@ export function fetchQuote(
   type: ApiRideType,
   signal?: AbortSignal,
 ): Promise<QuoteResponse> {
-  return postJson<QuoteResponse>(
-    '/v1/rides/quote',
-    routeBody(pickup, dropoff, type),
-    {},
-    signal,
-  );
+  return postJson<QuoteResponse>('/v1/rides/quote', routeBody(pickup, dropoff, type), {}, signal);
 }
 
 export function createSharedRide(
@@ -225,8 +221,8 @@ export function submitRating(
   text: string | undefined,
 ): Promise<RatingResponse> {
   const trimmed = text?.trim();
-  return postJson<RatingResponse>(
-    `/v1/rides/${rideId}/ratings`,
-    { stars, ...(trimmed ? { text: trimmed } : {}) },
-  );
+  return postJson<RatingResponse>(`/v1/rides/${rideId}/ratings`, {
+    stars,
+    ...(trimmed ? { text: trimmed } : {}),
+  });
 }
