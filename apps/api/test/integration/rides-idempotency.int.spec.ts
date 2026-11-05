@@ -4,32 +4,44 @@ import { randomUUID } from 'node:crypto';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import * as schema from '../../src/db/schema';
 import { RidesRepository } from '../../src/modules/rides/rides.repository';
+import { IdempotencyRepository } from '../../src/modules/rides/idempotency.repository';
 
 const skip = process.env.RCAB_INT_SKIPPED === '1';
 
 describe.skipIf(skip)('RidesRepository — idempotency (real Postgres)', () => {
   let pool: Pool;
   let repo: RidesRepository;
+  let idem: IdempotencyRepository;
   let passengerId: string;
+  let otherPassengerId: string;
 
-  beforeAll(async () => {
-    pool = new Pool({ connectionString: process.env.TEST_POSTGRES_URI });
-    const db = drizzle(pool, { schema });
-    repo = new RidesRepository(db as never);
-    // rides.passenger_id references app_user — seed a client to satisfy the FK.
-    passengerId = randomUUID();
+  async function seedClient(id: string) {
     const phone = `+91${Math.floor(Math.random() * 1e10)
       .toString()
       .padStart(10, '0')}`;
     await pool.query(
       `INSERT INTO app_user (id, firebase_uid, phone_e164, role) VALUES ($1, $2, $3, 'client')`,
-      [passengerId, `fb-${passengerId}`, phone],
+      [id, `fb-${id}`, phone],
     );
+  }
+
+  beforeAll(async () => {
+    pool = new Pool({ connectionString: process.env.TEST_POSTGRES_URI });
+    const db = drizzle(pool, { schema });
+    repo = new RidesRepository(db as never);
+    idem = new IdempotencyRepository(db as never);
+    // rides.passenger_id references app_user — seed clients to satisfy the FK.
+    passengerId = randomUUID();
+    otherPassengerId = randomUUID();
+    await seedClient(passengerId);
+    await seedClient(otherPassengerId);
   });
 
   afterAll(async () => {
-    await pool.query('DELETE FROM rides WHERE passenger_id = $1', [passengerId]);
-    await pool.query('DELETE FROM app_user WHERE id = $1', [passengerId]);
+    const ids = [passengerId, otherPassengerId];
+    await pool.query('DELETE FROM idempotency_record WHERE principal_id = ANY($1)', [ids]);
+    await pool.query('DELETE FROM rides WHERE passenger_id = ANY($1)', [ids]);
+    await pool.query('DELETE FROM app_user WHERE id = ANY($1)', [ids]);
     await pool.end();
   });
 
@@ -154,5 +166,94 @@ describe.skipIf(skip)('RidesRepository — idempotency (real Postgres)', () => {
     );
     expect(rows[0].type).toBe('scheduled');
     expect(new Date(rows[0].scheduled_for).getTime()).toBe(when.getTime());
+  });
+  // F07 / R05 (migration 0013): the key is scoped to (passenger, operation).
+  it('the same key under two accounts → two independent rides (no global UNIQUE)', async () => {
+    const key = `idem-${randomUUID()}`;
+    const a = await repo.create({ ...params(key), requestFingerprint: 'fp-a' });
+    const b = await repo.create({
+      ...params(key),
+      passengerId: otherPassengerId,
+      requestFingerprint: 'fp-b',
+    });
+
+    expect(a.created).toBe(true);
+    expect(b.created).toBe(true);
+    expect(b.row.id).not.toBe(a.row.id);
+    expect(b.row.passengerId).toBe(otherPassengerId);
+
+    // Scoped lookup never crosses accounts.
+    const bobsView = await repo.findByIdempotencyScope(otherPassengerId, 'ride.create.solo', key);
+    expect(bobsView?.row.id).toBe(b.row.id);
+    expect(bobsView?.requestFingerprint).toBe('fp-b');
+  });
+
+  it('a duplicate in scope returns the stored fingerprint (for the caller to compare)', async () => {
+    const key = `idem-${randomUUID()}`;
+    await repo.create({ ...params(key), requestFingerprint: 'fp-original' });
+    const dup = await repo.create({ ...params(key), requestFingerprint: 'fp-different' });
+    expect(dup.created).toBe(false);
+    expect(dup.requestFingerprint).toBe('fp-original');
+  });
+
+  it('the same key for solo and scheduled operations does not collide', async () => {
+    const key = `idem-${randomUUID()}`;
+    const solo = await repo.create(params(key));
+    const sched = await repo.create({
+      ...params(key),
+      type: 'scheduled',
+      scheduledFor: new Date(Date.now() + 3 * 3600_000),
+    });
+    expect(sched.created).toBe(true);
+    expect(sched.row.id).not.toBe(solo.row.id);
+    const { rows } = await pool.query<{ idempotency_operation: string }>(
+      'SELECT idempotency_operation FROM rides WHERE id = $1',
+      [sched.row.id],
+    );
+    expect(rows[0].idempotency_operation).toBe('ride.create.scheduled');
+  });
+
+  it('migration 0013 replaced the global unique with the scoped one', async () => {
+    const { rows } = await pool.query<{ conname: string }>(
+      `SELECT conname FROM pg_constraint WHERE conrelid = 'rides'::regclass AND contype = 'u'`,
+    );
+    const names = rows.map((r) => r.conname);
+    expect(names).toContain('rides_idempotency_scope_uq');
+    expect(names).not.toContain('rides_idempotency_key_key');
+  });
+
+  // F15: durable claim for shared create.
+  it('idempotency_record: concurrent first use → exactly one claim; scoped per principal', async () => {
+    const scope = {
+      principalId: passengerId,
+      operation: 'ride.create.shared' as const,
+      key: `k-${randomUUID()}`,
+    };
+    const [x, y] = await Promise.all([idem.claim(scope, 'fp'), idem.claim(scope, 'fp')]);
+    expect([x.kind, y.kind].sort()).toEqual(['claimed', 'existing']);
+
+    // Another principal with the same key claims independently.
+    const other = await idem.claim({ ...scope, principalId: otherPassengerId }, 'fp-other');
+    expect(other.kind).toBe('claimed');
+
+    const resourceId = randomUUID();
+    await idem.complete(scope, resourceId, { sharedRideId: resourceId, mode: 'opened' });
+    const again = await idem.claim(scope, 'fp');
+    expect(again).toEqual({
+      kind: 'existing',
+      record: {
+        requestFingerprint: 'fp',
+        state: 'completed',
+        resourceId,
+        response: { sharedRideId: resourceId, mode: 'opened' },
+      },
+    });
+
+    // release only drops a pending claim, never a completed one.
+    await idem.release(scope);
+    expect((await idem.find(scope))?.state).toBe('completed');
+    const otherScope = { ...scope, principalId: otherPassengerId };
+    await idem.release(otherScope);
+    expect(await idem.find(otherScope)).toBeNull();
   });
 });

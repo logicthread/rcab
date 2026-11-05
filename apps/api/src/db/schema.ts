@@ -181,7 +181,12 @@ export const rides = pgTable(
     // ~10 min before pickup (BullMQ). 'normal'/'shared' dispatch immediately.
     type: text('type').notNull().default('normal'),
     scheduledFor: timestamp('scheduled_for', { withTimezone: true }),
-    idempotencyKey: text('idempotency_key').notNull().unique(),
+    // F07 / R05 (0013): the key is scoped to (passenger, operation) — no longer
+    // globally unique — and bound to a fingerprint of the request's intent.
+    // NULL fingerprint = legacy pre-0013 row (replayable by its owner only).
+    idempotencyKey: text('idempotency_key').notNull(),
+    idempotencyOperation: text('idempotency_operation').notNull().default('ride.create.solo'),
+    requestFingerprint: text('request_fingerprint'),
     driverId: uuid('driver_id'),
     acceptedAt: timestamp('accepted_at', { withTimezone: true }),
     enRouteAt: timestamp('en_route_at', { withTimezone: true }),
@@ -208,6 +213,41 @@ export const rides = pgTable(
       sql`${t.cancelledBy} IS NULL OR ${t.cancelledBy} IN ('client','driver')`,
     ),
     check('rides_type_check', sql`${t.type} IN ('normal','shared','scheduled')`),
+    unique('rides_idempotency_scope_uq').on(
+      t.passengerId,
+      t.idempotencyOperation,
+      t.idempotencyKey,
+    ),
+    check(
+      'rides_idempotency_operation_check',
+      sql`${t.idempotencyOperation} IN ('ride.create.solo','ride.create.scheduled')`,
+    ),
+  ],
+);
+
+// Durable idempotency records for create operations that have no single row
+// of their own to carry the key — shared create (a seat in a pool) today.
+// Scoped by (principal, operation, key) and bound to a request fingerprint.
+// `pending` is claimed before the side effect; `completed` holds the replayable
+// response. F07 / F15 / R05 (0013).
+export const idempotencyRecord = pgTable(
+  'idempotency_record',
+  {
+    principalId: uuid('principal_id')
+      .notNull()
+      .references(() => appUser.id, { onDelete: 'cascade' }),
+    operation: text('operation').notNull(),
+    idempotencyKey: text('idempotency_key').notNull(),
+    requestFingerprint: text('request_fingerprint').notNull(),
+    state: text('state').notNull().default('pending'),
+    resourceId: uuid('resource_id'),
+    response: jsonb('response'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+  },
+  (t) => [
+    primaryKey({ columns: [t.principalId, t.operation, t.idempotencyKey] }),
+    check('idempotency_record_state_check', sql`${t.state} IN ('pending','completed')`),
   ],
 );
 

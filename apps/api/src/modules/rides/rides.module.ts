@@ -7,13 +7,20 @@ import { ScheduledModule } from '../scheduled/scheduled.module';
 import { RidesController } from './rides.controller';
 import { QuoteTokenService } from './quote-token.service';
 import { RidesRepository } from './rides.repository';
+import { IdempotencyRepository } from './idempotency.repository';
 import { RideStateMachine } from './ride-state-machine.service';
 import { RidesRealtimeListener } from './rides-realtime.listener';
 
 @Module({
   imports: [AuthModule, MatchingModule, PricingModule, RealtimeModule, ScheduledModule],
   controllers: [RidesController],
-  providers: [QuoteTokenService, RidesRepository, RideStateMachine, RidesRealtimeListener],
+  providers: [
+    QuoteTokenService,
+    RidesRepository,
+    IdempotencyRepository,
+    RideStateMachine,
+    RidesRealtimeListener,
+  ],
   exports: [RidesRepository],
 })
 export class RidesModule {}
