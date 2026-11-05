@@ -75,6 +75,16 @@ describe('useBookingStore', () => {
     expect(useBookingStore.getState().stage).toBe('idle');
   });
 
+  it('setPoint with the same coordinates but a new label keeps the quote (label-only update)', () => {
+    useBookingStore.getState().setPoint('pickup', PICKUP);
+    useBookingStore.setState({ quote: quoteFixture(), stage: 'quoted' });
+    useBookingStore.getState().setPoint('pickup', { ...PICKUP, label: 'Reverse-geocoded name' });
+    const s = useBookingStore.getState();
+    expect(s.pickup?.label).toBe('Reverse-geocoded name');
+    expect(s.quote).not.toBeNull();
+    expect(s.stage).toBe('quoted');
+  });
+
   it('applyPreset sets both endpoints and clears the quote', () => {
     useBookingStore.setState({ quote: quoteFixture(), stage: 'quoted' });
     useBookingStore.getState().applyPreset(PRESET_TRIPS[0]);

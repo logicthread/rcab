@@ -9,17 +9,22 @@ export function withAuth<P extends object>(
 ): React.ComponentType<P> {
   return function ProtectedRoute(props: P) {
     const router = useRouter();
-    const { user, jwt, silentRefresh } = useAuthStore();
+    const { user, jwt, signedOut, silentRefresh } = useAuthStore();
 
     useEffect(() => {
-      if (!jwt) {
-        silentRefresh().then(() => {
-          if (!useAuthStore.getState().jwt) {
-            router.replace('/signin');
-          }
-        });
+      if (jwt) return;
+      // Explicit sign-out: go to sign-in, never refresh (the cookie may still be
+      // live until the logout request lands, which would silently log back in).
+      if (signedOut) {
+        router.replace('/signin');
+        return;
       }
-    }, [jwt, router, silentRefresh]);
+      silentRefresh().then(() => {
+        if (!useAuthStore.getState().jwt) {
+          router.replace('/signin');
+        }
+      });
+    }, [jwt, signedOut, router, silentRefresh]);
 
     if (!user) return null;
     return <Component {...props} />;

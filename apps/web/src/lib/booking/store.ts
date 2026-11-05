@@ -122,6 +122,13 @@ export const useBookingStore = create<BookingState>((set, get) => ({
   },
 
   setPoint(field, place) {
+    const existing = get()[field];
+    // Same coordinates, new label (reverse-geocode landing): the route is
+    // unchanged, so keep the valid quote instead of wiping it.
+    if (existing && existing.lat === place.lat && existing.lng === place.lng) {
+      set({ [field]: place } as Partial<BookingState>);
+      return;
+    }
     const other: PointField = field === 'pickup' ? 'dropoff' : 'pickup';
     // After setting a point, move focus to the other endpoint if it's still empty.
     const nextActive = get()[other] === null ? other : field;
