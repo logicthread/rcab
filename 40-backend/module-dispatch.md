@@ -26,7 +26,7 @@ See [[algo-top-k-dispatch]] for the full algorithm and parameters.
 
 ## Public providers
 
-- `OutboxRelay` / `OutboxService` — transactional outbox (`outbox_event`, migration 0015); the booking/pool commit writes the intent in the same transaction. BullMQ jobs complete only after the dispatch work ran, so a failed wave is retried.
+- `OutboxRelay` / `OutboxService` — transactional outbox (`outbox`, migration 0015); the booking/pool commit writes the intent in the same transaction. BullMQ jobs complete only after the dispatch work ran, so a failed wave is retried.
 - `DispatchStartService` — idempotent first-wave start per generation (`runSoloWave` / `runPoolWave`); both **throw** on infrastructure failure so the job retries.
 - `DispatchReconciler` — boot + periodic sweep that re-arms undispatched `requested`/closed-pool trips.
 - `DispatchService`
@@ -36,7 +36,7 @@ See [[algo-top-k-dispatch]] for the full algorithm and parameters.
 
 ## State
 
-- **Postgres is the source of truth**: `dispatch_offer`, `driver_active_assignment`, `outbox_event`, `rides`/`shared_rides` (see [[schema-postgres]]). Migration 0014 added offers + the guard (with a backfill and a `migration_conflict` inventory for pre-existing double assignments).
+- **Postgres is the source of truth**: `dispatch_offer`, `driver_active_assignment`, `outbox`, `rides`/`shared_rides` (see [[schema-postgres]]). Migration 0014 added offers + the guard (with a backfill and a `migration_conflict` inventory for pre-existing double assignments).
 - Redis holds only projections and timers: `driver:state:<id>.current_ride_id` (reconciled from Postgres at boot and periodically), the `active_drivers` geo index and `bull:dispatch:*` delayed jobs (`dispatch:wave2-timeout`, `dispatch:hard-fail`). The former `claim:ride:*`, `offer:*`, `ride:*:offered`, `pool:*:offered/stops` keys and the Lua claim scripts were **removed**.
 
 ## Scheduled rides (E6 + Stage C)

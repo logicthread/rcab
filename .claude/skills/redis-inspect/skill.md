@@ -21,7 +21,7 @@ RC() { docker compose --env-file .env.dev -f infra/docker/docker-compose.dev.yml
 |---|---|---|
 | Driver presence | `active_drivers` (GEO zset), `driver:state:<driverId>` (hash: `availability`, `last_seen`, `session_id`, `current_ride_id` — a projection of `driver_active_assignment`) | `drivers.service`, `realtime.gateway` |
 | Shared-ride pool projection | `pool:<rideId>` (hash: `state`, `seat_count`, `max_seats`, `version`) — a **projection** reconciled from Postgres at boot and periodically | `pool-lifecycle.service` |
-| ~~Dispatch offers / claims~~ | **Removed in Stage C** (`claim:ride:*`, `offer:*`, `offer:meta/type/list:*`, `ride:*:offered`, `pool:*:offered/stops/seats`). Offers and assignment live in Postgres: `dispatch_offer`, `driver_active_assignment`, `outbox_event` | — |
+| ~~Dispatch offers / claims~~ | **Removed in Stage C** (`claim:ride:*`, `offer:*`, `offer:meta/type/list:*`, `ride:*:offered`, `pool:*:offered/stops/seats`). Offers and assignment live in Postgres: `dispatch_offer`, `driver_active_assignment`, `outbox` | — |
 | OSRM polyline cache | `osrm:poly:<geohash7>:<geohash7>` | `route-similarity.service` |
 | Idempotency | *(none in Redis)* — durable in Postgres: `rides.idempotency_operation`/`request_fingerprint` and `idempotency_record` (migration 0013). The old `idem:rides:*` keys were removed (RCAB-E8.S7) | `rides.controller` |
 | BullMQ | `bull:dispatch:*`, `bull:matching:*`, `bull:scheduled-dispatch:*` | dispatch / matching / scheduled modules |
@@ -48,9 +48,9 @@ RC() { docker compose --env-file .env.dev -f infra/docker/docker-compose.dev.yml
 3. **In-flight dispatch** — truth is Postgres, not Redis. Offers, the one-trip-per-driver guard and undelivered outbox intents:
    ```bash
    PSQL() { docker compose --env-file .env.dev -f infra/docker/docker-compose.dev.yml exec -T postgres psql -U rcab -d rcab "$@"; }
-   PSQL -c "SELECT * FROM dispatch_offer ORDER BY created_at DESC LIMIT 10;"
+   PSQL -c "SELECT id, trip_kind, ride_id, shared_ride_id, driver_id, state, expires_at FROM dispatch_offer ORDER BY offered_at DESC LIMIT 10;"
    PSQL -c "SELECT * FROM driver_active_assignment;"
-   PSQL -c "SELECT topic, count(*) FROM outbox_event WHERE published_at IS NULL GROUP BY 1;"
+   PSQL -c "SELECT topic, count(*) FROM outbox WHERE processed_at IS NULL AND failed_at IS NULL GROUP BY 1;"
    ```
    Only the BullMQ wave-2 / hard-fail timers (step 5) remain in Redis. If `driver:state:<id>.current_ride_id` disagrees with `driver_active_assignment`, the next reconcile pass fixes Redis, not Postgres.
 

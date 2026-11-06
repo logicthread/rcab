@@ -128,7 +128,7 @@ Gateway: `apps/api/src/modules/realtime/realtime.gateway.ts`. Rooms: `user:<id>`
 
 ## 5. Data model — Postgres (Drizzle, `apps/api/src/db/schema.ts`)
 
-**10 tables** (incl. `idempotency_record`, shared-create claims). FKs shown with →. (Stage C added `dispatch_offer`, `driver_active_assignment`, `outbox_event`, `pool_member` and `migration_conflict` (migrations 0014-0017) — offers, assignment and pool membership are authoritative in Postgres, not Redis. No `ride_events`/`jwt_revocations`
+**10 tables** (incl. `idempotency_record`, shared-create claims). FKs shown with →. (Stage C added `dispatch_offer`, `driver_active_assignment`, `outbox`, `pool_member` and `migration_conflict` (migrations 0014-0017) — offers, assignment and pool membership are authoritative in Postgres, not Redis. No `ride_events`/`jwt_revocations`
 tables exist. Refresh-token revocation is the
 `auth_refresh_token.revoked_at` column, **not** a Redis set.)
 
@@ -168,7 +168,7 @@ Integration tests apply the same files via `@rcab/test-fixtures` `runMigrations(
 | `bull:dispatch:*`, `bull:matching:*`, `bull:scheduled-dispatch:*` | BullMQ | dispatch/matching/scheduled | wave-timeout, hard-fail, pool-expire, and scheduled-wake delayed jobs |
 | `socketio:*` | pub/sub | realtime | Socket.IO Redis adapter (multi-node) |
 
-Idempotency is no longer in Redis: it is durable in Postgres (migration 0013). Offers, claims and seat counters are not in Redis either (Stage C): `dispatch_offer`, `driver_active_assignment`, `outbox_event` and `pool_member` in Postgres are authoritative; the `claim:ride:*`, `offer:*`, `pool:*:seats|offered|stops` keys and the `pool_claim`/`pool_slot` Lua scripts were removed.
+Idempotency is no longer in Redis: it is durable in Postgres (migration 0013). Offers, claims and seat counters are not in Redis either (Stage C): `dispatch_offer`, `driver_active_assignment`, `outbox` and `pool_member` in Postgres are authoritative; the `claim:ride:*`, `offer:*`, `pool:*:seats|offered|stops` keys and the `pool_claim`/`pool_slot` Lua scripts were removed.
 
 Inspect with `/redis-inspect` (geo/queues/projections) and `/pool-inspect` (shared pools; Postgres first).
 
@@ -189,7 +189,7 @@ requested → dispatching → accepted → en_route → arrived → in_progress 
      └──────────────► no_driver            (any pre-complete) └► cancelled / no_show
 ```
 - **Dispatch** (`dispatch` module, Postgres outbox + BullMQ timers): the booking commit
-  writes an `outbox_event` (`ride.dispatch.requested`) in the same transaction;
+  writes an `outbox` (`ride.dispatch.requested`) in the same transaction;
   `OutboxRelay` → `DispatchStartService` → `dispatchSolo` → geo top-K on `active_drivers`
   (wave-1 K1/R1) → persist `dispatch_offer` rows and fan out `ride_offer`. A
   `ride_offer_response{accept}` is validated in **one Postgres transaction** against the

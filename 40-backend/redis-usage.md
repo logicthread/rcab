@@ -29,7 +29,7 @@ audience: both
 
 ## Removed (Stage C)
 
-Offers, claims and pool seats are no longer Redis state. Deleted: `claim:ride:*`, `offer:*`, `offer:meta:*`, `offer:type:*`, `offer:list:*`, `ride:*:offered`, `pool:*:offered`, `pool:*:stops`, `pool:<id>:seats`, and the Lua scripts `pool_claim.lua` / `pool_slot.lua` (claim and revoke now run as Postgres transactions). Truth lives in Postgres: `dispatch_offer`, `driver_active_assignment`, `outbox_event`, `pool_member` — see [[schema-postgres]] and [[module-dispatch]].
+Offers, claims and pool seats are no longer Redis state. Deleted: `claim:ride:*`, `offer:*`, `offer:meta:*`, `offer:type:*`, `offer:list:*`, `ride:*:offered`, `pool:*:offered`, `pool:*:stops`, `pool:<id>:seats`, and the Lua scripts `pool_claim.lua` / `pool_slot.lua` (claim and revoke now run as Postgres transactions). Truth lives in Postgres: `dispatch_offer`, `driver_active_assignment`, `outbox`, `pool_member` — see [[schema-postgres]] and [[module-dispatch]].
 
 ## Memory bound
 

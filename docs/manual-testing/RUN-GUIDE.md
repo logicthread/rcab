@@ -171,7 +171,7 @@ Inspect while it runs:
 ```bash
 docker compose … exec -T postgres psql -U rcab -d rcab -c \
   "SELECT id,status,type,driver_id,fare_cents FROM rides ORDER BY created_at DESC LIMIT 3;"
-/redis-inspect     # claim:ride:*, offer:*, bull:dispatch:* during dispatch
+/redis-inspect   # presence, pool projections, BullMQ (offers/claims now in Postgres)
 ```
 
 **Pass:** exactly one driver wins; ride reaches `completed`; a `ratings` row per direction.

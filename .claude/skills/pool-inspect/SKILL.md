@@ -27,9 +27,9 @@ RC() { docker compose --env-file .env.dev -f infra/docker/docker-compose.dev.yml
    Lua scripts were removed in Stage C. **Postgres is the truth**:
    ```bash
    PSQL() { docker compose --env-file .env.dev -f infra/docker/docker-compose.dev.yml exec -T postgres psql -U rcab -d rcab "$@"; }
-   PSQL -c "SELECT id, status, seat_count, state_version, claimed_by_driver_id FROM shared_rides ORDER BY created_at DESC LIMIT 10;"
-   PSQL -c "SELECT shared_ride_id, passenger_id, seats, agreed_fare_cents FROM pool_member ORDER BY created_at DESC LIMIT 20;"
-   PSQL -c "SELECT * FROM dispatch_offer WHERE trip_id IN (SELECT id FROM shared_rides ORDER BY created_at DESC LIMIT 5);"
+   PSQL -c "SELECT ride_id, pool_state, seat_count, max_seats, state_version, dispatch_generation, claimed_by_driver_id FROM shared_rides ORDER BY created_at DESC LIMIT 10;"
+   PSQL -c "SELECT pool_id, passenger_id, seats, active, agreed_fare_cents, joined_at FROM pool_member ORDER BY joined_at DESC LIMIT 20;"
+   PSQL -c "SELECT id, driver_id, state, dispatch_generation, expires_at FROM dispatch_offer WHERE shared_ride_id IN (SELECT ride_id FROM shared_rides ORDER BY created_at DESC LIMIT 5);"
    ```
    Then compare the projection (`RC HGETALL pool:<rideId>`) against the row; a mismatch
    heals on the next reconcile pass. (If a column name differs, check `\d pool_member` and `\d dispatch_offer`.)
