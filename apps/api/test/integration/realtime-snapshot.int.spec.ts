@@ -169,6 +169,20 @@ describe.skipIf(skip)('pool:subscribe — authorized, snapshot-first (T30)', () 
     expect(me.emitted).toEqual([['pool:snapshot', snap]]);
   });
 
+  it("the member's fare comes from agreed_fare_cents (post-0017 members have no legacy quoted fare)", async () => {
+    const snapshots = moduleRef.get(RealtimeSnapshotService);
+    const { poolId, passengers } = await seedClosedPool(pool, { members: 2 });
+    const { rows } = await pool.query<{ agreed: number | null; quoted: number | null }>(
+      `SELECT agreed_fare_cents AS agreed, quoted_fare_cents AS quoted
+         FROM pool_member WHERE pool_id = $1 AND passenger_id = $2`,
+      [poolId, passengers[0]],
+    );
+    expect(rows[0].agreed).not.toBeNull();
+    expect(rows[0].quoted).toBeNull();
+    const snap = (await snapshots.poolSnapshot(poolId, passengers[0]))!;
+    expect(snap.me.quotedFareCents).toBe(rows[0].agreed);
+  });
+
   it("a member's snapshot never exposes co-passengers' identity or coordinates", async () => {
     const snapshots = moduleRef.get(RealtimeSnapshotService);
     const { poolId, passengers } = await seedClosedPool(pool, { members: 3, maxSeats: 3 });

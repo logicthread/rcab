@@ -123,7 +123,8 @@ export class RealtimeSnapshotService {
       >(sql`
         SELECT s.ride_id, s.pool_state, s.seat_count, s.max_seats, s.state_version,
                s.claimed_by_driver_id, s.completed_at,
-               m.active, m.quoted_fare_cents, m.origin_lat, m.origin_lng, m.dest_lat, m.dest_lng
+               m.active, COALESCE(m.agreed_fare_cents, m.quoted_fare_cents) AS quoted_fare_cents,
+               m.origin_lat, m.origin_lng, m.dest_lat, m.dest_lng
           FROM shared_rides s
           JOIN pool_member m ON m.pool_id = s.ride_id AND m.passenger_id = ${passengerId}
          WHERE s.ride_id = ${poolId}
