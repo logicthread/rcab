@@ -3,31 +3,40 @@ import { ConfigService } from '@nestjs/config';
 import { getNumber } from '../../common/utils/env';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
+import { legacyWakeJobId, scheduledWakeJobId } from '../outbox/outbox.jobs';
 
 /** BullMQ queue that holds the delayed wake-up jobs for scheduled bookings.
  *  Backed by Redis keyspace `bull:scheduled-dispatch:*` (see [[redis-usage]]). */
 export const SCHEDULED_DISPATCH_QUEUE = 'scheduled-dispatch';
+
 /** The single job kind on that queue: "wake this ride and dispatch it now". */
 export const SCHEDULED_WAKE_JOB = 'scheduled:wake';
+
 /** Wake this many ms BEFORE `scheduled_for` so dispatch has lead time to find a
- *  driver before pickup (RCAB-E6 / [[features-scheduled-booking]]). */
+ *  driver before pickup (RCAB-E6 / [[features-scheduled-booking]]).
+ *  NOTE: the accept/escalation window after the wake is NOT changed by Stage C
+ *  (contract flag F-1). */
 export const SCHEDULED_WAKE_LEAD_MS = 10 * 60 * 1000; // 10 minutes
 
 export interface ScheduledWakeJob {
   rideId: string;
+  /**
+   * The dispatch generation this wake starts (Stage C). Absent on legacy jobs
+   * that were in flight at deploy time; the worker treats absence as 1.
+   */
+  generation?: number;
 }
 
-/** Deterministic per-ride job id so a scheduled ride has at most one wake job
- *  and cancellation (RCAB-E6.S4) can address it directly. */
-export function wakeJobId(rideId: string): string {
-  return `scheduled:wake:${rideId}`;
+/** Deterministic per-(ride, generation) job id (colon-free, contract §1.3). */
+export function wakeJobId(rideId: string, generation = 1): string {
+  return scheduledWakeJobId(rideId, generation);
 }
 
 /**
- * Owns the scheduled-booking wake queue: enqueue a delayed wake job for a
- * future ride, and cancel it while still pending. The wake HANDLER (running the
- * normal dispatch path) is wired in RCAB-E6.S3; this service is the runner +
- * enqueue/cancel surface (RCAB-E6.S1).
+ * Owns the scheduled-booking wake queue: publish a delayed wake job for a
+ * future ride (called by the outbox relay) and cancel it while still pending.
+ * The wake HANDLER lives in `DispatchStartService.wakeScheduled`, driven by
+ * `ScheduledDispatchProcessor`.
  */
 @Injectable()
 export class ScheduledDispatchService {
@@ -38,40 +47,66 @@ export class ScheduledDispatchService {
     @InjectQueue(SCHEDULED_DISPATCH_QUEUE) private readonly queue: Queue<ScheduledWakeJob>,
     @Inject(ConfigService) config: ConfigService,
   ) {
-    this.leadMs = getNumber(config, 'SCHEDULED_WAKE_LEAD_MS', SCHEDULED_WAKE_LEAD_MS, { integer: true, min: 0 });
+    this.leadMs = getNumber(config, 'SCHEDULED_WAKE_LEAD_MS', SCHEDULED_WAKE_LEAD_MS, {
+      integer: true,
+      min: 0,
+    });
   }
 
   /**
-   * Enqueue a delayed wake job to fire `leadMs` before `scheduledFor`. If the
-   * wake time is already in the past (edge: scheduled very close to now), the
-   * job fires immediately (delay clamped to 0). Idempotent per ride via a fixed
-   * jobId — re-scheduling replaces the pending job.
+   * Publish a delayed wake job to fire `leadMs` before `scheduledFor`. If the
+   * wake time is already in the past the job fires immediately (delay clamped
+   * to 0). Called by the outbox relay, never inline in a request: the durable
+   * intent is the outbox row. Idempotent per (ride, generation) through the
+   * deterministic jobId, so a republish after a lost acknowledgment (or a
+   * reconciler re-arm) never produces a second wake. Retention keeps the
+   * finished job for a while so a late duplicate publish is also a no-op; the
+   * worker's status/generation guard is the real protection either way.
    */
-  async scheduleWake(rideId: string, scheduledFor: Date): Promise<{ jobId: string; delayMs: number }> {
+  async scheduleWake(
+    rideId: string,
+    scheduledFor: Date,
+    generation = 1,
+  ): Promise<{ jobId: string; delayMs: number }> {
     const delayMs = Math.max(0, scheduledFor.getTime() - this.leadMs - Date.now());
-    const jobId = wakeJobId(rideId);
-    // Replace any existing pending wake for this ride before re-adding.
-    await this.queue.remove(jobId).catch(() => undefined);
+    const jobId = wakeJobId(rideId, generation);
     await this.queue.add(
       SCHEDULED_WAKE_JOB,
-      { rideId },
-      { jobId, delay: delayMs, removeOnComplete: true, removeOnFail: 100 },
+      { rideId, generation },
+      {
+        jobId,
+        delay: delayMs,
+        attempts: 5,
+        backoff: { type: 'exponential', delay: 1_000 },
+        removeOnComplete: { age: 3_600, count: 1_000 },
+        removeOnFail: { age: 7 * 24 * 3_600 },
+      },
     );
-    this.log.log({ rideId, delayMs }, 'scheduled wake enqueued');
+    this.log.log({ rideId, generation, delayMs }, 'scheduled wake published');
     return { jobId, delayMs };
   }
 
   /**
-   * Remove a still-pending wake job (free cancellation before the ride wakes —
-   * RCAB-E6.S4). Returns true if a job was removed. No-op once the job has
-   * already fired (removeOnComplete drops it).
+   * Best-effort removal of a still-pending wake job (free cancellation before
+   * the ride wakes, RCAB-E6.S4). Removes the generation-1 job and the legacy
+   * colon-id job. Returns true if a job was removed. Never the source of
+   * safety: a wake that fires anyway is a no-op because the worker only acts on
+   * a ride that is still `requested` (T26).
    */
   async cancelWake(rideId: string): Promise<boolean> {
-    const jobId = wakeJobId(rideId);
-    const job = await this.queue.getJob(jobId);
-    if (!job) return false;
-    await job.remove().catch(() => undefined);
-    this.log.log({ rideId }, 'scheduled wake cancelled');
-    return true;
+    let removed = false;
+    for (const jobId of [wakeJobId(rideId, 1), legacyWakeJobId(rideId)]) {
+      const job = await this.queue.getJob(jobId);
+      if (!job) continue;
+      // An active/finished job cannot be removed; that is fine (see above).
+      await job.remove().then(
+        () => {
+          removed = true;
+        },
+        () => undefined,
+      );
+    }
+    if (removed) this.log.log({ rideId }, 'scheduled wake cancelled');
+    return removed;
   }
 }

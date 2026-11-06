@@ -11,7 +11,7 @@
 import { Client, Pool } from 'pg';
 import Redis from 'ioredis';
 import { randomUUID } from 'node:crypto';
-import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, vi, beforeAll, afterAll, afterEach } from 'vitest';
 import { IdempotencyOperation } from '../../src/modules/rides/idempotency';
 import { RidesController } from '../../src/modules/rides/rides.controller';
 import { RideType } from '../../src/modules/rides/dto/create-ride.dto';
@@ -20,6 +20,7 @@ import {
   buildPoolStack,
   cleanupPools,
   holdPoolLock,
+  releaseLeakedPoolLocks,
   memberAt,
   poolInvariantViolations,
   seedPassenger,
@@ -78,6 +79,8 @@ describe.skipIf(skip)('Pool membership — transactional invariants (R08, multi-
     redis = new Redis(process.env.TEST_REDIS_URL!, { maxRetriesPerRequest: null });
   });
 
+  afterEach(releaseLeakedPoolLocks);
+
   afterAll(async () => {
     await cleanupPools(admin, poolIds, passengers).catch(() => {});
     await Promise.all(stacks.map((s) => s.close().catch(() => {})));
@@ -103,7 +106,7 @@ describe.skipIf(skip)('Pool membership — transactional invariants (R08, multi-
         quotedFareCents: 9_000 + i,
       }),
     );
-    await waitForLockWaiters(admin, joiners.length);
+    await waitForLockWaiters(admin, joiners.length, undefined, lock.pid);
     await lock.release();
     const settled = await Promise.all(results);
 
@@ -229,9 +232,9 @@ describe.skipIf(skip)('Pool membership — transactional invariants (R08, multi-
       joiner: memberAt(joiner, 1),
       quotedFareCents: 1,
     });
-    await waitForLockWaiters(admin, 1);
+    await waitForLockWaiters(admin, 1, undefined, lock.pid);
     const close = timerStack.lifecycle.closeIfOpen(poolId, 'closed_timeout');
-    await waitForLockWaiters(admin, 2);
+    await waitForLockWaiters(admin, 2, undefined, lock.pid);
     await lock.release();
 
     await expect(join).resolves.toEqual({ joined: true, closedFull: false, seatCount: 2 });
@@ -258,13 +261,13 @@ describe.skipIf(skip)('Pool membership — transactional invariants (R08, multi-
 
     const lock = await holdPoolLock(poolId);
     const close = timerStack.lifecycle.closeIfOpen(poolId, 'closed_timeout');
-    await waitForLockWaiters(admin, 1);
+    await waitForLockWaiters(admin, 1, undefined, lock.pid);
     const join = joinerStack.lifecycle.joinPool({
       poolId,
       joiner: memberAt(joiner, 1),
       quotedFareCents: 1,
     });
-    await waitForLockWaiters(admin, 2);
+    await waitForLockWaiters(admin, 2, undefined, lock.pid);
     await lock.release();
 
     await expect(close).resolves.toBe('closed');
@@ -291,7 +294,7 @@ describe.skipIf(skip)('Pool membership — transactional invariants (R08, multi-
       a.lifecycle.joinPool({ poolId, joiner: memberAt(joiner, 1), quotedFareCents: null }),
       b.lifecycle.closeIfOpen(poolId, 'closed_timeout'),
     ]);
-    await waitForLockWaiters(admin, 2);
+    await waitForLockWaiters(admin, 2, undefined, lock.pid);
     await lock.release();
     const [join, close] = await both;
 
@@ -472,7 +475,7 @@ describe.skipIf(skip)('Pool membership — transactional invariants (R08, multi-
       {} as never,
       {} as never,
       s.bus as never,
-      s.events,
+      s.relay as never,
       {} as never,
       s.idempotency,
     );

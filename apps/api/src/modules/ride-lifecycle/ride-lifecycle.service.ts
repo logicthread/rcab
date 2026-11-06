@@ -4,6 +4,7 @@ import type Redis from 'ioredis';
 import { REDIS } from '../../infra/redis/redis.module';
 import { DRIZZLE_DB, type DrizzleDb } from '../../infra/db/drizzle.module';
 import { RideStopRepository, type RideStopRow } from '../matching/ride-stop.repository';
+import { PoolProjectionService } from '../matching/pool-projection.service';
 import { DriverAssignmentRepository } from '../dispatch/assignment.repository';
 import { clearCurrentRide } from '../dispatch/driver-assignment.projection';
 import { RealtimeBus } from '../realtime/realtime.bus';
@@ -39,7 +40,12 @@ export type StopConfirmResult =
       reason: 'not_found' | 'not_owner' | 'wrong_type' | 'out_of_order';
     };
 
-type ConfirmOutcome = { result: StopConfirmResult; completedAt: Date | null };
+type ConfirmOutcome = {
+  result: StopConfirmResult;
+  completedAt: Date | null;
+  /** The pool row's state moved (closed_started / completed): re-project it. */
+  poolStateChanged?: boolean;
+};
 
 @Injectable()
 export class RideLifecycleService {
@@ -51,6 +57,7 @@ export class RideLifecycleService {
     private readonly bus: RealtimeBus,
     @Inject(REDIS) private readonly redis: Redis,
     @Inject(DRIZZLE_DB) private readonly db: DrizzleDb,
+    private readonly poolProjection: PoolProjectionService,
   ) {}
 
   @OnEvent(STOP_CONFIRM_REQUEST_EVENT, { async: true })
@@ -111,8 +118,10 @@ export class RideLifecycleService {
       const updated = await this.stops.confirm(input.rideId, input.sequenceIndex, tx);
       if (!updated) throw new Error('confirmStop: stop changed under the pool lock');
 
+      let poolStateChanged = false;
       if (input.type === 'pickup' && stops.every((s) => s.confirmedAt === null)) {
         await this.stops.markRideStarted(input.rideId, tx);
+        poolStateChanged = true;
       }
 
       const pendingAfter = pending - 1;
@@ -120,6 +129,7 @@ export class RideLifecycleService {
       if (pendingAfter === 0) {
         completedAt = await this.stops.markRideCompleted(input.rideId, tx);
         if (!completedAt) throw new Error('confirmStop: claimed pool could not be completed');
+        poolStateChanged = true;
         await this.assignments.release(tx, {
           driverId: input.driverId,
           trip: { kind: 'shared', sharedRideId: input.rideId },
@@ -134,6 +144,7 @@ export class RideLifecycleService {
           duplicate: false,
         },
         completedAt,
+        poolStateChanged,
       };
     });
 
@@ -141,6 +152,14 @@ export class RideLifecycleService {
     if (!result.ok) return result;
 
     // ── after commit ──
+    if (outcome.poolStateChanged) {
+      // The `pool:<id>` hash is a projection of the committed row (F09).
+      try {
+        await this.poolProjection.project(input.rideId);
+      } catch (err) {
+        this.log.warn({ err, poolId: input.rideId }, 'pool projection failed; rebuild will repair');
+      }
+    }
     if (outcome.completedAt) {
       try {
         await clearCurrentRide(this.redis, input.driverId, input.rideId);

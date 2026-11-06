@@ -9,17 +9,38 @@ import {
   type HardFailJob,
   type WaveTimeoutJob,
 } from './dispatch.service';
+import { DispatchStartService } from './dispatch-start.service';
+import { DISPATCH_START_JOB, type DispatchStartJobData } from '../outbox/outbox.jobs';
 
+/**
+ * Worker for the `dispatch` queue. Errors are never caught here: a job that
+ * throws is retried by BullMQ and only completes once the dispatch work it
+ * stands for has actually finished (R07 / F08). Stale or duplicate jobs are
+ * absorbed by the generation/state guards inside the handlers, which return
+ * normally.
+ */
 @Processor(DISPATCH_QUEUE, { autorun: process.env.RCAB_DISABLE_BULL_AUTORUN !== '1' })
 export class DispatchProcessor extends WorkerHost {
   private readonly log = new Logger(DispatchProcessor.name);
 
-  constructor(private readonly dispatch: DispatchService) {
+  constructor(
+    private readonly dispatch: DispatchService,
+    private readonly start: DispatchStartService,
+  ) {
     super();
   }
 
   async process(job: Job): Promise<void> {
     switch (job.name) {
+      case DISPATCH_START_JOB: {
+        const { kind, tripId, generation } = job.data as DispatchStartJobData;
+        const outcome =
+          kind === 'pool'
+            ? await this.start.startPool(tripId, generation)
+            : await this.start.startSolo(tripId, generation);
+        this.log.log({ kind, tripId, generation, outcome }, 'dispatch start processed');
+        return;
+      }
       case WAVE_TIMEOUT_JOB:
         await this.dispatch.handleWaveTimeout(job as Job<WaveTimeoutJob>);
         return;

@@ -20,6 +20,8 @@ import { DispatchModule } from './modules/dispatch/dispatch.module';
 import { RideLifecycleModule } from './modules/ride-lifecycle/ride-lifecycle.module';
 import { RatingModule } from './modules/rating/rating.module';
 import { ScheduledModule } from './modules/scheduled/scheduled.module';
+import { OutboxModule } from './modules/outbox/outbox.module';
+import { DispatchRunnerModule } from './modules/dispatch/dispatch-runner.module';
 import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
 import { MetricsMiddleware } from './common/middleware/metrics.middleware';
 import { AppExceptionFilter } from './common/filters/app-exception.filter';
@@ -57,6 +59,8 @@ function parseRedisConnection() {
     RideLifecycleModule,
     RatingModule,
     ScheduledModule,
+    OutboxModule,
+    DispatchRunnerModule,
   ],
   providers: [
     { provide: APP_FILTER, useClass: AppExceptionFilter },

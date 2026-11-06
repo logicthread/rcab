@@ -8,7 +8,6 @@
 import { Client, Pool } from 'pg';
 import Redis from 'ioredis';
 import { drizzle } from 'drizzle-orm/node-postgres';
-import { EventEmitter2 } from '@nestjs/event-emitter';
 import { vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { uniquePhone } from '@rcab/test-fixtures';
@@ -29,7 +28,8 @@ export interface PoolStack {
   projection: PoolProjectionService;
   idempotency: IdempotencyRepository;
   lifecycle: PoolLifecycleService;
-  events: EventEmitter2;
+  /** OutboxRelay stand-in: the pool stack only kicks it after commit. */
+  relay: { kick: ReturnType<typeof vi.fn> };
   bus: {
     toPool: ReturnType<typeof vi.fn>;
     joinPool: ReturnType<typeof vi.fn>;
@@ -52,7 +52,7 @@ export function buildPoolStack(
   const members = new PoolMembershipRepository();
   const projection = new PoolProjectionService(repo, redis);
   const idempotency = new IdempotencyRepository(db as never);
-  const events = new EventEmitter2();
+  const relay = { kick: vi.fn() };
   const bus = {
     toPool: vi.fn(),
     joinPool: vi.fn().mockResolvedValue(undefined),
@@ -65,7 +65,7 @@ export function buildPoolStack(
     members,
     projection,
     idempotency,
-    events,
+    relay as never,
     bus as never,
     config as never,
   );
@@ -79,7 +79,7 @@ export function buildPoolStack(
     projection,
     idempotency,
     lifecycle,
-    events,
+    relay,
     bus,
     matching,
     close: () => pg.end(),
@@ -108,18 +108,38 @@ export function memberAt(passengerId: string, i = 0): SharedRideMember {
   };
 }
 
-/** Resolves once `n` backends are waiting on a lock (barrier for controlled interleavings). */
+/**
+ * Resolves once `n` backends are waiting on a lock (barrier for controlled
+ * interleavings). Pass `blockedBy` (a holder's backend pid) to count only the
+ * sessions queued behind that holder, directly or transitively: the database is
+ * shared by every integration file, so a global count can trip early on an
+ * unrelated waiter.
+ */
 export async function waitForLockWaiters(
   q: Pool | Client,
   n: number,
   timeoutMs = 10_000,
+  blockedBy?: number,
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
-    const { rows } = await q.query<{ n: number }>(
-      `SELECT count(*)::int AS n FROM pg_stat_activity
-        WHERE wait_event_type = 'Lock' AND datname = current_database()`,
-    );
+    const { rows } =
+      blockedBy === undefined
+        ? await q.query<{ n: number }>(
+            `SELECT count(*)::int AS n FROM pg_stat_activity
+              WHERE wait_event_type = 'Lock' AND datname = current_database()`,
+          )
+        : await q.query<{ n: number }>(
+            // A second FOR UPDATE waiter queues on the first waiter's tuple lock,
+            // not on the holder, so walk the blocking chain.
+            `WITH RECURSIVE w(pid) AS (
+               SELECT pid FROM pg_stat_activity WHERE $1::int = ANY(pg_blocking_pids(pid))
+               UNION
+               SELECT a.pid FROM pg_stat_activity a JOIN w ON w.pid = ANY(pg_blocking_pids(a.pid))
+             )
+             SELECT count(*)::int AS n FROM w`,
+            [blockedBy],
+          );
     if (rows[0].n >= n) return;
     if (Date.now() > deadline)
       throw new Error(`timed out waiting for ${n} lock waiters (saw ${rows[0].n})`);
@@ -127,18 +147,42 @@ export async function waitForLockWaiters(
   }
 }
 
+const heldPoolLocks = new Set<Client>();
+
 /** A raw connection holding `SELECT … FOR UPDATE` on a pool row until released. */
-export async function holdPoolLock(poolId: string): Promise<{ release: () => Promise<void> }> {
+export async function holdPoolLock(
+  poolId: string,
+): Promise<{ pid: number; release: () => Promise<void> }> {
   const c = new Client({ connectionString: process.env.TEST_POSTGRES_URI });
   await c.connect();
+  const { rows } = await c.query<{ pid: number }>('SELECT pg_backend_pid() AS pid');
   await c.query('BEGIN');
   await c.query('SELECT 1 FROM shared_rides WHERE ride_id = $1 FOR UPDATE', [poolId]);
+  heldPoolLocks.add(c);
   return {
+    pid: rows[0].pid,
     release: async () => {
+      heldPoolLocks.delete(c);
       await c.query('COMMIT');
       await c.end();
     },
   };
+}
+
+/**
+ * Roll back and close any pool lock a failed test never released. Without this
+ * a timed-out test keeps the row locked and every later spec sharing the
+ * database blocks behind it (afterEach hook).
+ */
+export async function releaseLeakedPoolLocks(): Promise<void> {
+  const leaked = [...heldPoolLocks];
+  heldPoolLocks.clear();
+  await Promise.all(
+    leaked.map(async (c) => {
+      await c.query('ROLLBACK').catch(() => {});
+      await c.end().catch(() => {});
+    }),
+  );
 }
 
 /**

@@ -1,12 +1,11 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { EventEmitter2 } from '@nestjs/event-emitter';
-import { sql } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { getNumber } from '../../common/utils/env';
 import { DRIZZLE_DB, type DrizzleDb, type DrizzleTx } from '../../infra/db/drizzle.module';
 import { RealtimeBus } from '../realtime/realtime.bus';
 import { enqueueOutbox } from '../outbox/outbox.writer';
+import { OutboxRelay } from '../outbox/outbox.relay';
 import { OutboxTopic } from '../outbox/outbox.types';
 import { IdempotencyRepository, type IdempotencyScope } from '../rides/idempotency.repository';
 import { computeStops } from './itinerary';
@@ -24,14 +23,6 @@ import {
 
 export const MATCHING_QUEUE = 'matching';
 export const POOL_EXPIRE_JOB = 'pool:expire';
-/**
- * TRANSITIONAL (stage-c): in-process nudge kept only so the pre-outbox
- * `DispatchService.onPoolClosed` listener still dispatches until the outbox
- * slice replaces it with the `pool.dispatch.requested` relay. It is emitted
- * AFTER commit and is not the durable intent (the outbox row is). Delete the
- * export and its emit once no listener remains.
- */
-export const POOL_CLOSED_EVENT = 'pool.closed';
 export const POOL_UPDATE_EVENT = 'pool:update';
 
 export interface PoolUpdatePayload {
@@ -52,11 +43,6 @@ export interface OpenPoolParams {
   maxSeats: number;
   detourBudgetM: number;
   passengerId: string;
-}
-
-export interface PoolClosedEventPayload {
-  rideId: string;
-  reason: Extract<PoolCloseReason, 'closed_full' | 'closed_timeout'>;
 }
 
 /** What a committed seat looks like to the caller (and to its idempotency record). */
@@ -136,7 +122,7 @@ export class PoolLifecycleService {
     private readonly members: PoolMembershipRepository,
     private readonly projection: PoolProjectionService,
     private readonly idempotency: IdempotencyRepository,
-    private readonly events: EventEmitter2,
+    private readonly relay: OutboxRelay,
     private readonly bus: RealtimeBus,
     @Inject(ConfigService) config: ConfigService,
   ) {
@@ -218,7 +204,7 @@ export class PoolLifecycleService {
     );
     if (committed === null) throw new PoolOpenRejectedError('conflict');
 
-    const row = await this.afterCommit(poolId, { joinPassengerId: p.passengerId, closed: null });
+    const row = await this.afterCommit(poolId, { joinPassengerId: p.passengerId, kickRelay: true });
     return (
       row ?? {
         // Post-commit re-read failed: describe the committed pool from the txn.
@@ -308,7 +294,7 @@ export class PoolLifecycleService {
     if (result.joined) {
       await this.afterCommit(p.poolId, {
         joinPassengerId: p.joiner.passenger_id,
-        closed: result.closedFull ? 'closed_full' : null,
+        kickRelay: result.closedFull,
       });
     }
     return result;
@@ -335,49 +321,12 @@ export class PoolLifecycleService {
       throw new Error(`closeIfOpen(${poolId}): transaction retries exhausted`);
     }
     if (result === 'closed') {
-      await this.afterCommit(poolId, { joinPassengerId: null, closed: reason });
+      await this.afterCommit(poolId, { joinPassengerId: null, kickRelay: true });
     } else if (result === 'aborted_empty') {
       this.log.warn({ poolId }, 'open pool with no members timed out → aborted');
-      await this.afterCommit(poolId, { joinPassengerId: null, closed: null });
+      await this.afterCommit(poolId, { joinPassengerId: null, kickRelay: false });
     }
     return result;
-  }
-
-  /**
-   * @deprecated TRANSITIONAL (stage-c). Kept only for callers that predate the
-   * transactional API: `closed_full`/`closed_timeout` route through the guarded
-   * closure; `aborted` is the pre-assignment hard-fail abort (unclaimed,
-   * closed, not yet started) until the offers-assignment slice moves it to
-   * `abortUnclaimedPool`. Never overwrites a started/terminal pool.
-   */
-  async closePool(rideId: string, reason: PoolCloseReason): Promise<void> {
-    if (reason === 'closed_full' || reason === 'closed_timeout') {
-      const result = await this.inTx<'closed' | 'not_open' | 'conflict'>(
-        async (tx) => {
-          const pool = await this.members.lockPool(tx, rideId);
-          if (!pool || pool.poolState !== 'open') return 'not_open';
-          return (await this.closeInTxn(tx, pool, reason)) === null ? 'not_open' : 'closed';
-        },
-        () => 'conflict',
-      );
-      if (result === 'closed') {
-        await this.afterCommit(rideId, { joinPassengerId: null, closed: reason });
-      }
-      return;
-    }
-    if (reason === 'aborted') {
-      const res = await this.db.execute(sql`
-        UPDATE shared_rides
-           SET pool_state = 'aborted', updated_at = now()
-         WHERE ride_id = ${rideId}
-           AND pool_state IN ('closed_full', 'closed_timeout')
-           AND claimed_by_driver_id IS NULL
-      `);
-      if ((res.rowCount ?? 0) > 0)
-        await this.afterCommit(rideId, { joinPassengerId: null, closed: null });
-      return;
-    }
-    this.log.warn({ rideId, reason }, 'closePool: transition not owned by pool lifecycle; ignored');
   }
 
   /**
@@ -431,7 +380,8 @@ export class PoolLifecycleService {
     poolId: string,
     opts: {
       joinPassengerId: string | null;
-      closed: 'closed_full' | 'closed_timeout' | null;
+      /** An outbox row committed (expiry schedule / dispatch intent): drain it now. */
+      kickRelay: boolean;
     },
   ): Promise<SharedRideRow | null> {
     let row: SharedRideRow | null = null;
@@ -453,14 +403,12 @@ export class PoolLifecycleService {
       });
     }
     if (row) this.emitPoolUpdate(row);
-    if (opts.closed) {
+    if (opts.kickRelay) {
+      // Latency only: the relay's poll loop is the backstop for the durable row.
       try {
-        this.events.emit(POOL_CLOSED_EVENT, {
-          rideId: poolId,
-          reason: opts.closed,
-        } satisfies PoolClosedEventPayload);
+        this.relay.kick();
       } catch (err) {
-        this.log.warn({ err, poolId }, 'pool.closed nudge failed (outbox intent is durable)');
+        this.log.warn({ err, poolId }, 'outbox relay kick failed (intent is durable)');
       }
     }
     return row;

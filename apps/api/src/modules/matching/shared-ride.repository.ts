@@ -1,8 +1,7 @@
 import { Injectable, Inject } from '@nestjs/common';
-import { eq } from 'drizzle-orm';
 import { sql } from 'drizzle-orm';
 import { DRIZZLE_DB, type DbExecutor, type DrizzleDb } from '../../infra/db/drizzle.module';
-import { sharedRide, type SharedRideMember } from '../../db/schema';
+import type { SharedRideMember } from '../../db/schema';
 import { memberFromDb } from './pool-membership.repository';
 
 export type { SharedRideMember } from '../../db/schema';

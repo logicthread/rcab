@@ -66,14 +66,16 @@ function make(opts: MakeOpts = {}) {
   };
   const bus = { toDriver: vi.fn(), toRide: vi.fn() };
   const redis = { eval: vi.fn().mockResolvedValue(1) };
+  const poolProjection = { project: vi.fn().mockResolvedValue(null) };
   const svc = new RideLifecycleService(
     stopsRepo as never,
     assignments as never,
     bus as never,
     redis as never,
     db as never,
+    poolProjection as never,
   );
-  return { svc, tx, db, stopsRepo, assignments, bus, redis };
+  return { svc, tx, db, stopsRepo, assignments, bus, redis, poolProjection };
 }
 
 const input = (sequenceIndex: number, type: 'pickup' | 'dropoff' = 'pickup') => ({
@@ -106,8 +108,9 @@ describe('RideLifecycleService.confirmStop', () => {
 
   it('first pickup: stamps it in the pool-locked transaction, marks started, echoes', async () => {
     const stops = [stop({ sequenceIndex: 0 }), stop({ sequenceIndex: 1, type: 'dropoff' })];
-    const { svc, tx, stopsRepo, assignments, bus, redis } = make({ stops });
+    const { svc, tx, stopsRepo, assignments, bus, redis, poolProjection } = make({ stops });
     const result = await svc.confirmStop(input(0));
+    expect(poolProjection.project).toHaveBeenCalledWith('r-1');
 
     expect(result).toMatchObject({ ok: true, pendingAfter: 1, rideCompleted: false, duplicate: false });
     expect(assignments.lockSharedTrip).toHaveBeenCalledWith(tx, 'r-1');
@@ -131,8 +134,9 @@ describe('RideLifecycleService.confirmStop', () => {
       stop({ sequenceIndex: 0, confirmedAt: T0 }),
       stop({ sequenceIndex: 1, type: 'dropoff' }),
     ];
-    const { svc, tx, stopsRepo, assignments, bus, redis } = make({ stops });
+    const { svc, tx, stopsRepo, assignments, bus, redis, poolProjection } = make({ stops });
     const result = await svc.confirmStop(input(1, 'dropoff'));
+    expect(poolProjection.project).toHaveBeenCalledWith('r-1');
 
     expect(result).toMatchObject({ ok: true, pendingAfter: 0, rideCompleted: true });
     expect(stopsRepo.markRideStarted).not.toHaveBeenCalled();
@@ -165,11 +169,12 @@ describe('RideLifecycleService.confirmStop', () => {
       stop({ sequenceIndex: 0, confirmedAt: T0 }),
       stop({ sequenceIndex: 1, type: 'dropoff', confirmedAt: T0 }),
     ];
-    const { svc, stopsRepo, assignments, bus } = make({
+    const { svc, stopsRepo, assignments, bus, poolProjection } = make({
       stops,
       pool: lock({ poolState: 'completed' }),
     });
     const result = await svc.confirmStop(input(1, 'dropoff'));
+    expect(poolProjection.project).not.toHaveBeenCalled();
 
     expect(result).toMatchObject({ ok: true, duplicate: true, pendingAfter: 0, rideCompleted: true });
     expect(stopsRepo.confirm).not.toHaveBeenCalled();
@@ -196,6 +201,7 @@ describe('RideLifecycleService.confirmStop', () => {
     const stops = [stop({ sequenceIndex: 0, type: 'dropoff' })];
     const m = make({ stops });
     m.redis.eval.mockRejectedValue(new Error('redis down'));
+    m.poolProjection.project.mockRejectedValue(new Error('redis down'));
     m.bus.toRide.mockImplementation(() => {
       throw new Error('socket down');
     });

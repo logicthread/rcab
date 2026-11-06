@@ -12,12 +12,9 @@ import {
   RIDE_OFFER_RESPONSE_EVENT,
   type RideOfferResponseEvent,
 } from '../realtime/realtime.gateway';
-import {
-  POOL_CLOSED_EVENT,
-  type PoolClosedEventPayload,
-} from '../matching/pool-lifecycle.service';
 import { SharedRideRepository, type SharedRideRow } from '../matching/shared-ride.repository';
 import { RideStopRepository } from '../matching/ride-stop.repository';
+import { PoolProjectionService } from '../matching/pool-projection.service';
 import { RidesRepository, type RevokedOffer, type RideRow } from '../rides/rides.repository';
 import {
   RIDE_CANCELLED_EVENT,
@@ -30,6 +27,12 @@ import {
 } from './assignment.repository';
 import { DriverAssignmentProjection } from './driver-assignment.projection';
 import { withTxRetry } from './tx-retry';
+import {
+  wave2JobId as waveTwoJobId,
+  hardFailJobId,
+  legacyWave2JobId as legacyWaveTwoJobId,
+  legacyHardFailJobId,
+} from '../outbox/outbox.jobs';
 import {
   tripId,
   type AcceptOfferFailure,
@@ -44,13 +47,6 @@ import {
 export const DISPATCH_QUEUE = 'dispatch';
 export const WAVE_TIMEOUT_JOB = 'dispatch:wave-timeout';
 export const HARD_FAIL_JOB = 'dispatch:hard-fail';
-
-/** Emitted by the rides controller when a solo ride is persisted `requested`. */
-export const RIDE_REQUESTED_EVENT = 'ride.requested';
-
-export interface RideRequestedEventPayload {
-  rideId: string;
-}
 
 /** Live offer lifetime. The authoritative deadline is `dispatch_offer.expires_at`. */
 export const OFFER_TTL_MS = 12_000;
@@ -73,24 +69,16 @@ export interface HardFailJob {
   generation?: number;
 }
 
-/** Wave-2 escalation timer for one trip generation (no colons: contract §1.3 rule 7). */
-export function waveTwoJobId(tripRef: string, generation: number): string {
-  return `dispatch-wave2-${tripRef}-g${generation}`;
-}
-
-/** No-driver hard-fail timer for one trip generation. */
-export function hardFailJobId(tripRef: string, generation: number): string {
-  return `dispatch-hardfail-${tripRef}-g${generation}`;
-}
-
-/** Pre-Stage-C ids still possibly in flight at deploy; removed alongside the new ones. */
-export function legacyWaveTwoJobId(tripRef: string): string {
-  return `dispatch:wave2-timeout:${tripRef}`;
-}
-
-export function legacyHardFailJobId(tripRef: string): string {
-  return `dispatch:hard-fail:${tripRef}`;
-}
+// Timer job ids are owned by the dependency-free outbox.jobs module so the
+// dispatch service, the reconciler and the relay can never drift apart
+// (generation-scoped, colon-free: contract §1.3 rule 7). Re-exported under the
+// dispatch-side names.
+export {
+  wave2JobId as waveTwoJobId,
+  hardFailJobId,
+  legacyWave2JobId as legacyWaveTwoJobId,
+  legacyHardFailJobId,
+} from '../outbox/outbox.jobs';
 
 interface DispatchParams {
   k1: number;
@@ -128,6 +116,7 @@ export class DispatchService {
     @Inject(REDIS) private readonly redis: Redis,
     @Inject(DRIZZLE_DB) private readonly db: DrizzleDb,
     @Inject(ConfigService) config: ConfigService,
+    private readonly poolProjection: PoolProjectionService,
   ) {
     this.params = {
       k1: getNumber(config, 'DISPATCH_K1', 5, { integer: true, min: 1 }),
@@ -140,16 +129,6 @@ export class DispatchService {
       }),
       hardFailMs: getNumber(config, 'DISPATCH_HARD_FAIL_MS', 60_000, { integer: true, min: 1 }),
     };
-  }
-
-  @OnEvent(POOL_CLOSED_EVENT, { async: true })
-  async onPoolClosed(payload: PoolClosedEventPayload): Promise<void> {
-    this.log.log({ rideId: payload.rideId, reason: payload.reason }, 'pool.closed → dispatchPool');
-    try {
-      await this.dispatchPool(payload.rideId);
-    } catch (err) {
-      this.log.error({ err, rideId: payload.rideId }, 'dispatchPool failed');
-    }
   }
 
   /**
@@ -310,6 +289,8 @@ export class DispatchService {
     const id = tripId(result.trip);
     await this.projection.set(driverId, id);
     if (!result.replay) await this.removeTimers(id, result.generation);
+    // The `pool:<id>` hash is a projection of the committed claim (F09).
+    if (result.trip.kind === 'shared') await this.projectPool(id);
 
     this.safely('ride_offer_accepted', () =>
       this.bus.toDriver(driverId, 'ride_offer_accepted', {
@@ -325,6 +306,15 @@ export class DispatchService {
       this.safely('ride_state_changed', () =>
         this.bus.toRide(id, 'ride_state_changed', { rideId: id, state: 'accepted', by: 'driver' }),
       );
+    }
+  }
+
+  /** Best-effort `pool:<id>` projection refresh; boot / next write repairs a miss. */
+  private async projectPool(poolId: string): Promise<void> {
+    try {
+      await this.poolProjection.project(poolId);
+    } catch (err) {
+      this.log.warn({ err, poolId }, 'pool projection failed; rebuild will repair');
     }
   }
 
@@ -363,45 +353,6 @@ export class DispatchService {
         }),
       );
     }
-  }
-
-  async dispatchPool(rideId: string): Promise<void> {
-    const pool = await this.repo.findById(rideId);
-    if (!pool) {
-      this.log.warn({ rideId }, 'dispatchPool: pool not found');
-      return;
-    }
-    if (pool.claimedByDriverId) {
-      this.log.warn({ rideId }, 'dispatchPool: pool already claimed; skipping');
-      return;
-    }
-    await this.runPoolWave(pool, 1);
-  }
-
-  @OnEvent(RIDE_REQUESTED_EVENT, { async: true })
-  async onRideRequested(payload: RideRequestedEventPayload): Promise<void> {
-    this.log.log({ rideId: payload.rideId }, 'ride.requested → dispatchSolo');
-    try {
-      await this.dispatchSolo(payload.rideId);
-    } catch (err) {
-      this.log.error({ err, rideId: payload.rideId }, 'dispatchSolo failed');
-    }
-  }
-
-  async dispatchSolo(rideId: string): Promise<void> {
-    const ride = await this.ridesRepo.findById(rideId);
-    if (!ride) {
-      this.log.warn({ rideId }, 'dispatchSolo: ride not found');
-      return;
-    }
-    if (ride.status !== 'requested') {
-      this.log.warn(
-        { rideId, status: ride.status },
-        'dispatchSolo: ride not in requested state; skipping',
-      );
-      return;
-    }
-    await this.runSoloWave(ride, 1);
   }
 
   /**
@@ -584,6 +535,7 @@ export class DispatchService {
     this.log.warn({ rideId }, 'dispatch hard-fail → aborting pool');
     this.notifyRevoked(trip, aborted.revoked, 'revoked');
     await this.removeTimers(rideId, aborted.generation);
+    await this.projectPool(rideId);
     // Phase-0: an aborted pool is terminal. Re-queueing each member as an
     // individual solo ride is a future enhancement (owner decision F-5).
   }

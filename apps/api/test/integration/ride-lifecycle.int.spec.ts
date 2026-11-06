@@ -43,7 +43,7 @@ describe.skipIf(skip)(
       });
       bus = makeBus();
       h = buildDispatch(pg, redis, dispatchQueue, bus);
-      rideLifecycle = new RideLifecycleService(h.stops, h.assignments, bus as never, redis, h.db);
+      rideLifecycle = new RideLifecycleService(h.stops, h.assignments, bus as never, redis, h.db, h.poolProjection);
     });
 
     afterAll(async () => {
@@ -157,7 +157,7 @@ describe.skipIf(skip)(
       const pgB = new Pool({ connectionString: process.env.TEST_POSTGRES_URI, max: 2 });
       try {
         const hB = buildDispatch(pgB, redis, dispatchQueue, makeBus());
-        const otherLifecycle = new RideLifecycleService(hB.stops, hB.assignments, makeBus() as never, redis, hB.db);
+        const otherLifecycle = new RideLifecycleService(hB.stops, hB.assignments, makeBus() as never, redis, hB.db, hB.poolProjection);
         await rideLifecycle.confirmStop({ rideId: poolId, driverId, sequenceIndex: 0, type: 'pickup' });
         const input = { rideId: poolId, driverId, sequenceIndex: 1, type: 'dropoff' } as const;
         const [a, b] = await Promise.all([

@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { HttpModule } from '@nestjs/axios';
 import { ConfigModule } from '@nestjs/config';
 import { BullModule } from '@nestjs/bullmq';
+import { OutboxModule } from '../outbox/outbox.module';
 import { RealtimeModule } from '../realtime/realtime.module';
 import { IdempotencyRepository } from '../rides/idempotency.repository';
 import { RouteSimilarityService } from './route-similarity.service';
@@ -18,6 +19,8 @@ import { PoolProjectionService } from './pool-projection.service';
     HttpModule,
     ConfigModule,
     RealtimeModule,
+    // Post-commit relay kick for the pool's outbox rows (latency only).
+    OutboxModule,
     BullModule.registerQueue({ name: MATCHING_QUEUE }),
   ],
   providers: [

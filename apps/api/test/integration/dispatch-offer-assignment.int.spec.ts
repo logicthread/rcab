@@ -773,7 +773,7 @@ describe.skipIf(skip)('Stage C slice A — offers + assignment guard (multi-conn
       expect((await A.dispatch.acceptOffer({ offerId, driverId: d })).ok).toBe(true);
       expect(await currentRide(d)).toBe(poolId);
 
-      const lifecycle = new RideLifecycleService(A.stops, A.assignments, busA as never, redis, A.db);
+      const lifecycle = new RideLifecycleService(A.stops, A.assignments, busA as never, redis, A.db, A.poolProjection);
       const first = await lifecycle.confirmStop({ rideId: poolId, driverId: d, sequenceIndex: 0, type: 'pickup' });
       expect(first).toMatchObject({ ok: true, rideCompleted: false });
       const last = await lifecycle.confirmStop({ rideId: poolId, driverId: d, sequenceIndex: 1, type: 'dropoff' });

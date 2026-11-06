@@ -29,7 +29,6 @@ import { CreateRideDto, RideType } from './dto/create-ride.dto';
 import { QuoteRideDto } from './dto/quote-ride.dto';
 import { TransitionRideDto } from './dto/transition-ride.dto';
 import { CancelRideDto } from './dto/cancel-ride.dto';
-import { EventEmitter2 } from '@nestjs/event-emitter';
 import { QuoteTokenService, type QuoteClaims } from './quote-token.service';
 import { RidesRepository, type RideIdempotencyOperation, type RideRow } from './rides.repository';
 import { IdempotencyRepository } from './idempotency.repository';
@@ -44,7 +43,7 @@ import {
 import type { IdempotencyScope } from './idempotency.repository';
 import { RideStateMachine } from './ride-state-machine.service';
 import { RealtimeBus } from '../realtime/realtime.bus';
-import { RIDE_REQUESTED_EVENT, type RideRequestedEventPayload } from '../dispatch/dispatch.service';
+import { OutboxRelay } from '../outbox/outbox.relay';
 import { ScheduledDispatchService } from '../scheduled/scheduled.service';
 
 // Scheduled bookings must fall in a 15 min – 24 h future window (RCAB-E6.S2 /
@@ -135,7 +134,7 @@ export class RidesController {
     private readonly ridesRepo: RidesRepository,
     private readonly stateMachine: RideStateMachine,
     private readonly bus: RealtimeBus,
-    private readonly events: EventEmitter2,
+    private readonly relay: OutboxRelay,
     private readonly scheduled: ScheduledDispatchService,
     private readonly idempotency: IdempotencyRepository,
   ) {}
@@ -396,7 +395,9 @@ export class RidesController {
    * mismatched intent is 422. The fare is locked from the signed quote token
    * (rejected if expired/tampered) — but only for a NEW booking: a replay of an
    * accepted one is returned even after its quote has expired. Persists
-   * `requested`; dispatch is RCAB-E4.S3.
+   * `requested` together with its dispatch work intent in ONE transaction (the
+   * outbox row, R07/F08); the relay publishes it, so no in-memory event can be
+   * lost between the commit and the dispatch.
    */
   private async createNormal(
     passengerId: string,
@@ -432,16 +433,14 @@ export class RidesController {
     // Lost a concurrent first-use race to a request with a different intent.
     if (!created && !fingerprintMatches(stored, fingerprint)) throw idempotencyKeyConflict();
 
-    // Only a freshly-created ride triggers dispatch — a replay must not re-dispatch.
-    // TODO(F08/R07): if the process dies after the insert but before the emit,
-    // a retry replays the row without dispatching it; Stage C's outbox owns this.
+    // The dispatch intent already committed with the ride (outbox row), so a
+    // replay needs nothing here and a crash after this point loses no work.
+    // The kick only shortens the latency; the relay's poll is the backstop.
     if (created) {
       // Join the booking client to the ride room so it receives
       // `ride_state_changed` once a driver starts advancing the ride (E4.S6).
+      this.relay.kick();
       await this.bus.joinRide(passengerId, row.id);
-      this.events.emit(RIDE_REQUESTED_EVENT, {
-        rideId: row.id,
-      } satisfies RideRequestedEventPayload);
     }
 
     return soloResponse(row);
@@ -451,9 +450,10 @@ export class RidesController {
    * Scheduled (future) booking request. Same idempotent + quote-locked flow as
    * `createNormal` (scope `ride.create.scheduled`), but the ride is persisted
    * `type='scheduled'` with a future `scheduled_for` (15 min – 24 h out) and a
-   * BullMQ wake job is enqueued (~10 min before pickup, RCAB-E6.S1) INSTEAD of
-   * dispatching now. The wake worker (RCAB-E6.S3) runs the normal dispatch path
-   * when it fires. A replay is resolved BEFORE the window check, so a late
+   * wake intent (outbox row, published as a delayed BullMQ job ~10 min before
+   * pickup, RCAB-E6.S1) INSTEAD of dispatching now. The wake worker
+   * (RCAB-E6.S3) runs the normal dispatch path when it fires. A replay is
+   * resolved BEFORE the window check, so a late
    * retry still recovers the committed booking (R05).
    */
   private async createScheduled(
@@ -510,13 +510,12 @@ export class RidesController {
     });
     if (!created && !fingerprintMatches(stored, fingerprint)) throw idempotencyKeyConflict();
 
-    // A freshly-created scheduled ride enqueues a delayed wake instead of
-    // dispatching now (a replay must not double-schedule).
-    // TODO(F08/R07): if scheduleWake fails after the insert, a retry replays the
-    // row and never re-enqueues the wake; Stage C's outbox/reconciler owns this.
+    // The wake intent committed with the ride (outbox row, R07/F08): the relay
+    // publishes the delayed job, the reconciler rebuilds it if Redis loses it.
+    // A replay needs nothing, and no failure here can strand the booking.
     if (created) {
+      this.relay.kick();
       await this.bus.joinRide(passengerId, row.id);
-      await this.scheduled.scheduleWake(row.id, scheduledFor);
     }
 
     return soloResponse(row);
@@ -711,10 +710,13 @@ export class RidesController {
     }
     // A cancelled scheduled ride drops its pending wake job so it never fires
     // (free cancellation before wake — RCAB-E6.S4). Safe/no-op after the ride
-    // has already woken (the job is gone), and dispatchSolo guards
-    // status='requested' anyway, so a race can't dispatch a cancelled ride.
+    // has already woken (the job is gone). Best effort only: the wake worker's
+    // guarded UPDATE on status='requested' is the real protection, so a late
+    // or already-running wake can't dispatch a cancelled ride (T26).
     if (result.row.type === 'scheduled') {
-      await this.scheduled.cancelWake(rideId);
+      await this.scheduled.cancelWake(rideId).catch((err: unknown) =>
+        this.log.warn({ err, rideId }, 'scheduled wake removal failed; worker status guard applies'),
+      );
     }
 
     return {

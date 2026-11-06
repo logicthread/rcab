@@ -36,9 +36,10 @@ describe.skipIf(skip)('ScheduledDispatchService — wake queue (real Redis + Bul
     const rideId = randomUUID();
     const scheduledFor = new Date(Date.now() + 2 * 60 * 60 * 1000); // 2h out
 
-    const { jobId, delayMs } = await service.scheduleWake(rideId, scheduledFor);
+    const { jobId, delayMs } = await service.scheduleWake(rideId, scheduledFor, 1);
 
-    expect(jobId).toBe(wakeJobId(rideId));
+    expect(jobId).toBe(wakeJobId(rideId, 1));
+    expect(jobId).toBe(`scheduled-wake-${rideId}-g1`);
     // ~ (2h − 10min lead); allow a few seconds of clock slack.
     const expected = 2 * 60 * 60 * 1000 - SCHEDULED_WAKE_LEAD_MS;
     expect(Math.abs(delayMs - expected)).toBeLessThan(5000);
@@ -46,7 +47,7 @@ describe.skipIf(skip)('ScheduledDispatchService — wake queue (real Redis + Bul
     const job = await queue.getJob(jobId);
     expect(job).toBeDefined();
     expect(job!.name).toBe(SCHEDULED_WAKE_JOB);
-    expect(job!.data.rideId).toBe(rideId);
+    expect(job!.data).toEqual({ rideId, generation: 1 });
     expect(Math.abs((job!.delay ?? 0) - delayMs)).toBeLessThan(50);
 
     await service.cancelWake(rideId);
@@ -62,12 +63,11 @@ describe.skipIf(skip)('ScheduledDispatchService — wake queue (real Redis + Bul
     await service.cancelWake(rideId);
   });
 
-  it('re-scheduling the same ride replaces its pending job (one job per ride)', async () => {
+  it('publishing the same ride+generation twice yields one job (republish is a no-op)', async () => {
     const rideId = randomUUID();
     await service.scheduleWake(rideId, new Date(Date.now() + 3 * 60 * 60 * 1000));
-    await service.scheduleWake(rideId, new Date(Date.now() + 4 * 60 * 60 * 1000));
+    await service.scheduleWake(rideId, new Date(Date.now() + 3 * 60 * 60 * 1000));
 
-    // Only the fixed jobId exists; no duplicate wake jobs for this ride.
     const job = await queue.getJob(wakeJobId(rideId));
     expect(job).toBeDefined();
     const all = await queue.getDelayed();
@@ -84,5 +84,16 @@ describe.skipIf(skip)('ScheduledDispatchService — wake queue (real Redis + Bul
     expect(await queue.getJob(wakeJobId(rideId))).toBeUndefined();
     // Second cancel: nothing left to remove.
     expect(await service.cancelWake(rideId)).toBe(false);
+  });
+
+  it('cancelWake also removes a legacy colon-id wake that was in flight at deploy', async () => {
+    const rideId = randomUUID();
+    await queue.add(
+      SCHEDULED_WAKE_JOB,
+      { rideId },
+      { jobId: `scheduled:wake:${rideId}`, delay: 60 * 60 * 1000 },
+    );
+    expect(await service.cancelWake(rideId)).toBe(true);
+    expect(await queue.getJob(`scheduled:wake:${rideId}`)).toBeUndefined();
   });
 });

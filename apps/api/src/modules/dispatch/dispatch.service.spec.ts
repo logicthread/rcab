@@ -299,6 +299,7 @@ function makeService(config: Record<string, unknown> = {}) {
     abortUnclaimedPool: vi.fn().mockResolvedValue(true),
   };
   const projection = { set: vi.fn().mockResolvedValue(undefined) };
+  const poolProjection = { project: vi.fn().mockResolvedValue(null) };
   const bus = { toDriver: vi.fn(), toUser: vi.fn(), toRide: vi.fn() };
   const queue = {
     add: vi.fn().mockResolvedValue({ id: 'job' }),
@@ -317,8 +318,23 @@ function makeService(config: Record<string, unknown> = {}) {
     redis as never,
     db as never,
     { get: vi.fn((k: string) => config[k]) } as never,
+    poolProjection as never,
   );
-  return { svc, db, tx, repo, ridesRepo, stops, offers, assignments, projection, bus, queue, redis };
+  return {
+    svc,
+    db,
+    tx,
+    repo,
+    ridesRepo,
+    stops,
+    offers,
+    assignments,
+    projection,
+    poolProjection,
+    bus,
+    queue,
+    redis,
+  };
 }
 
 describe('job ids (contract §1.3 rule 7)', () => {
@@ -407,6 +423,8 @@ describe('DispatchService.acceptOffer', () => {
       sharedRideId: POOL,
     });
     expect(m.bus.toRide).not.toHaveBeenCalled();
+    // pool:<id> hash re-projected from the committed claim (F09).
+    expect(m.poolProjection.project).toHaveBeenCalledWith(POOL);
   });
 
   it.each([
@@ -776,6 +794,14 @@ describe('DispatchService.handleHardFail', () => {
       reason: 'revoked',
     });
     expect(m.queue.remove).toHaveBeenCalledWith(hardFailJobId(POOL, 1));
+    expect(m.poolProjection.project).toHaveBeenCalledWith(POOL);
+  });
+
+  it('pool: a failing projection refresh never fails the committed abort', async () => {
+    const m = makeService();
+    m.poolProjection.project.mockRejectedValue(new Error('redis down'));
+    await expect(m.svc.handleHardFail(job({ rideId: POOL, kind: 'pool' }))).resolves.toBeUndefined();
+    expect(m.assignments.abortUnclaimedPool).toHaveBeenCalled();
   });
 
   it.each([
@@ -794,6 +820,7 @@ describe('DispatchService.handleHardFail', () => {
     await m.svc.handleHardFail(job({ rideId: POOL, kind: 'pool', generation: 1 }));
     expect(m.offers.revokeLiveForTrip).not.toHaveBeenCalled();
     expect(m.queue.remove).not.toHaveBeenCalled();
+    expect(m.poolProjection.project).not.toHaveBeenCalled();
   });
 });
 

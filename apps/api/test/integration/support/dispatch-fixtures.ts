@@ -12,6 +12,7 @@ import * as schema from '../../../src/db/schema';
 import type { DrizzleDb } from '../../../src/infra/db/drizzle.module';
 import { SharedRideRepository } from '../../../src/modules/matching/shared-ride.repository';
 import { RideStopRepository } from '../../../src/modules/matching/ride-stop.repository';
+import { PoolProjectionService } from '../../../src/modules/matching/pool-projection.service';
 import { RidesRepository } from '../../../src/modules/rides/rides.repository';
 import { DispatchService } from '../../../src/modules/dispatch/dispatch.service';
 import { DispatchOfferRepository } from '../../../src/modules/dispatch/offer.repository';
@@ -57,6 +58,7 @@ export interface DispatchHarness {
   rides: RidesRepository;
   stops: RideStopRepository;
   shared: SharedRideRepository;
+  poolProjection: PoolProjectionService;
 }
 
 /** A full DispatchService over its own pg Pool (independent connections). */
@@ -69,6 +71,7 @@ export function buildDispatch(pgPool: Pool, redis: Redis, queue: Queue, bus: Bus
   const assignments = new DriverAssignmentRepository();
   const projection = new DriverAssignmentProjection(db, redis, assignments, offers);
   const config = { get: vi.fn().mockReturnValue(undefined) };
+  const poolProjection = new PoolProjectionService(shared, redis);
   const dispatch = new DispatchService(
     shared,
     rides,
@@ -81,8 +84,9 @@ export function buildDispatch(pgPool: Pool, redis: Redis, queue: Queue, bus: Bus
     redis,
     db,
     config as never,
+    poolProjection,
   );
-  return { db, dispatch, offers, assignments, projection, rides, stops, shared };
+  return { db, dispatch, offers, assignments, projection, rides, stops, shared, poolProjection };
 }
 
 export async function seedClient(db: Db): Promise<string> {
