@@ -36,7 +36,11 @@ audience: both
 - **Stale pending reclaim:** a `pending` claim older than 60 s (`PENDING_RECLAIM_AFTER_MS`) can be taken over by a same-fingerprint retry; shared create first returns a seat the dead attempt already holds (best effort until R08).
 - Replay is resolved **before** quote verification and the scheduled-window check, so a late retry recovers an already-accepted booking.
 - **Shared create** claims the key in `idempotency_record` (pending) before seat allocation, completes it with the replayable response, and releases it if allocation throws. A retried identical request replays the original seat; a concurrent duplicate gets **409 `idempotency_request_in_progress`**.
-- Migration: `0013_idempotency_scope.sql`. Known gap: dispatch hand-off after commit is not yet durable (F08, Stage C).
+- Migration: `0013_idempotency_scope.sql`.
+
+## Dispatch hand-off (outbox)
+
+The create path writes the ride **and** an outbox intent in one transaction: `ride.dispatch.requested` for normal rides, `ride.wake.schedule` for scheduled rides (wake at T−10 min), and `pool.*` topics for shared pools (migration `0015_outbox.sql`). The in-memory `ride.requested` event was removed. `OutboxRelay` + `DispatchStartService` start dispatch; `DispatchReconciler` re-arms anything committed but not started ([[module-dispatch]]). Shared joins persist the seat's `agreed_fare_cents` in the join transaction ([[module-matching]]).
 
 ## Persistence
 

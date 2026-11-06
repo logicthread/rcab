@@ -1,6 +1,6 @@
 ---
 name: pool-inspect
-description: Inspect the current state of all shared-ride pools in Redis — open pools, seat counts, expiry timers, and BullMQ queue depth. Useful during E5 development and demos. No args.
+description: Inspect shared-ride pools — authoritative Postgres rows (shared_rides, pool_member), the Redis pool projection, expiry timers, and BullMQ queue depth. Useful during E5 development and demos. No args.
 ---
 
 # pool-inspect
@@ -20,20 +20,19 @@ RC() { docker compose --env-file .env.dev -f infra/docker/docker-compose.dev.yml
 
 1. **List all open pools.**
    ```bash
-   RC --scan --pattern 'pool:*' | grep -v ':seats' | sort
+   RC --scan --pattern 'pool:*' | sort
    ```
-   Keys are `pool:<rideId>` (hash, TTL-bounded) and `pool:<rideId>:seats` (the Lua-guarded
-   seat counter). For each pool hash:
+   The only pool key is `pool:<rideId>` (hash, TTL-bounded): a **projection** reconciled
+   from Postgres at boot and periodically. `pool:<rideId>:seats`, `:offered`, `:stops` and the
+   Lua scripts were removed in Stage C. **Postgres is the truth**:
    ```bash
-   RC HGETALL pool:<rideId>
-   RC GET pool:<rideId>:seats
+   PSQL() { docker compose --env-file .env.dev -f infra/docker/docker-compose.dev.yml exec -T postgres psql -U rcab -d rcab "$@"; }
+   PSQL -c "SELECT id, status, seat_count, state_version, claimed_by_driver_id FROM shared_rides ORDER BY created_at DESC LIMIT 10;"
+   PSQL -c "SELECT shared_ride_id, passenger_id, seats, agreed_fare_cents FROM pool_member ORDER BY created_at DESC LIMIT 20;"
+   PSQL -c "SELECT * FROM dispatch_offer WHERE trip_id IN (SELECT id FROM shared_rides ORDER BY created_at DESC LIMIT 5);"
    ```
-   The authoritative pool row is in Postgres (`shared_rides`: `status`, `seat_count`,
-   `claimed_by_driver_id`) — the Redis hash is the hot copy, so cross-check:
-   ```bash
-   docker compose --env-file .env.dev -f infra/docker/docker-compose.dev.yml exec -T postgres \
-     psql -U rcab -d rcab -c "SELECT id, status, seat_count, claimed_by_driver_id FROM shared_rides ORDER BY created_at DESC LIMIT 10;"
-   ```
+   Then compare the projection (`RC HGETALL pool:<rideId>`) against the row; a mismatch
+   heals on the next reconcile pass. (If a column name differs, check `\d pool_member` and `\d dispatch_offer`.)
 
 2. **Show pool expiry timers from BullMQ.**
    ```bash

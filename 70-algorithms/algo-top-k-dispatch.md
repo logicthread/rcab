@@ -35,20 +35,19 @@ if candidates is empty:
 
 for each c in candidates:
   offer_id ← uuid_v7()
-  SET offer:<offer_id> driver_id NX EX 12     # reserve, but won = ZADD-on-accept later
+  INSERT dispatch_offer(offer_id, driver_id, generation, expires_at=now()+12s)   # Postgres; UNIQUE skips re-offers
   emit RealtimeBus.toDriver(c, "ride_offer", {…, offer_id, ttl_ms: 12000})
   FCM send (data-only, ttl=12s)
-  SADD offer:list:<request_id> offer_id
 
 await driver_accept OR offer_expiry OR client_cancel
 
 on accept(offer_id, driver_id):
-  EVAL Lua: dispatch_claim
-    if first to set claim:<offer_id> = driver_id then OK
-    else return ALREADY_TAKEN
+  BEGIN tx: validate stored offer (owner, expiry, generation, trip state, eligibility)
+    + insert driver_active_assignment (one active trip per driver) + bind trip
+    else return lost/expired/rejected
   if OK:
     create Ride, transition request → matched
-    EVAL Lua: dispatch_revoke for all other offer_ids
+    mark other offers revoked (same tx); emit ride_offer_outcome
     emit "ride_offer_revoked" + FCM
 
 on all offers expired and no accept:
@@ -56,27 +55,27 @@ on all offers expired and no accept:
   else transition request → failed
 ```
 
-## Why the Redis `SET … NX EX` lock
+## Why Postgres decides (Stage C)
 
-Two drivers may tap "accept" at the same millisecond. We need a single point of atomic decision. Redis is millisecond-fast; Postgres `SELECT FOR UPDATE` would also work but is heavier and brings the DB into the hot path.
+Two drivers may tap "accept" at the same millisecond. The decision is a Postgres transaction (row lock on the trip + unique `driver_active_assignment`), so it survives Redis loss and is the same for solo and shared. The earlier Redis `SET NX` / Lua claim scheme was removed. Dispatch itself is started from outbox intents, never from in-memory events ([[module-dispatch]]).
 
 ## Shared-ride variant (E5.S4)
 
 For pools closed by `closed_full` or `closed_timeout`, the same top-K machinery is reused but the offer payload is enriched and the claim is per-pool not per-offer:
 
-- Candidates: `GEORADIUS active_drivers <pool.origin> R k+excluded ASC` then filter against `pool:<ride_id>:offered`.
-- Payload: `ride_offer { offerId, sharedRideId, ttlMs, stops[], passengerCount, waveNumber }`. `stops[]` is computed once from `pool.members` (pickups sorted by proximity to `origin_centroid`, drops by proximity to `dest_centroid`) and cached at `pool:<ride_id>:stops` for stability across waves.
+- Candidates: `GEORADIUS active_drivers <pool.origin> R k+excluded ASC` then exclude drivers who already have a `dispatch_offer` row for this pool.
+- Payload: `ride_offer { offerId, sharedRideId, ttlMs, stops[], passengerCount, waveNumber }`. `stops[]` is computed once from `pool.members` (pickups sorted by proximity to `origin_centroid`, drops by proximity to `dest_centroid`) and read from the persisted itinerary for stability across waves.
 - Wave-1 K=5 R=2 km; wave-2 K=10 R=4 km at 30 s; hard-fail 60 s.
-- Claim: `pool_claim.lua` atomically stamps `claimed_by` + `claimed_at` on `pool:<ride_id>` HASH. Result codes `1` / `0` / `-1` / `-2` (see [[redis-usage]]). On success: `setClaimed` in Postgres, revoke `offer:list:<ride_id>`, remove `dispatch:wave2-timeout:<ride_id>` + `dispatch:hard-fail:<ride_id>` BullMQ jobs.
+- Claim: the transactional accept binds the pool (`claimed_by_driver_id`) and the driver guard in Postgres (see [[redis-usage]] for what was removed). On success: revoke the other offers, remove `dispatch:wave2-timeout:<ride_id>` + `dispatch:hard-fail:<ride_id>` BullMQ jobs.
 - Hard-fail: `DispatchService.handleHardFail` closes the pool to `aborted` and revokes outstanding offers. Re-queueing aborted pool members as solo rides remains a future enhancement (the solo path itself is E4.S3–S4).
 
 ## Solo variant (E4.S3–S4)
 
 The normal (non-pooled) ride is the direct realisation of the algorithm above:
 
-- Candidates: `GEORADIUS active_drivers <pickup> R k+excluded ASC` filtered against `ride:<ride_id>:offered`. Wave-1 K=5 R=2 km; wave-2 K=10 R=4 km at 30 s; hard-fail 60 s.
-- Payload: `ride_offer { offerId, rideId, ttlMs, pickup, dropoff, fareCents, waveNumber }`, tagged `offer:type:<offerId>='solo'`.
-- Claim: `claim:ride:<ride_id>` `SET NX` is the atomic single-winner decision — one command, so no Lua is needed (unlike the pool's multi-field HASH check). The winner is then bound to the `rides` row (`status='accepted'`, `driver_id`, `accepted_at`) via a `WHERE status='requested'`-guarded UPDATE; a loser (incl. the same driver re-tapping) gets `already_taken`. On success: revoke `offer:list:<ride_id>` (excluding the winner) + remove the wave-2/hard-fail jobs.
+- Candidates: `GEORADIUS active_drivers <pickup> R k+excluded ASC` excluding drivers who already have a `dispatch_offer` row. Scheduled rides use a 4-minute window (`SCHEDULED_DISPATCH_WINDOW_MS`) and are re-armed uncapped when unanswered. Wave-1 K=5 R=2 km; wave-2 K=10 R=4 km at 30 s; hard-fail 60 s.
+- Payload: `ride_offer { offerId, rideId, ttlMs, pickup, dropoff, fareCents, waveNumber }`.
+- Claim: the single winner is decided by the accept transaction. The winner is bound to the `rides` row (`status='accepted'`, `driver_id`, `accepted_at`) via a `WHERE status='requested'`-guarded UPDATE; a loser gets `ride_offer_outcome` `lost`. On success: revoke the other offers + remove the wave-2/hard-fail jobs.
 - Hard-fail: `handleHardFail` (`kind='solo'`) marks the ride `no_driver`, revokes outstanding offers, and emits `ride_no_driver` to the passenger.
 - The wave-2/hard-fail BullMQ jobs carry `kind: 'solo' | 'pool'` so the shared handlers route to the right path.
 

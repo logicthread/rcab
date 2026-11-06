@@ -26,7 +26,7 @@ audience: both
 | origin_centroid | geography(Point,4326) | for fast matching against new requests |
 | dest_centroid | geography(Point,4326) | |
 | members | jsonb | array of `{passenger_id, origin_lat, origin_lng, dest_lat, dest_lng, joined_at}`; seeded with the opener on `openPool`, appended on each successful `slotRequest`; consumed by `DispatchService` (E5.S4) to build the multi-stop `ride_offer` payload. |
-| claimed_by_driver_id | uuid | set by `DispatchService.claimPool` (E5.S4) via `pool_claim.lua`; NULL until a driver wins the dispatch offer, stays NULL for `aborted` pools. |
+| claimed_by_driver_id | uuid | set by the transactional offer accept (Stage C; formerly `claimPool` + `pool_claim.lua`); NULL until a driver wins the dispatch offer, stays NULL for `aborted` pools. |
 | claimed_at | timestamptz | written alongside `claimed_by_driver_id`. |
 
 ## Lifecycle

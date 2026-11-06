@@ -212,6 +212,11 @@ CREATE INDEX ON notification (user_id, created_at DESC);
 - **Auth refresh tokens (0012):** `auth_refresh_token` stores `token_hash` (SHA-256 digest, CHECK on format), `family_id`, `auth_method`; no plaintext column. See [[module-auth]].
 - **Ride idempotency (0013):** `rides.idempotency_operation` + `rides.request_fingerprint`; UNIQUE on (passenger, operation, key) replaces the former global UNIQUE on `idempotency_key`. New `idempotency_record` table backs shared-create claims (pending/completed). See [[module-rides]].
 
+- **Offers + driver assignment (0014):** `dispatch_offer` (one row per offered driver, generation, DB-clock `expires_at`, outcome), `driver_active_assignment` (one active trip per driver across solo and shared), `migration_conflict` (pre-existing double assignments found by the backfill; operators resolve, never auto-cancel). See [[module-dispatch]].
+- **Outbox (0015):** `outbox_event` — dispatch/wake/pool intents written in the booking/pool transaction and published by `OutboxRelay`. See [[module-rides]].
+- **Pool membership (0016):** `pool_member` (capacity + duplicate-member constraints) replaces the deprecated `shared_rides.members` jsonb; `shared_rides.state_version` versions realtime events. See [[module-matching]].
+- **Agreed fare (0017):** `pool_member.agreed_fare_cents` required and immutable (triggers); fixed at join (`SHARED_FARE_POLICY='fixed_at_join'`).
+
 ## Indexing rationale
 
 We index for the hot queries:

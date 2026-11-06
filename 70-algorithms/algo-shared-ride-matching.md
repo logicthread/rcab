@@ -37,7 +37,7 @@ for each c in candidates:
     keep best
 
 if best exists:
-  slot_request_into_pool(R, best)   # Lua: pool_slot
+  slot_request_into_pool(R, best)   # Postgres tx: pool_member insert
   return { mode: 'slotted', sharedRideId: best.ride_id }
 else:
   open_new_pool(R)

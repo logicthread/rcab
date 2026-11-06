@@ -44,6 +44,10 @@ Modules should not import the WebSocket gateway. The bus is the seam — when we
 | `driver:<driver_id>` | driver's sockets |
 | `ride:<ride_id>` | both parties (and any pooled passengers) for the live ride |
 
+## Subscriptions and snapshots (Stage D, R09)
+
+Rooms are no longer joined implicitly. `pool:subscribe` / `ride:subscribe` authorize against Postgres, join the room and reply with a Postgres snapshot (`pool:snapshot`, `ride:snapshot`); drivers receive `driver:assignment` / `driver:sync` on (re)connect. Incremental events are versioned (pool version = `shared_rides.state_version`, ride version = status rank) so a client applies a snapshot, then only newer events. Offer results arrive as `ride_offer_outcome`. See [[websocket-events]].
+
 ## See also
 - [[websocket-events]] · [[redis-usage]]
 - [[ADR-0008-socketio-realtime]]
