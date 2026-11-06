@@ -195,27 +195,34 @@ function BookPage() {
     [intentKeys, invalidateQuote],
   );
 
+  // Shared pool: subscribe explicitly after create and on every reconnect (the
+  // wrapper re-sends it). The server authorizes membership, then sends a
+  // Postgres snapshot; only newer versioned updates are applied after it, so a
+  // first booking or a dropped connection never misses a pool change (F10).
   useEffect(() => {
     if (!authed || !sharedRideId) return;
     const conn = connectBookingSocket(getToken);
     const unsub = conn.onPoolUpdate((payload) => {
       applyPoolUpdate(payload.sharedRideId, payload.seatCount, payload.poolStatus);
     });
+    conn.subscribePool(sharedRideId);
     return () => {
       unsub();
       conn.close();
     };
   }, [authed, getToken, sharedRideId, applyPoolUpdate]);
 
-  // Solo live-tracking: follow the ride room for status + driver position.
+  // Solo live-tracking: follow the ride room for status + driver position. The
+  // subscribe (re-sent on every reconnect) returns an authoritative snapshot;
+  // older / duplicate status events are dropped by the wrapper's version gate.
   useEffect(() => {
     if (!authed || !rideId) return;
     const conn = connectBookingSocket(getToken);
-    conn.subscribeRide(rideId);
     const unsubState = conn.onRideStateChanged((p) => applyRideState(p.state));
     const unsubLoc = conn.onDriverLocation((p) =>
       applyDriverLocation(p.rideId, p.lat, p.lng, p.heading),
     );
+    conn.subscribeRide(rideId);
     return () => {
       unsubState();
       unsubLoc();

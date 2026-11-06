@@ -244,11 +244,12 @@ describe('PoolLifecycleService.openPool', () => {
     expect(repo.findById).toHaveBeenCalledWith('pool-new');
     expect(projection.write).toHaveBeenCalledWith(committed);
     expect(bus.joinPool).toHaveBeenCalledWith('p-opener', 'pool-new');
-    expect(bus.toPool).toHaveBeenCalledWith('pool-new', POOL_UPDATE_EVENT, {
+    expect(bus.toPool).toHaveBeenCalledWith('pool-new', POOL_UPDATE_EVENT, expect.objectContaining({
       sharedRideId: 'pool-new',
       seatCount: 1,
       poolStatus: 'open',
-    });
+      version: expect.any(Number),
+    }));
   });
 
   it('post-commit failures never fail a committed open (row described from the txn)', async () => {
@@ -472,11 +473,12 @@ describe('PoolLifecycleService.joinPool', () => {
       generation: 1,
       payload: { poolId: 'pool-1', reason: 'closed_full' },
     });
-    expect(bus.toPool).toHaveBeenCalledWith('pool-1', POOL_UPDATE_EVENT, {
+    expect(bus.toPool).toHaveBeenCalledWith('pool-1', POOL_UPDATE_EVENT, expect.objectContaining({
       sharedRideId: 'pool-1',
       seatCount: 2,
       poolStatus: 'closed_full',
-    });
+      version: expect.any(Number),
+    }));
     expect(relay.kick).toHaveBeenCalled();
   });
 
@@ -488,11 +490,12 @@ describe('PoolLifecycleService.joinPool', () => {
     await svc.joinPool({ poolId: 'pool-1', joiner: JOINER, quoteFare });
 
     expect(bus.joinPool).toHaveBeenCalledWith('p-joiner', 'pool-1');
-    expect(bus.toPool).toHaveBeenCalledWith('pool-1', POOL_UPDATE_EVENT, {
+    expect(bus.toPool).toHaveBeenCalledWith('pool-1', POOL_UPDATE_EVENT, expect.objectContaining({
       sharedRideId: 'pool-1',
       seatCount: 2,
       poolStatus: 'open',
-    });
+      version: expect.any(Number),
+    }));
     expect(relay.kick).not.toHaveBeenCalled();
   });
 
@@ -543,11 +546,12 @@ describe('PoolLifecycleService.closeIfOpen', () => {
         payload: { poolId: 'pool-1', reason: 'closed_timeout' },
       }),
     );
-    expect(bus.toPool).toHaveBeenCalledWith('pool-1', POOL_UPDATE_EVENT, {
+    expect(bus.toPool).toHaveBeenCalledWith('pool-1', POOL_UPDATE_EVENT, expect.objectContaining({
       sharedRideId: 'pool-1',
       seatCount: 1,
       poolStatus: 'closed_timeout',
-    });
+      version: expect.any(Number),
+    }));
     expect(relay.kick).toHaveBeenCalled();
     expect(bus.joinPool).not.toHaveBeenCalled();
   });

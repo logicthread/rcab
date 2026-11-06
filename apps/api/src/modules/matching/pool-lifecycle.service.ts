@@ -4,6 +4,11 @@ import { randomUUID } from 'node:crypto';
 import { getNumber } from '../../common/utils/env';
 import { DRIZZLE_DB, type DrizzleDb, type DrizzleTx } from '../../infra/db/drizzle.module';
 import { RealtimeBus } from '../realtime/realtime.bus';
+import {
+  POOL_UPDATE,
+  poolUpdatePayload,
+  type PoolUpdatePayload,
+} from '../realtime/realtime.protocol';
 import { enqueueOutbox } from '../outbox/outbox.writer';
 import { OutboxRelay } from '../outbox/outbox.relay';
 import { OutboxTopic } from '../outbox/outbox.types';
@@ -24,13 +29,10 @@ import {
 
 export const MATCHING_QUEUE = 'matching';
 export const POOL_EXPIRE_JOB = 'pool:expire';
-export const POOL_UPDATE_EVENT = 'pool:update';
+export const POOL_UPDATE_EVENT = POOL_UPDATE;
 
-export interface PoolUpdatePayload {
-  sharedRideId: string;
-  seatCount: number;
-  poolStatus: 'open' | 'closed_full' | 'closed_timeout';
-}
+/** The versioned, member-visible pool event (R09) — see realtime.protocol.ts. */
+export type { PoolUpdatePayload };
 
 export type PoolCloseReason = 'closed_full' | 'closed_timeout' | 'closed_started' | 'aborted';
 
@@ -490,11 +492,9 @@ export class PoolLifecycleService {
     const status = row.poolState;
     if (status !== 'open' && status !== 'closed_full' && status !== 'closed_timeout') return;
     try {
-      this.bus.toPool(row.rideId, POOL_UPDATE_EVENT, {
-        sharedRideId: row.rideId,
-        seatCount: row.seatCount,
-        poolStatus: status,
-      } satisfies PoolUpdatePayload);
+      // Built from the committed row; `version` (= state_version) lets members
+      // drop duplicates / reordered deliveries and reconcile with snapshots.
+      this.bus.toPool(row.rideId, POOL_UPDATE_EVENT, poolUpdatePayload(row));
     } catch (err) {
       this.log.warn({ err, poolId: row.rideId }, 'emitPoolUpdate failed');
     }

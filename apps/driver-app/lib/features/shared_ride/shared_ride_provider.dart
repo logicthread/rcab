@@ -1,5 +1,9 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/realtime/driver_assignment.dart';
+import '../../core/realtime/offer_outcome.dart';
+import '../offer/offer_models.dart';
+import '../offer/offer_provider.dart';
 import 'shared_ride_models.dart';
 
 /// Thin transport interface so the provider can run without a real
@@ -9,13 +13,26 @@ abstract class StopConfirmSender {
   void sendDropConfirmed({required String rideId, required int sequenceIndex});
 }
 
+/// Shared-trip state machine on the driver (R09 / F10):
+///
+/// `none → offered → accepting → assigned` on a committed server outcome,
+/// or `offered|accepting → lost | expired | revoked | rejected`.
+/// Receiving an offer never enables pickup / dropoff commands; only
+/// [SharedRidePhase.assigned] does, and it is entered only from the server's
+/// assigned outcome or its `driver:assignment` snapshot.
 class SharedRideNotifier extends StateNotifier<SharedRideState> {
-  SharedRideNotifier(this._sender) : super(SharedRideState.empty);
+  SharedRideNotifier(this._sender, {OfferResponseSender? offerSender})
+      : _offerSender = offerSender,
+        super(SharedRideState.empty);
 
   final StopConfirmSender _sender;
+  final OfferResponseSender? _offerSender;
 
-  /// Apply an incoming `ride_offer` event payload for a shared ride.
+  /// Apply an incoming shared `ride_offer`: show the proposed itinerary and
+  /// start ringing. Ignored while a committed trip is in progress (the server
+  /// does not offer a busy driver; a stray event must not replace the trip).
   void applyOffer(SharedRideOffer offer) {
+    if (state.isAssigned && !state.completed) return;
     final sorted = [...offer.stops]
       ..sort((a, b) => a.sequenceIndex.compareTo(b.sequenceIndex));
     state = SharedRideState(
@@ -25,15 +42,121 @@ class SharedRideNotifier extends StateNotifier<SharedRideState> {
           .toList(),
       currentStopIndex: 0,
       completed: false,
+      phase: SharedRidePhase.offered,
+      offerId: offer.offerId,
+      passengerCount: offer.passengerCount,
+      secondsLeft: (offer.ttlMs / 1000).ceil(),
     );
   }
 
-  /// Hydrate state from `GET /v1/rides/:id/stops` on WS reconnect.
-  void hydrateFromServer({
-    required String sharedRideId,
-    required List<Map<String, dynamic>> stops,
-  }) {
-    final restored = stops.map((j) {
+  /// One countdown step while ringing; the advisory deadline flips to
+  /// `expired` (the server's DB clock stays authoritative for an accept).
+  void tick() {
+    if (state.phase != SharedRidePhase.offered) return;
+    final next = state.secondsLeft - 1;
+    state = next <= 0
+        ? state.copyWith(phase: SharedRidePhase.expired, secondsLeft: 0)
+        : state.copyWith(secondsLeft: next);
+  }
+
+  /// Driver tapped Accept. Sends the response and waits for the verdict.
+  bool accept() {
+    final offerId = state.offerId;
+    if (state.phase != SharedRidePhase.offered || offerId == null) return false;
+    final sender = _offerSender;
+    if (sender == null) return false;
+    sender.sendOfferResponse(offerId: offerId, accept: true);
+    state = state.copyWith(phase: SharedRidePhase.accepting);
+    return true;
+  }
+
+  /// Driver tapped Decline: release the offer server-side and dismiss.
+  void decline() {
+    final offerId = state.offerId;
+    if (state.isOffer && offerId != null) {
+      _offerSender?.sendOfferResponse(offerId: offerId, accept: false);
+    }
+    if (state.isOffer || state.isTerminalOutcome) state = SharedRideState.empty;
+  }
+
+  /// Apply an explicit outcome for this driver's offer (ack or event). Returns
+  /// true when the phase changed. Duplicates (ack + event) are no-ops, and a
+  /// loss can never undo a committed assignment.
+  bool applyOutcome(OfferOutcome outcome) {
+    final ownOffer = state.offerId != null && outcome.offerId == state.offerId;
+    if (outcome.kind == OfferOutcomeKind.assigned) {
+      if (!outcome.isShared && outcome.tripKind != null) return false;
+      final matches = ownOffer ||
+          (outcome.tripId != null && outcome.tripId == state.sharedRideId && state.isOffer);
+      if (!matches) {
+        // Lost-ack recovery: the event may arrive after state was reset; the
+        // assignment payload (when present) is still authoritative.
+        final a = DriverAssignment.fromJson(outcome.assignment);
+        if (a != null && a.isShared && a.offerId == outcome.offerId) {
+          return applyAssignment(a) == AssignmentChange.restored;
+        }
+        return false;
+      }
+      final a = DriverAssignment.fromJson(outcome.assignment);
+      if (a != null && a.isShared && a.tripId == state.sharedRideId) {
+        _hydrate(a);
+        return true;
+      }
+      if (state.isAssigned) return false;
+      state = state.copyWith(
+        phase: SharedRidePhase.assigned,
+        generation: outcome.generation,
+        secondsLeft: 0,
+      );
+      return true;
+    }
+    if (!ownOffer) return false;
+    switch (outcome.kind) {
+      case OfferOutcomeKind.retry:
+        if (state.phase != SharedRidePhase.accepting) return false;
+        state = state.copyWith(phase: SharedRidePhase.offered);
+        return true;
+      case OfferOutcomeKind.declined:
+        return false;
+      default:
+        if (!state.isOffer) return false;
+        state = state.copyWith(
+          phase: _lossPhase(outcome.kind),
+          outcomeReason: outcome.reason,
+          secondsLeft: 0,
+        );
+        return true;
+    }
+  }
+
+  /// The accept ack never arrived. The accept is replay-safe server-side, so
+  /// fall back to ringing (or expired once the countdown ran out); a snapshot
+  /// that shows the committed assignment moves us to `assigned` instead.
+  void ackTimedOut() {
+    if (state.phase != SharedRidePhase.accepting) return;
+    state = state.copyWith(
+      phase: state.secondsLeft > 0 ? SharedRidePhase.offered : SharedRidePhase.expired,
+    );
+  }
+
+  /// Apply the authoritative `driver:assignment` snapshot.
+  AssignmentChange applyAssignment(DriverAssignment? a) {
+    if (a == null) {
+      // Released while we were away (completed / aborted / cancelled).
+      if (state.isAssigned && !state.completed) {
+        state = SharedRideState.empty;
+        return AssignmentChange.released;
+      }
+      return AssignmentChange.none;
+    }
+    if (!a.isShared) return AssignmentChange.none;
+    final wasSame = state.isAssigned && state.sharedRideId == a.tripId;
+    _hydrate(a);
+    return wasSame ? AssignmentChange.refreshed : AssignmentChange.restored;
+  }
+
+  void _hydrate(DriverAssignment a) {
+    final restored = a.stops.map((j) {
       final stop = SharedRideStop.fromOfferJson(j);
       final confirmed = (j['confirmed'] as bool?) ?? false;
       final at = j['confirmedAt'] as String?;
@@ -43,23 +166,39 @@ class SharedRideNotifier extends StateNotifier<SharedRideState> {
         confirmedAt: at != null ? DateTime.tryParse(at) : null,
       );
     }).toList()
-      ..sort((a, b) => a.stop.sequenceIndex.compareTo(b.stop.sequenceIndex));
-
-    final firstPendingIndex = restored.indexWhere(
-      (s) => s.status == StopStatus.pending,
-    );
-    final allDone = firstPendingIndex == -1;
+      ..sort((x, y) => x.stop.sequenceIndex.compareTo(y.stop.sequenceIndex));
+    final firstPending = restored.indexWhere((s) => s.status == StopStatus.pending);
+    final passengers = <String>{for (final s in restored) s.stop.passengerId};
     state = SharedRideState(
-      sharedRideId: sharedRideId,
+      sharedRideId: a.tripId,
       stops: restored,
-      currentStopIndex: allDone ? restored.length : firstPendingIndex,
-      completed: allDone,
+      currentStopIndex: firstPending == -1 ? restored.length : firstPending,
+      completed: restored.isNotEmpty && firstPending == -1,
+      phase: SharedRidePhase.assigned,
+      offerId: a.offerId,
+      passengerCount: passengers.length,
+      generation: a.generation,
     );
   }
 
-  /// Send the WS confirmation for the current pending stop.
+  /// Hydrate state from a REST stops payload (legacy restore path).
+  void hydrateFromServer({
+    required String sharedRideId,
+    required List<Map<String, dynamic>> stops,
+  }) {
+    _hydrate(DriverAssignment(
+      tripKind: 'shared',
+      tripId: sharedRideId,
+      generation: 0,
+      version: 0,
+      stops: stops,
+    ));
+  }
+
+  /// Send the WS confirmation for the current pending stop. Only a committed
+  /// assignment may issue stop commands.
   bool confirmCurrentStop() {
-    if (state.completed) return false;
+    if (!state.isAssigned || state.completed) return false;
     final current = state.currentStop;
     final rideId = state.sharedRideId;
     if (current == null || rideId == null) return false;
@@ -76,14 +215,15 @@ class SharedRideNotifier extends StateNotifier<SharedRideState> {
 
   /// Apply the server-echo for either `stop:pickup_confirmed` or
   /// `stop:drop_confirmed`. Advances the cursor and flips `completed` when the
-  /// server signals it.
+  /// server signals it. A server echo proves the server holds this driver's
+  /// assignment, so it only applies to an assigned trip.
   void applyServerEcho({
     required String rideId,
     required int sequenceIndex,
     required DateTime confirmedAt,
     required bool rideCompleted,
   }) {
-    if (state.sharedRideId != rideId) return;
+    if (state.sharedRideId != rideId || !state.isAssigned) return;
     final stops = state.stops;
     final idx = stops.indexWhere((s) => s.stop.sequenceIndex == sequenceIndex);
     if (idx < 0) return;
@@ -112,7 +252,23 @@ class SharedRideNotifier extends StateNotifier<SharedRideState> {
   void reset() {
     state = SharedRideState.empty;
   }
+
+  static SharedRidePhase _lossPhase(OfferOutcomeKind kind) {
+    switch (kind) {
+      case OfferOutcomeKind.lost:
+        return SharedRidePhase.lost;
+      case OfferOutcomeKind.expired:
+        return SharedRidePhase.expired;
+      case OfferOutcomeKind.revoked:
+        return SharedRidePhase.revoked;
+      default:
+        return SharedRidePhase.rejected;
+    }
+  }
 }
+
+/// What a `driver:assignment` snapshot did to the shared-ride state.
+enum AssignmentChange { none, restored, refreshed, released }
 
 final sharedRideSenderProvider = Provider<StopConfirmSender>((ref) {
   throw UnimplementedError(
@@ -122,5 +278,8 @@ final sharedRideSenderProvider = Provider<StopConfirmSender>((ref) {
 
 final sharedRideProvider =
     StateNotifierProvider<SharedRideNotifier, SharedRideState>((ref) {
-  return SharedRideNotifier(ref.watch(sharedRideSenderProvider));
+  return SharedRideNotifier(
+    ref.watch(sharedRideSenderProvider),
+    offerSender: ref.watch(offerResponseSenderProvider),
+  );
 });

@@ -3,6 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 
+import 'package:driver_app/core/realtime/offer_outcome.dart';
+import 'package:driver_app/features/offer/offer_models.dart';
+import 'package:driver_app/features/offer/offer_provider.dart';
 import 'package:driver_app/features/shared_ride/shared_ride_models.dart';
 import 'package:driver_app/features/shared_ride/shared_ride_provider.dart';
 import 'package:driver_app/features/shared_ride/shared_ride_screen.dart';
@@ -21,9 +24,25 @@ class _RecordingSender implements StopConfirmSender {
   }
 }
 
+class _RecordingOfferSender implements OfferResponseSender {
+  final List<({String offerId, bool accept})> calls = [];
+  @override
+  void sendOfferResponse({required String offerId, required bool accept}) {
+    calls.add((offerId: offerId, accept: accept));
+  }
+}
+
+const _assigned = OfferOutcome(
+  offerId: 'o-1',
+  kind: OfferOutcomeKind.assigned,
+  tripKind: 'shared',
+  tripId: 'ride-1',
+);
+
 SharedRideOffer _twoPaxOffer() {
   return const SharedRideOffer(
     sharedRideId: 'ride-1',
+    offerId: 'o-1',
     passengerCount: 2,
     stops: [
       SharedRideStop(sequenceIndex: 0, passengerId: 'pa', type: StopType.pickup,  lat: 1, lng: 2),
@@ -45,7 +64,9 @@ Widget _wrap({
     ],
   );
   if (seedOffer != null) {
-    container.read(sharedRideProvider.notifier).applyOffer(seedOffer);
+    container.read(sharedRideProvider.notifier)
+      ..applyOffer(seedOffer)
+      ..applyOutcome(_assigned);
   }
   return UncontrolledProviderScope(
     container: container,
@@ -72,6 +93,60 @@ GoRouter _router(String ride) {
 }
 
 void main() {
+  testWidgets('an incoming offer shows Accept / Decline, never the stop controls', (tester) async {
+    final sender = _RecordingSender();
+    final offers = _RecordingOfferSender();
+    final container = ProviderContainer(overrides: [
+      sharedRideSenderProvider.overrideWithValue(sender),
+      offerResponseSenderProvider.overrideWithValue(offers),
+    ]);
+    addTearDown(container.dispose);
+    container.read(sharedRideProvider.notifier).applyOffer(_twoPaxOffer());
+
+    await tester.pumpWidget(UncontrolledProviderScope(
+      container: container,
+      child: MaterialApp.router(routerConfig: _router('ride-1')),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('shared_offer_screen')), findsOneWidget);
+    expect(find.byKey(const Key('shared_offer_itinerary')), findsOneWidget);
+    expect(find.byKey(const Key('shared_ride_confirm_button')), findsNothing);
+
+    await tester.tap(find.byKey(const Key('shared_offer_accept_button')));
+    await tester.pump();
+    expect(offers.calls.single, (offerId: 'o-1', accept: true));
+    expect(find.byKey(const Key('shared_offer_claiming')), findsOneWidget);
+    expect(find.byKey(const Key('shared_ride_confirm_button')), findsNothing);
+
+    // Only the committed outcome brings up the stop screen.
+    container.read(sharedRideProvider.notifier).applyOutcome(_assigned);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('shared_ride_confirm_button')), findsOneWidget);
+    expect(sender.calls, isEmpty);
+  });
+
+  testWidgets('a lost offer shows its outcome, not the stops', (tester) async {
+    final container = ProviderContainer(overrides: [
+      sharedRideSenderProvider.overrideWithValue(_RecordingSender()),
+      offerResponseSenderProvider.overrideWithValue(_RecordingOfferSender()),
+    ]);
+    addTearDown(container.dispose);
+    container.read(sharedRideProvider.notifier)
+      ..applyOffer(_twoPaxOffer())
+      ..accept()
+      ..applyOutcome(const OfferOutcome(offerId: 'o-1', kind: OfferOutcomeKind.lost));
+
+    await tester.pumpWidget(UncontrolledProviderScope(
+      container: container,
+      child: MaterialApp.router(routerConfig: _router('ride-1')),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('shared_offer_outcome')), findsOneWidget);
+    expect(find.text('Another driver took this ride'), findsOneWidget);
+    expect(find.byKey(const Key('shared_ride_confirm_button')), findsNothing);
+  });
+
   testWidgets('renders empty state when no shared ride is active', (tester) async {
     final sender = _RecordingSender();
     await tester.pumpWidget(_wrap(sender: sender, router: _router('ride-1')));
@@ -113,7 +188,9 @@ void main() {
     final container = ProviderContainer(
       overrides: [sharedRideSenderProvider.overrideWithValue(sender)],
     );
-    container.read(sharedRideProvider.notifier).applyOffer(_twoPaxOffer());
+    container.read(sharedRideProvider.notifier)
+      ..applyOffer(_twoPaxOffer())
+      ..applyOutcome(_assigned);
 
     await tester.pumpWidget(UncontrolledProviderScope(
       container: container,
@@ -141,7 +218,9 @@ void main() {
     final container = ProviderContainer(
       overrides: [sharedRideSenderProvider.overrideWithValue(sender)],
     );
-    container.read(sharedRideProvider.notifier).applyOffer(_twoPaxOffer());
+    container.read(sharedRideProvider.notifier)
+      ..applyOffer(_twoPaxOffer())
+      ..applyOutcome(_assigned);
 
     await tester.pumpWidget(UncontrolledProviderScope(
       container: container,
