@@ -1,66 +1,14 @@
-import 'dart:async';
-
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:driver_app/core/realtime/realtime_socket.dart';
 import 'package:driver_app/di/providers.dart';
 import 'package:driver_app/features/offer/offer_controller.dart';
 import 'package:driver_app/features/offer/offer_models.dart';
 import 'package:driver_app/features/offer/offer_provider.dart';
 
-class _FakeSocket implements IRealtimeSocket {
-  final _rideOffer = StreamController<Map<String, dynamic>>.broadcast(sync: true);
-  final _rideOfferAccepted = StreamController<Map<String, dynamic>>.broadcast(sync: true);
-  final _rideOfferRevoked = StreamController<Map<String, dynamic>>.broadcast(sync: true);
-  final _stopPickup = StreamController<Map<String, dynamic>>.broadcast(sync: true);
-  final _stopDrop = StreamController<Map<String, dynamic>>.broadcast(sync: true);
-  final _rideCompleted = StreamController<Map<String, dynamic>>.broadcast(sync: true);
-  final _driverState = StreamController<Map<String, dynamic>>.broadcast(sync: true);
-  final List<({String event, Map<String, dynamic> data})> sent = [];
+import '../../support/fake_realtime_socket.dart';
 
-  @override
-  Stream<Map<String, dynamic>> get rideOffer => _rideOffer.stream;
-  @override
-  Stream<Map<String, dynamic>> get rideOfferAccepted => _rideOfferAccepted.stream;
-  @override
-  Stream<Map<String, dynamic>> get rideOfferRevoked => _rideOfferRevoked.stream;
-  @override
-  Stream<Map<String, dynamic>> get stopPickupConfirmed => _stopPickup.stream;
-  @override
-  Stream<Map<String, dynamic>> get stopDropConfirmed => _stopDrop.stream;
-  @override
-  Stream<Map<String, dynamic>> get rideCompleted => _rideCompleted.stream;
-  @override
-  Stream<Map<String, dynamic>> get driverState => _driverState.stream;
-
-  @override
-  Future<void> connect() async {}
-  @override
-  void disconnect() {}
-
-  @override
-  void sendOfferResponse({required String offerId, required bool accept}) {
-    sent.add((event: 'ride_offer_response', data: {'offerId': offerId, 'accept': accept}));
-  }
-
-  @override
-  void sendPickupConfirmed({required String rideId, required int sequenceIndex}) {}
-  @override
-  void sendDropConfirmed({required String rideId, required int sequenceIndex}) {}
-
-  @override
-  Future<void> dispose() async {
-    await Future.wait([
-      _rideOffer.close(), _rideOfferAccepted.close(), _rideOfferRevoked.close(),
-      _stopPickup.close(), _stopDrop.close(), _rideCompleted.close(), _driverState.close(),
-    ]);
-  }
-
-  void emitRideOffer(Map<String, dynamic> p) => _rideOffer.add(p);
-  void emitAccepted(Map<String, dynamic> p) => _rideOfferAccepted.add(p);
-  void emitRevoked(Map<String, dynamic> p) => _rideOfferRevoked.add(p);
-}
+typedef _FakeSocket = FakeRealtimeSocket;
 
 Map<String, dynamic> _soloOfferJson({
   String offerId = 'o-1',
@@ -230,6 +178,93 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 60));
       expect(h.container.read(offerProvider).phase, OfferPhase.expired);
       expect(h.navStack, contains('/home'));
+      h.ctrl.stop();
+    });
+  });
+
+  group('OfferController explicit outcomes + assignment snapshot (R09)', () {
+    test('assigned outcome (ack) for the live solo offer → /ride/:id; the event dup is a no-op', () async {
+      final h = _make();
+      await h.ctrl.start();
+      h.socket.emitRideOffer(_soloOfferJson(offerId: 'o-1', rideId: 'r-1'));
+      h.container.read(offerProvider.notifier).accept();
+      h.socket.emitOutcome({
+        'offerId': 'o-1', 'outcome': 'assigned', 'tripKind': 'solo', 'tripId': 'r-1', 'source': 'ack',
+      });
+      h.socket.emitOutcome({'offerId': 'o-1', 'outcome': 'assigned', 'tripKind': 'solo', 'tripId': 'r-1'});
+      h.socket.emitAccepted({'offerId': 'o-1', 'rideId': 'r-1'});
+      expect(h.navStack, ['/offer/o-1', '/ride/r-1']);
+      h.ctrl.stop();
+    });
+
+    test('a refused accept (driver_busy) ends the offer immediately', () async {
+      final h = _make();
+      await h.ctrl.start();
+      h.socket.emitRideOffer(_soloOfferJson(offerId: 'o-1'));
+      h.container.read(offerProvider.notifier).accept();
+      h.socket.emitOutcome({'offerId': 'o-1', 'outcome': 'rejected', 'reason': 'driver_busy'});
+      expect(h.container.read(offerProvider).phase, OfferPhase.revoked);
+      expect(h.container.read(offerProvider).revokeReason, 'driver_busy');
+      expect(h.navStack, ['/offer/o-1', '/home']);
+      h.ctrl.stop();
+    });
+
+    test('a late loss never undoes a won offer', () async {
+      final h = _make();
+      await h.ctrl.start();
+      h.socket.emitRideOffer(_soloOfferJson(offerId: 'o-1', rideId: 'r-1'));
+      h.socket.emitAccepted({'offerId': 'o-1', 'rideId': 'r-1'});
+      h.socket.emitOutcome({'offerId': 'o-1', 'outcome': 'lost'});
+      expect(h.container.read(offerProvider).phase, OfferPhase.accepted);
+      expect(h.navStack, ['/offer/o-1', '/ride/r-1']);
+      h.ctrl.stop();
+    });
+
+    test('retry returns a claiming offer to ringing', () async {
+      final h = _make();
+      await h.ctrl.start();
+      h.socket.emitRideOffer(_soloOfferJson(offerId: 'o-1'));
+      h.container.read(offerProvider.notifier).accept();
+      h.socket.emitOutcome({'offerId': 'o-1', 'outcome': 'retry', 'reason': 'conflict'});
+      expect(h.container.read(offerProvider).phase, OfferPhase.ringing);
+      h.ctrl.stop();
+    });
+
+    test('shared outcomes are left to the shared-ride controller', () async {
+      final h = _make();
+      await h.ctrl.start();
+      h.socket.emitOutcome({'offerId': 'o-9', 'outcome': 'assigned', 'tripKind': 'shared', 'tripId': 'p-1'});
+      expect(h.navStack, isEmpty);
+      h.ctrl.stop();
+    });
+
+    test('cold start: a solo assignment snapshot restores /ride/:id once per trip', () async {
+      final h = _make();
+      await h.ctrl.start();
+      final snap = {
+        'driverId': 'd',
+        'assignment': {'tripKind': 'solo', 'tripId': 'r-7', 'offerId': 'o-7', 'generation': 1},
+      };
+      h.socket.emitAssignment(snap);
+      h.socket.emitAssignment(snap); // reconnect: same trip, no re-navigation
+      expect(h.navStack, ['/ride/r-7']);
+      h.socket.emitAssignment({'driverId': 'd', 'assignment': null});
+      h.socket.emitAssignment(snap);
+      expect(h.navStack, ['/ride/r-7', '/ride/r-7']);
+      h.ctrl.stop();
+    });
+
+    test('lost ack: the snapshot naming our claiming offer completes the win', () async {
+      final h = _make();
+      await h.ctrl.start();
+      h.socket.emitRideOffer(_soloOfferJson(offerId: 'o-1', rideId: 'r-1'));
+      h.container.read(offerProvider.notifier).accept();
+      h.socket.emitAssignment({
+        'driverId': 'd',
+        'assignment': {'tripKind': 'solo', 'tripId': 'r-1', 'offerId': 'o-1', 'generation': 1},
+      });
+      expect(h.container.read(offerProvider).phase, OfferPhase.accepted);
+      expect(h.navStack, ['/offer/o-1', '/ride/r-1']);
       h.ctrl.stop();
     });
   });
