@@ -45,7 +45,12 @@ interface MakeOpts {
 }
 
 function make(opts: MakeOpts = {}) {
-  const tx = { tx: true };
+  let version = opts.pool?.stateVersion ?? 0;
+  const tx = {
+    tx: true,
+    // touchPool: the state_version trigger bumps once per UPDATE.
+    execute: vi.fn().mockImplementation(async () => ({ rows: [{ state_version: String(++version) }] })),
+  };
   const db = { transaction: vi.fn(async (fn: (t: unknown) => unknown) => fn(tx)) };
   const stops = opts.stops ?? [];
   const stopsRepo = {
@@ -67,6 +72,7 @@ function make(opts: MakeOpts = {}) {
   const bus = { toDriver: vi.fn(), toRide: vi.fn() };
   const redis = { eval: vi.fn().mockResolvedValue(1) };
   const poolProjection = { project: vi.fn().mockResolvedValue(null) };
+  const snapshots = { publishPoolUpdate: vi.fn().mockResolvedValue(undefined) };
   const svc = new RideLifecycleService(
     stopsRepo as never,
     assignments as never,
@@ -74,8 +80,9 @@ function make(opts: MakeOpts = {}) {
     redis as never,
     db as never,
     poolProjection as never,
+    snapshots as never,
   );
-  return { svc, tx, db, stopsRepo, assignments, bus, redis, poolProjection };
+  return { svc, tx, db, stopsRepo, assignments, bus, redis, poolProjection, snapshots };
 }
 
 const input = (sequenceIndex: number, type: 'pickup' | 'dropoff' = 'pickup') => ({
@@ -126,7 +133,42 @@ describe('RideLifecycleService.confirmStop', () => {
       type: 'pickup',
       confirmedAt: T0.toISOString(),
       rideCompleted: false,
+      version: 1,
     });
+  });
+
+  it('bumps state_version in the transaction for a mid-trip stop and publishes a versioned pool:update', async () => {
+    const stops = [
+      stop({ sequenceIndex: 0, confirmedAt: T0 }),
+      stop({ sequenceIndex: 1, passengerId: 'p-2' }),
+      stop({ sequenceIndex: 2, type: 'dropoff' }),
+      stop({ sequenceIndex: 3, passengerId: 'p-2', type: 'dropoff' }),
+    ];
+    const { svc, tx, bus, stopsRepo, snapshots } = make({ stops, pool: lock({ stateVersion: 4 }) });
+    await svc.confirmStop(input(1));
+    // No pool-state change (not first pickup, not final), yet the version moved.
+    expect(stopsRepo.markRideStarted).not.toHaveBeenCalled();
+    expect(stopsRepo.markRideCompleted).not.toHaveBeenCalled();
+    expect(tx.execute).toHaveBeenCalledTimes(1);
+    expect(bus.toDriver).toHaveBeenCalledWith(
+      'd-1',
+      STOP_PICKUP_EVENT,
+      expect.objectContaining({ version: 5 }),
+    );
+    expect(snapshots.publishPoolUpdate).toHaveBeenCalledWith('r-1');
+  });
+
+  it('a duplicate confirmation echoes the current committed version and does not re-broadcast', async () => {
+    const stops = [stop({ sequenceIndex: 0, confirmedAt: T0 })];
+    const { svc, tx, bus, snapshots } = make({ stops, pool: lock({ stateVersion: 9 }) });
+    await svc.confirmStop(input(0));
+    expect(tx.execute).not.toHaveBeenCalled();
+    expect(bus.toDriver).toHaveBeenCalledWith(
+      'd-1',
+      STOP_PICKUP_EVENT,
+      expect.objectContaining({ version: 9 }),
+    );
+    expect(snapshots.publishPoolUpdate).not.toHaveBeenCalled();
   });
 
   it('final drop: completes the pool and releases the guard in the same transaction', async () => {

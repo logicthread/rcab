@@ -1,13 +1,15 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
+import { sql } from 'drizzle-orm';
 import { OnEvent } from '@nestjs/event-emitter';
 import type Redis from 'ioredis';
 import { REDIS } from '../../infra/redis/redis.module';
-import { DRIZZLE_DB, type DrizzleDb } from '../../infra/db/drizzle.module';
+import { DRIZZLE_DB, type DbExecutor, type DrizzleDb } from '../../infra/db/drizzle.module';
 import { RideStopRepository, type RideStopRow } from '../matching/ride-stop.repository';
 import { PoolProjectionService } from '../matching/pool-projection.service';
 import { DriverAssignmentRepository } from '../dispatch/assignment.repository';
 import { clearCurrentRide } from '../dispatch/driver-assignment.projection';
 import { RealtimeBus } from '../realtime/realtime.bus';
+import { RealtimeSnapshotService } from '../realtime/realtime-snapshot.service';
 import {
   STOP_CONFIRM_REQUEST_EVENT,
   type StopConfirmRequestEvent,
@@ -43,6 +45,12 @@ export type StopConfirmResult =
 type ConfirmOutcome = {
   result: StopConfirmResult;
   completedAt: Date | null;
+  /**
+   * `shared_rides.state_version` after this confirmation (bumped once per
+   * confirmed stop, in the same transaction); the committed current version for
+   * a duplicate. Absent when the request was rejected.
+   */
+  version?: number;
   /** The pool row's state moved (closed_started / completed): re-project it. */
   poolStateChanged?: boolean;
 };
@@ -58,6 +66,7 @@ export class RideLifecycleService {
     @Inject(REDIS) private readonly redis: Redis,
     @Inject(DRIZZLE_DB) private readonly db: DrizzleDb,
     private readonly poolProjection: PoolProjectionService,
+    @Optional() private readonly snapshots?: RealtimeSnapshotService,
   ) {}
 
   @OnEvent(STOP_CONFIRM_REQUEST_EVENT, { async: true })
@@ -107,6 +116,7 @@ export class RideLifecycleService {
             duplicate: true,
           },
           completedAt: null,
+          version: pool.stateVersion,
         };
       }
 
@@ -135,6 +145,10 @@ export class RideLifecycleService {
           trip: { kind: 'shared', sharedRideId: input.rideId },
         });
       }
+      // Every confirmed stop is a versioned change of the pool (the state_version
+      // trigger bumps on any UPDATE), even when the pool state does not move, so
+      // clients can order the driver echo against pool:update / snapshots.
+      const version = await this.touchPool(tx, input.rideId);
       return {
         result: {
           ok: true,
@@ -144,6 +158,7 @@ export class RideLifecycleService {
           duplicate: false,
         },
         completedAt,
+        version,
         poolStateChanged,
       };
     });
@@ -174,6 +189,12 @@ export class RideLifecycleService {
       );
     }
 
+    if (!result.duplicate && this.snapshots) {
+      // Versioned pool:update from the committed row (closed_started /
+      // completed included); best effort, a miss is repaired by the snapshot.
+      await this.snapshots.publishPoolUpdate(input.rideId);
+    }
+
     const echoEvent = input.type === 'pickup' ? STOP_PICKUP_EVENT : STOP_DROP_EVENT;
     this.safely(() =>
       this.bus.toDriver(input.driverId, echoEvent, {
@@ -183,10 +204,23 @@ export class RideLifecycleService {
         type: result.stop.type,
         confirmedAt: (result.stop.confirmedAt ?? new Date()).toISOString(),
         rideCompleted: result.rideCompleted,
+        ...(outcome.version !== undefined ? { version: outcome.version } : {}),
       }),
     );
 
     return result;
+  }
+
+  /** Bump `state_version` (trigger) inside the confirmation transaction; returns it. */
+  private async touchPool(tx: DbExecutor, poolId: string): Promise<number> {
+    const res = await tx.execute<{ state_version: number | string }>(sql`
+      UPDATE shared_rides SET updated_at = now()
+       WHERE ride_id = ${poolId}
+   RETURNING state_version
+    `);
+    const row = res.rows[0];
+    if (!row) throw new Error('confirmStop: pool vanished under the pool lock');
+    return Number(row.state_version);
   }
 
   private safely(deliver: () => void): void {

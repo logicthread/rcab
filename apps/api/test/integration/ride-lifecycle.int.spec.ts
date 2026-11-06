@@ -5,6 +5,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { DISPATCH_QUEUE } from '../../src/modules/dispatch/dispatch.service';
 import type { SharedRideOfferPayload } from '../../src/modules/dispatch/dispatch.types';
+import { RealtimeSnapshotService } from '../../src/modules/realtime/realtime-snapshot.service';
 import { RideLifecycleService } from '../../src/modules/ride-lifecycle/ride-lifecycle.service';
 import {
   buildDispatch,
@@ -43,7 +44,15 @@ describe.skipIf(skip)(
       });
       bus = makeBus();
       h = buildDispatch(pg, redis, dispatchQueue, bus);
-      rideLifecycle = new RideLifecycleService(h.stops, h.assignments, bus as never, redis, h.db, h.poolProjection);
+      rideLifecycle = new RideLifecycleService(
+        h.stops,
+        h.assignments,
+        bus as never,
+        redis,
+        h.db,
+        h.poolProjection,
+        new RealtimeSnapshotService(h.db, bus as never),
+      );
     });
 
     afterAll(async () => {
@@ -136,6 +145,42 @@ describe.skipIf(skip)(
       for (const s of stops.rows) expect(s.confirmed_at).toBeInstanceOf(Date);
 
       await redis.zrem('active_drivers', driverId);
+    });
+
+    it('every confirmed stop bumps the pool version; closed_started and completed reach the pool room with increasing versions', async () => {
+      const { poolId, driverId } = await claimedPool(2);
+      const poolUpdates = () =>
+        bus.toPool.mock.calls
+          .filter((c) => c[0] === poolId && c[1] === 'pool:update')
+          .map((c) => c[2] as { version: number; poolStatus: string });
+      const before = poolUpdates().length;
+      const echoVersions: number[] = [];
+      for (const [i, type] of (['pickup', 'pickup', 'dropoff', 'dropoff'] as const).entries()) {
+        bus.toDriver.mockClear();
+        const r = await rideLifecycle.confirmStop({ rideId: poolId, driverId, sequenceIndex: i, type });
+        expect(r.ok).toBe(true);
+        const echo = bus.toDriver.mock.calls.find((c) => c[0] === driverId && /^stop:/.test(c[1]))![2] as {
+          version: number;
+        };
+        echoVersions.push(echo.version);
+      }
+      const { rows } = await pg.query<{ state_version: string }>(
+        'SELECT state_version FROM shared_rides WHERE ride_id = $1',
+        [poolId],
+      );
+      // Strictly increasing per stop, ending at (or below, when the trigger also bumped for the
+      // state change) the committed version.
+      for (let i = 1; i < echoVersions.length; i++) {
+        expect(echoVersions[i]).toBeGreaterThan(echoVersions[i - 1]);
+      }
+      expect(echoVersions[3]).toBeLessThanOrEqual(Number(rows[0].state_version));
+
+      const fresh = poolUpdates().slice(before);
+      expect(fresh).toHaveLength(4);
+      const versions = fresh.map((u) => u.version);
+      for (let i = 1; i < versions.length; i++) expect(versions[i]).toBeGreaterThan(versions[i - 1]);
+      expect(fresh.map((u) => u.poolStatus)).toContain('closed_started');
+      expect(fresh[3]).toMatchObject({ poolStatus: 'completed', version: Number(rows[0].state_version) });
     });
 
     it('a duplicate stop confirmation returns the authoritative state (T32)', async () => {
