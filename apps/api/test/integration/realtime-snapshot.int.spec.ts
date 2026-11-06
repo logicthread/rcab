@@ -240,8 +240,8 @@ describe.skipIf(skip)('pool:subscribe — authorized, snapshot-first (T30)', () 
     for (let i = 0; i < 2; i++) {
       const p = await seedClient(pool);
       await pool.query(
-        `INSERT INTO pool_member (pool_id, passenger_id, origin_lat, origin_lng, dest_lat, dest_lng)
-         VALUES ($1, $2, 22.57, 88.36, 22.58, 88.37)`,
+        `INSERT INTO pool_member (pool_id, passenger_id, origin_lat, origin_lng, dest_lat, dest_lng, agreed_fare_cents)
+         VALUES ($1, $2, 22.57, 88.36, 22.58, 88.37, 10000)`,
         [poolId, p],
       );
       const u = (await snapshots.poolUpdate(poolId))!;
