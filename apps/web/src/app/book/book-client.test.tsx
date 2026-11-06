@@ -338,6 +338,7 @@ describe('BookPage pool realtime wiring (F10)', () => {
       passengerId: 'u1',
       mode: 'opened',
       poolStatus: 'open',
+      perSeatPrice: { amount: 7_000, currency: 'INR' },
     });
     render(<BookClient />);
     pickPreset(0);
