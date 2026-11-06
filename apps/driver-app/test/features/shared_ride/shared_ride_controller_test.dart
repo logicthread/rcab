@@ -207,6 +207,42 @@ void main() {
     });
   });
 
+  group('accept ack unavailable (undecided, not a loss)', () {
+    Future<dynamic> accepting() async {
+      final h = _make();
+      await h.ctrl.start();
+      h.socket.emitRideOffer(_offerJson());
+      h.container.read(sharedRideProvider.notifier).accept();
+      return h;
+    }
+
+    test('keeps accepting and requests a snapshot; never goes home on its own', () async {
+      final h = await accepting();
+      final before = h.socket.snapshotRequests as int;
+      h.socket.emitOutcome({'offerId': 'o-1', 'outcome': 'unknown', 'reason': 'unavailable', 'source': 'ack'});
+      expect(h.container.read(sharedRideProvider).phase, SharedRidePhase.accepting);
+      expect(h.socket.snapshotRequests, before + 1);
+      expect(h.navStack, ['/shared-ride/ride-1']);
+    });
+
+    test('snapshot with the assignment -> assigned (stop screen)', () async {
+      final h = await accepting();
+      h.socket.emitOutcome({'offerId': 'o-1', 'outcome': 'unknown', 'reason': 'unavailable'});
+      h.socket.emitAssignment({'driverId': 'd', 'assignment': _sharedAssignment()});
+      expect(h.container.read(sharedRideProvider).phase, SharedRidePhase.assigned);
+      expect(h.navStack.last, '/shared-ride/ride-1'); // stop screen, never /home
+      expect(h.navStack, isNot(contains('/home')));
+    });
+
+    test('empty snapshot -> home', () async {
+      final h = await accepting();
+      h.socket.emitOutcome({'offerId': 'o-1', 'outcome': 'unknown', 'reason': 'unavailable'});
+      h.socket.emitAssignment({'driverId': 'd', 'assignment': null});
+      expect(h.container.read(sharedRideProvider).isEmpty, isTrue);
+      expect(h.navStack, ['/shared-ride/ride-1', '/home']);
+    });
+  });
+
   group('lost accept ack', () {
     test('ack timeout asks for a snapshot; the snapshot proves the commit', () async {
       final h = _make(ackTimeout: const Duration(milliseconds: 10));

@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:driver_app/core/realtime/driver_assignment.dart';
 import 'package:driver_app/core/realtime/offer_outcome.dart';
 import 'package:driver_app/features/offer/offer_models.dart';
 import 'package:driver_app/features/shared_ride/shared_ride_models.dart';
@@ -321,6 +322,106 @@ void main() {
       );
       expect(n.state.completed, isTrue);
       expect(n.state.currentStopIndex, 2);
+    });
+  });
+
+  group('snapshot / echo version ordering (SHARED CONTRACT)', () {
+    DriverAssignment snap(int version, List<bool> confirmed) => DriverAssignment.fromJson({
+          'tripKind': 'shared',
+          'tripId': 'ride-1',
+          'offerId': 'o-1',
+          'generation': 1,
+          'version': version,
+          'stops': [
+            for (var i = 0; i < confirmed.length; i++)
+              {
+                'sequenceIndex': i,
+                'passengerId': i.isEven ? 'pa' : 'pb',
+                'type': i < 2 ? 'pickup' : 'dropoff',
+                'lat': 0.0,
+                'lng': 0.0,
+                'confirmed': confirmed[i],
+                'confirmedAt': confirmed[i] ? '2026-11-06T10:00:00.000Z' : null,
+              },
+          ],
+        })!;
+
+    test('a stale snapshot (lower version) cannot rewind confirmed stops', () {
+      final n = SharedRideNotifier(_FakeSender());
+      n.applyAssignment(snap(5, [true, false, false, false]));
+      n.applyServerEcho(
+        rideId: 'ride-1',
+        sequenceIndex: 1,
+        confirmedAt: DateTime.utc(2026, 11, 6, 10, 1),
+        rideCompleted: false,
+        version: 6,
+      );
+      expect(n.state.currentStopIndex, 2);
+
+      final change = n.applyAssignment(snap(5, [true, false, false, false]));
+      expect(change, AssignmentChange.none);
+      expect(n.state.currentStopIndex, 2);
+
+      // A newer snapshot still applies.
+      n.applyAssignment(snap(7, [true, true, true, false]));
+      expect(n.state.currentStopIndex, 3);
+    });
+
+    test('a lower-version snapshot is ignored even when no echo raised the bar', () {
+      final n = SharedRideNotifier(_FakeSender());
+      n.applyAssignment(snap(9, [true, true, false, false]));
+      n.applyAssignment(snap(4, [false, false, false, false]));
+      expect(n.state.currentStopIndex, 2);
+    });
+
+    test('a stale echo (lower version) is dropped', () {
+      final n = SharedRideNotifier(_FakeSender());
+      n.applyAssignment(snap(8, [true, false, false, false]));
+      n.applyServerEcho(
+        rideId: 'ride-1',
+        sequenceIndex: 1,
+        confirmedAt: DateTime.utc(2026, 11, 6),
+        rideCompleted: false,
+        version: 3,
+      );
+      expect(n.state.currentStopIndex, 1);
+    });
+
+    test('a locally completed trip is never reopened by a same/lower-version snapshot', () {
+      final n = SharedRideNotifier(_FakeSender());
+      n.applyAssignment(snap(5, [true, true, true, false]));
+      n.applyServerEcho(
+        rideId: 'ride-1',
+        sequenceIndex: 3,
+        confirmedAt: DateTime.utc(2026, 11, 6),
+        rideCompleted: true,
+        version: 6,
+      );
+      expect(n.state.completed, isTrue);
+
+      expect(n.applyAssignment(snap(6, [true, true, true, false])), AssignmentChange.none);
+      expect(n.applyAssignment(snap(5, [true, true, true, false])), AssignmentChange.none);
+      expect(n.state.completed, isTrue);
+
+      // Still holds after the driver leaves the trip screen.
+      n.reset();
+      expect(n.applyAssignment(snap(5, [true, true, true, false])), AssignmentChange.none);
+      expect(n.state.isEmpty, isTrue);
+    });
+  });
+
+  group('unknown outcome (server unavailable)', () {
+    test('does not change the accepting phase', () {
+      final n = SharedRideNotifier(_FakeSender(), offerSender: _FakeOfferSender());
+      n.applyOffer(_offerWithId());
+      n.accept();
+      final changed = n.applyOutcome(const OfferOutcome(
+        offerId: 'o-1',
+        kind: OfferOutcomeKind.unknown,
+        reason: 'unavailable',
+      ));
+      expect(changed, isFalse);
+      expect(n.state.phase, SharedRidePhase.accepting);
     });
   });
 

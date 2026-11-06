@@ -267,5 +267,55 @@ void main() {
       expect(h.navStack, ['/offer/o-1', '/ride/r-1']);
       h.ctrl.stop();
     });
+
+    test('ack unavailable keeps claiming + asks for a snapshot (no abandon)', () async {
+      final h = _make();
+      await h.ctrl.start();
+      h.socket.emitRideOffer(_soloOfferJson(offerId: 'o-1', rideId: 'r-1'));
+      h.container.read(offerProvider.notifier).accept();
+      final before = h.socket.snapshotRequests;
+      h.socket.emitOutcome({'offerId': 'o-1', 'outcome': 'unknown', 'reason': 'unavailable', 'source': 'ack'});
+      expect(h.container.read(offerProvider).phase, OfferPhase.claiming);
+      expect(h.socket.snapshotRequests, before + 1);
+      expect(h.navStack, ['/offer/o-1']);
+      h.ctrl.stop();
+    });
+
+    test('unavailable then snapshot with the assignment -> /ride/:id', () async {
+      final h = _make();
+      await h.ctrl.start();
+      h.socket.emitRideOffer(_soloOfferJson(offerId: 'o-1', rideId: 'r-1'));
+      h.container.read(offerProvider.notifier).accept();
+      h.socket.emitOutcome({'offerId': 'o-1', 'outcome': 'unknown', 'reason': 'unavailable'});
+      h.socket.emitAssignment({
+        'driverId': 'd',
+        'assignment': {'tripKind': 'solo', 'tripId': 'r-1', 'offerId': 'o-1', 'generation': 1},
+      });
+      expect(h.container.read(offerProvider).phase, OfferPhase.accepted);
+      expect(h.navStack, ['/offer/o-1', '/ride/r-1']);
+      h.ctrl.stop();
+    });
+
+    test('unavailable then empty snapshot -> home', () async {
+      final h = _make();
+      await h.ctrl.start();
+      h.socket.emitRideOffer(_soloOfferJson(offerId: 'o-1', rideId: 'r-1'));
+      h.container.read(offerProvider.notifier).accept();
+      h.socket.emitOutcome({'offerId': 'o-1', 'outcome': 'unknown', 'reason': 'unavailable'});
+      h.socket.emitAssignment({'driverId': 'd', 'assignment': null});
+      expect(h.container.read(offerProvider).phase, OfferPhase.revoked);
+      expect(h.navStack, ['/offer/o-1', '/home']);
+      h.ctrl.stop();
+    });
+
+    test('an empty snapshot without a prior unavailable does not end a claiming offer', () async {
+      final h = _make();
+      await h.ctrl.start();
+      h.socket.emitRideOffer(_soloOfferJson(offerId: 'o-1', rideId: 'r-1'));
+      h.container.read(offerProvider.notifier).accept();
+      h.socket.emitAssignment({'driverId': 'd', 'assignment': null});
+      expect(h.container.read(offerProvider).phase, OfferPhase.claiming);
+      h.ctrl.stop();
+    });
   });
 }

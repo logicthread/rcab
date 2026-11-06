@@ -27,7 +27,12 @@ enum OfferOutcomeKind {
   retry,
 
   /// Our own decline was recorded.
-  declined;
+  declined,
+
+  /// The server could not answer (`unavailable`: Redis / DB hiccup). The
+  /// accept may or may not have committed, so this is NOT a loss: keep
+  /// waiting and let a `driver:assignment` snapshot decide.
+  unknown;
 
   static OfferOutcomeKind? parse(Object? raw) {
     if (raw is! String) return null;
@@ -55,6 +60,8 @@ OfferOutcomeKind outcomeForAcceptFailure(String? reason) {
       return OfferOutcomeKind.revoked;
     case 'conflict':
       return OfferOutcomeKind.retry;
+    case 'unavailable':
+      return OfferOutcomeKind.unknown;
     default:
       return OfferOutcomeKind.rejected;
   }

@@ -40,6 +40,8 @@ void main() {
       'offer_revoked': OfferOutcomeKind.revoked,
       'trip_not_claimable': OfferOutcomeKind.revoked,
       'conflict': OfferOutcomeKind.retry,
+      // Server could not decide: NOT a terminal loss (accept may have committed).
+      'unavailable': OfferOutcomeKind.unknown,
       'driver_busy': OfferOutcomeKind.rejected,
       'itinerary_missing': OfferOutcomeKind.rejected,
       'invalid_payload': OfferOutcomeKind.rejected,

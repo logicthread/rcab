@@ -28,6 +28,35 @@ class SharedRideNotifier extends StateNotifier<SharedRideState> {
   final StopConfirmSender _sender;
   final OfferResponseSender? _offerSender;
 
+  // Highest server `state_version` applied for [_versionTripId] (from a
+  // snapshot or a stop-confirm echo). Survives [reset] on purpose: a stale
+  // snapshot arriving after the driver left a finished trip must not bring it
+  // back. Snapshots / echoes below it are dropped.
+  String? _versionTripId;
+  int _appliedVersion = 0;
+
+  // The last trip this notifier saw complete (kept across [reset]).
+  String? _completedTripId;
+
+  void _noteVersion(String tripId, int? version) {
+    if (version == null) return;
+    if (_versionTripId != tripId) {
+      _versionTripId = tripId;
+      _appliedVersion = version;
+    } else if (version > _appliedVersion) {
+      _appliedVersion = version;
+    }
+  }
+
+  /// True when [version] is older than what was already applied for the trip.
+  bool _isOlder(String tripId, int? version) =>
+      version != null && _versionTripId == tripId && version < _appliedVersion;
+
+  /// True for a snapshot that must not rewind a trip already completed locally
+  /// (same trip, version not newer than what completed it).
+  bool _revertsCompleted(String tripId, int version) =>
+      _completedTripId == tripId && _versionTripId == tripId && version <= _appliedVersion;
+
   /// Apply an incoming shared `ride_offer`: show the proposed itinerary and
   /// start ringing. Ignored while a committed trip is in progress (the server
   /// does not offer a busy driver; a stray event must not replace the trip).
@@ -117,6 +146,9 @@ class SharedRideNotifier extends StateNotifier<SharedRideState> {
         state = state.copyWith(phase: SharedRidePhase.offered);
         return true;
       case OfferOutcomeKind.declined:
+      case OfferOutcomeKind.unknown:
+        // `unknown` (server `unavailable`) is not a verdict: stay in
+        // `accepting`; the controller asks for a snapshot which decides.
         return false;
       default:
         if (!state.isOffer) return false;
@@ -139,7 +171,19 @@ class SharedRideNotifier extends StateNotifier<SharedRideState> {
     );
   }
 
-  /// Apply the authoritative `driver:assignment` snapshot.
+  /// An accept whose ack said `unavailable` was never decided by the server
+  /// and a snapshot just reported no assignment: the accept did not commit.
+  /// Returns true when an undecided `accepting` offer was dropped.
+  bool resolveUndecidedAccept() {
+    if (state.phase != SharedRidePhase.accepting) return false;
+    state = SharedRideState.empty;
+    return true;
+  }
+
+  /// Apply the authoritative `driver:assignment` snapshot. A snapshot older
+  /// than what was already applied for the trip (stale / reordered delivery)
+  /// is ignored, and a trip completed locally is never reopened by a snapshot
+  /// of the same version or lower.
   AssignmentChange applyAssignment(DriverAssignment? a) {
     if (a == null) {
       // Released while we were away (completed / aborted / cancelled).
@@ -150,6 +194,9 @@ class SharedRideNotifier extends StateNotifier<SharedRideState> {
       return AssignmentChange.none;
     }
     if (!a.isShared) return AssignmentChange.none;
+    if (_isOlder(a.tripId, a.version) || _revertsCompleted(a.tripId, a.version)) {
+      return AssignmentChange.none;
+    }
     final wasSame = state.isAssigned && state.sharedRideId == a.tripId;
     _hydrate(a);
     return wasSame ? AssignmentChange.refreshed : AssignmentChange.restored;
@@ -169,6 +216,8 @@ class SharedRideNotifier extends StateNotifier<SharedRideState> {
       ..sort((x, y) => x.stop.sequenceIndex.compareTo(y.stop.sequenceIndex));
     final firstPending = restored.indexWhere((s) => s.status == StopStatus.pending);
     final passengers = <String>{for (final s in restored) s.stop.passengerId};
+    _noteVersion(a.tripId, a.version);
+    if (restored.isNotEmpty && firstPending == -1) _completedTripId = a.tripId;
     state = SharedRideState(
       sharedRideId: a.tripId,
       stops: restored,
@@ -222,8 +271,13 @@ class SharedRideNotifier extends StateNotifier<SharedRideState> {
     required int sequenceIndex,
     required DateTime confirmedAt,
     required bool rideCompleted,
+    int? version,
   }) {
     if (state.sharedRideId != rideId || !state.isAssigned) return;
+    // An echo older than an applied snapshot / echo is stale (its effect is
+    // already included); a newer one raises the bar for later snapshots.
+    if (_isOlder(rideId, version)) return;
+    _noteVersion(rideId, version);
     final stops = state.stops;
     final idx = stops.indexWhere((s) => s.stop.sequenceIndex == sequenceIndex);
     if (idx < 0) return;
@@ -242,6 +296,7 @@ class SharedRideNotifier extends StateNotifier<SharedRideState> {
 
     final nextPending = updated.indexWhere((s) => s.status == StopStatus.pending);
     final nextIndex = nextPending == -1 ? updated.length : nextPending;
+    if (rideCompleted || nextPending == -1) _completedTripId = rideId;
     state = state.copyWith(
       stops: updated,
       currentStopIndex: nextIndex,

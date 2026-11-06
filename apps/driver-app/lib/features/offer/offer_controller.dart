@@ -56,6 +56,11 @@ class OfferController {
   /// re-navigate a driver who is already on it.
   String? _routedRideId;
 
+  /// Set when an accept ack said `unavailable`: the server did not decide, so
+  /// the next `driver:assignment` snapshot does (solo assigned → `/ride/:id`,
+  /// none → home).
+  bool _awaitingVerdict = false;
+
   void stop() {
     for (final s in _subs) {
       unawaited(s.cancel());
@@ -98,6 +103,14 @@ class OfferController {
         break;
       case OfferOutcomeKind.declined:
         break;
+      case OfferOutcomeKind.unknown:
+        // Undecided accept (`unavailable`): keep claiming and ask the server.
+        final live = container.read(offerProvider);
+        if (live.phase == OfferPhase.claiming && live.offer?.offerId == outcome.offerId) {
+          _awaitingVerdict = true;
+          container.read(realtimeSocketProvider).requestAssignmentSnapshot();
+        }
+        break;
       default:
         _onRevoked({'offerId': outcome.offerId, 'reason': outcome.reason ?? outcome.kind.name});
     }
@@ -108,9 +121,16 @@ class OfferController {
     final a = snapshot?.assignment;
     if (a == null) {
       _routedRideId = null;
+      final live = container.read(offerProvider);
+      if (_awaitingVerdict && live.phase == OfferPhase.claiming && live.offer != null) {
+        // No committed assignment: the undecided accept did not win.
+        _awaitingVerdict = false;
+        _onRevoked({'offerId': live.offer!.offerId, 'reason': 'unavailable'});
+      }
       return;
     }
     if (!a.isSolo) return;
+    _awaitingVerdict = false;
     final current = container.read(offerProvider);
     if (current.offer != null && a.offerId == current.offer!.offerId) {
       _onAccepted({'offerId': a.offerId, 'rideId': a.tripId});

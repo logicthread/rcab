@@ -50,6 +50,11 @@ class SharedRideController {
   Timer? _ackTimer;
   IRealtimeSocket? _socket;
 
+  /// Set when an accept ack said `unavailable`: the server did not decide, so
+  /// the next `driver:assignment` snapshot does (assigned → stop screen,
+  /// none → home).
+  bool _awaitingVerdict = false;
+
   Future<void> start() async {
     final IRealtimeSocket socket = container.read(realtimeSocketProvider);
     _socket = socket;
@@ -101,6 +106,16 @@ class SharedRideController {
     final outcome = OfferOutcome.fromJson(payload);
     if (outcome == null) return;
     final wasOnTrip = container.read(sharedRideProvider).sharedRideId;
+    if (outcome.kind == OfferOutcomeKind.unknown) {
+      // Undecided accept: keep the offer screen waiting and ask the server
+      // what it committed instead of abandoning an accept that may have won.
+      final s = container.read(sharedRideProvider);
+      if (s.phase == SharedRidePhase.accepting && s.offerId == outcome.offerId) {
+        _awaitingVerdict = true;
+        _socket?.requestAssignmentSnapshot();
+      }
+      return;
+    }
     if (!_notifier.applyOutcome(outcome)) return;
     final state = container.read(sharedRideProvider);
     if (state.isAssigned) {
@@ -118,7 +133,19 @@ class SharedRideController {
   void _onAssignment(Map<String, dynamic> payload) {
     final snapshot = DriverAssignmentSnapshot.fromJson(payload);
     if (snapshot == null) return;
+    if (_awaitingVerdict &&
+        snapshot.assignment == null &&
+        container.read(sharedRideProvider).phase == SharedRidePhase.accepting) {
+      // The server holds no assignment: the undecided accept did not commit.
+      _awaitingVerdict = false;
+      _cancelTicker();
+      _cancelAckTimer();
+      _notifier.resolveUndecidedAccept();
+      _navigate('/home');
+      return;
+    }
     final change = _notifier.applyAssignment(snapshot.assignment);
+    if (change == AssignmentChange.restored) _awaitingVerdict = false;
     switch (change) {
       case AssignmentChange.restored:
         _cancelTicker();
@@ -147,6 +174,7 @@ class SharedRideController {
       sequenceIndex: seq,
       confirmedAt: at,
       rideCompleted: rideCompleted,
+      version: (payload['version'] as num?)?.toInt(),
     );
   }
 
@@ -179,6 +207,7 @@ class SharedRideController {
       _ackTimer = null;
       if (container.read(sharedRideProvider).phase != SharedRidePhase.accepting) return;
       // Lost ack: the snapshot tells us whether the accept committed.
+      _awaitingVerdict = false;
       _socket?.requestAssignmentSnapshot();
       _notifier.ackTimedOut();
       if (container.read(sharedRideProvider).phase == SharedRidePhase.expired) {
