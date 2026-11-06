@@ -116,11 +116,12 @@ describe.skipIf(skip)('PoolLifecycleService — integration (Postgres + Redis)',
     expect(await redis.ttl(`pool:${poolId}`)).toBeGreaterThan(0);
     expect(await redis.exists(`pool:${poolId}:seats`)).toBe(0); // removed Redis seat counter
     expect(s.bus.joinPool).toHaveBeenCalledWith(opener, poolId);
-    expect(s.bus.toPool).toHaveBeenCalledWith(poolId, POOL_UPDATE_EVENT, {
+    expect(s.bus.toPool).toHaveBeenCalledWith(poolId, POOL_UPDATE_EVENT, expect.objectContaining({
       sharedRideId: poolId,
       seatCount: 1,
       poolStatus: 'open',
-    });
+      version: expect.any(Number),
+    }));
   });
 
   it('the filling join closes closed_full in the same commit: itinerary persisted, gen 1 intent', async () => {

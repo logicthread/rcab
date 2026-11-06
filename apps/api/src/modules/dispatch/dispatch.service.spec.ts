@@ -306,6 +306,13 @@ function makeService(config: Record<string, unknown> = {}) {
     remove: vi.fn().mockResolvedValue(1),
   };
   const redis = { georadius: vi.fn().mockResolvedValue([]) };
+  const snapshots = {
+    driverAssignment: vi.fn().mockImplementation(async (driverId: string) => ({
+      driverId,
+      assignment: null,
+    })),
+    publishPoolUpdate: vi.fn().mockResolvedValue(undefined),
+  };
   const svc = new DispatchService(
     repo as never,
     ridesRepo as never,
@@ -319,9 +326,11 @@ function makeService(config: Record<string, unknown> = {}) {
     db as never,
     { get: vi.fn((k: string) => config[k]) } as never,
     poolProjection as never,
+    snapshots as never,
   );
   return {
     svc,
+    snapshots,
     db,
     tx,
     repo,
@@ -402,6 +411,7 @@ describe('DispatchService.acceptOffer', () => {
       rideId: RIDE,
       state: 'accepted',
       by: 'driver',
+      version: 3,
     });
   });
 
@@ -846,5 +856,161 @@ describe('DispatchService.onRideCancelled / releaseDispatch', () => {
     gone.queue.remove.mockRejectedValue(new Error('redis down'));
     await expect(gone.svc.releaseDispatch(RIDE)).resolves.toBeUndefined();
     expect(gone.queue.remove).toHaveBeenCalledTimes(2);
+  });
+});
+
+// ── R09 / F10: explicit offer outcomes + versioned post-commit broadcasts ───
+describe('DispatchService — explicit offer outcomes (ride_offer_outcome)', () => {
+  const sharedTrip = { kind: 'shared', sharedRideId: POOL } as const;
+  const sharedAssignment = {
+    tripKind: 'shared' as const,
+    tripId: POOL,
+    sharedRideId: POOL,
+    offerId: OFFER,
+    generation: 1,
+    assignedAt: '2026-11-06T00:00:00.000Z',
+    version: 4,
+    poolStatus: 'closed_full',
+    seatCount: 2,
+    stops: [],
+  };
+
+  function outcomes(m: ReturnType<typeof makeService>, driverId: string) {
+    return m.bus.toDriver.mock.calls
+      .filter(([d, e]) => d === driverId && e === 'ride_offer_outcome')
+      .map(([, , p]) => p as Record<string, unknown>);
+  }
+
+  it('shared winner gets `assigned` with the committed itinerary; losers get `lost`; never the winner', async () => {
+    const m = makeService();
+    m.offers.findForDriver.mockResolvedValue(offerRow({ trip: sharedTrip }));
+    m.offers.lockForUpdate.mockResolvedValue(offerRow({ trip: sharedTrip }));
+    m.offers.revokeLiveForTrip.mockResolvedValue([{ offerId: 'o-2', driverId: OTHER }]);
+    m.snapshots.driverAssignment.mockResolvedValue({
+      driverId: DRIVER,
+      assignment: sharedAssignment,
+    });
+
+    await m.svc.acceptOffer({ offerId: OFFER, driverId: DRIVER });
+
+    // The winner's offer is excluded from the revoke (A's contract) …
+    expect(m.offers.revokeLiveForTrip).toHaveBeenCalledWith(m.tx, sharedTrip, OFFER);
+    // … and gets a positive, explicit acknowledgement with the assignment.
+    expect(outcomes(m, DRIVER)).toEqual([
+      {
+        offerId: OFFER,
+        outcome: 'assigned',
+        tripKind: 'shared',
+        tripId: POOL,
+        generation: 1,
+        assignment: sharedAssignment,
+      },
+    ]);
+    expect(outcomes(m, OTHER)).toEqual([
+      { offerId: 'o-2', outcome: 'lost', tripKind: 'shared', tripId: POOL, reason: 'taken' },
+    ]);
+    expect(m.bus.toDriver).not.toHaveBeenCalledWith(
+      DRIVER,
+      'ride_offer_revoked',
+      expect.anything(),
+    );
+    // Members learn the claim from the committed row.
+    expect(m.snapshots.publishPoolUpdate).toHaveBeenCalledWith(POOL);
+  });
+
+  it('a replayed accept (lost ack) re-sends `assigned` but no revokes / broadcasts', async () => {
+    const m = makeService();
+    m.offers.lockForUpdate.mockResolvedValue(offerRow({ state: 'accepted' }));
+    m.assignments.findByTrip.mockResolvedValue({ driverId: DRIVER, generation: 1 });
+
+    await m.svc.acceptOffer({ offerId: OFFER, driverId: DRIVER });
+
+    expect(outcomes(m, DRIVER)).toEqual([
+      expect.objectContaining({ offerId: OFFER, outcome: 'assigned', tripId: RIDE }),
+    ]);
+    expect(m.bus.toRide).not.toHaveBeenCalled();
+    expect(m.snapshots.publishPoolUpdate).not.toHaveBeenCalled();
+  });
+
+  it('an assignment snapshot for another trip is never attached to the outcome', async () => {
+    const m = makeService();
+    m.snapshots.driverAssignment.mockResolvedValue({
+      driverId: DRIVER,
+      assignment: { ...sharedAssignment, tripId: 'other-trip' },
+    });
+    await m.svc.acceptOffer({ offerId: OFFER, driverId: DRIVER });
+    expect(outcomes(m, DRIVER)[0]).toMatchObject({ outcome: 'assigned', assignment: null });
+  });
+
+  it('a failing snapshot read never fails the committed winner', async () => {
+    const m = makeService();
+    m.snapshots.driverAssignment.mockRejectedValue(new Error('pg blip'));
+    const res = await m.svc.acceptOffer({ offerId: OFFER, driverId: DRIVER });
+    expect(res).toMatchObject({ ok: true });
+    expect(outcomes(m, DRIVER)[0]).toMatchObject({ outcome: 'assigned', assignment: null });
+  });
+
+  it.each([
+    ['trip_taken', 'lost'],
+    ['offer_expired', 'expired'],
+    ['offer_stale', 'expired'],
+    ['trip_not_claimable', 'revoked'],
+    ['driver_busy', 'rejected'],
+  ])('a refused accept (%s) is answered with outcome %s', async (reason, outcome) => {
+    const m = makeService();
+    if (reason === 'trip_taken') {
+      m.assignments.lockSoloTrip.mockResolvedValue(soloRide({ id: RIDE, driverId: OTHER }));
+    } else if (reason === 'offer_expired') {
+      m.offers.lockForUpdate.mockResolvedValue(offerRow({ lapsed: true }));
+    } else if (reason === 'offer_stale') {
+      m.offers.lockForUpdate.mockResolvedValue(offerRow({ generation: 0 }));
+    } else if (reason === 'trip_not_claimable') {
+      m.assignments.lockSoloTrip.mockResolvedValue(null);
+    } else {
+      m.assignments.acquire.mockResolvedValue({ ok: false, reason: 'driver_busy' });
+    }
+    expect(await m.svc.acceptOffer({ offerId: OFFER, driverId: DRIVER })).toEqual({
+      ok: false,
+      reason,
+    });
+    expect(outcomes(m, DRIVER)).toEqual([
+      { offerId: OFFER, outcome, tripKind: 'solo', tripId: RIDE, reason },
+    ]);
+  });
+
+  it('an unknown offer gets `rejected` without echoing any trip id', async () => {
+    const m = makeService();
+    m.offers.findForDriver.mockResolvedValue(null);
+    await m.svc.acceptOffer({ offerId: OFFER, driverId: DRIVER });
+    expect(outcomes(m, DRIVER)).toEqual([
+      { offerId: OFFER, outcome: 'rejected', reason: 'offer_not_found' },
+    ]);
+  });
+
+  it('hard-fail: revoked drivers get `revoked`; the pool room gets the versioned abort', async () => {
+    const m = makeService();
+    m.offers.revokeLiveForTrip.mockResolvedValue([{ offerId: OFFER, driverId: DRIVER }]);
+    await m.svc.handleHardFail({ data: { rideId: POOL, kind: 'pool' } } as Job<HardFailJob>);
+    expect(outcomes(m, DRIVER)).toEqual([
+      { offerId: OFFER, outcome: 'revoked', tripKind: 'shared', tripId: POOL, reason: 'revoked' },
+    ]);
+    expect(m.snapshots.publishPoolUpdate).toHaveBeenCalledWith(POOL);
+  });
+
+  it('solo hard-fail tells the ride room `no_driver` with its terminal version', async () => {
+    const m = makeService();
+    m.ridesRepo.markNoDriver.mockResolvedValue({
+      row: soloRide({ id: RIDE, status: 'no_driver' }),
+      revokedOffers: [],
+    });
+    await m.svc.handleHardFail({
+      data: { rideId: RIDE, kind: 'solo', generation: 1 },
+    } as Job<HardFailJob>);
+    expect(m.bus.toRide).toHaveBeenCalledWith(RIDE, 'ride_state_changed', {
+      rideId: RIDE,
+      state: 'no_driver',
+      by: 'system',
+      version: 10,
+    });
   });
 });

@@ -19,6 +19,7 @@ import { DispatchOfferRepository } from '../../../src/modules/dispatch/offer.rep
 import { DriverAssignmentRepository } from '../../../src/modules/dispatch/assignment.repository';
 import { DriverAssignmentProjection } from '../../../src/modules/dispatch/driver-assignment.projection';
 import { computeStops } from '../../../src/modules/dispatch/dispatch.service';
+import { RealtimeSnapshotService } from '../../../src/modules/realtime/realtime-snapshot.service';
 import type { TripRef } from '../../../src/modules/dispatch/dispatch.types';
 
 type Db = Pool | PoolClient | Client;
@@ -59,6 +60,7 @@ export interface DispatchHarness {
   stops: RideStopRepository;
   shared: SharedRideRepository;
   poolProjection: PoolProjectionService;
+  snapshots: RealtimeSnapshotService;
 }
 
 /** A full DispatchService over its own pg Pool (independent connections). */
@@ -72,6 +74,7 @@ export function buildDispatch(pgPool: Pool, redis: Redis, queue: Queue, bus: Bus
   const projection = new DriverAssignmentProjection(db, redis, assignments, offers);
   const config = { get: vi.fn().mockReturnValue(undefined) };
   const poolProjection = new PoolProjectionService(shared, redis);
+  const snapshots = new RealtimeSnapshotService(db, bus as never);
   const dispatch = new DispatchService(
     shared,
     rides,
@@ -85,8 +88,20 @@ export function buildDispatch(pgPool: Pool, redis: Redis, queue: Queue, bus: Bus
     db,
     config as never,
     poolProjection,
+    snapshots,
   );
-  return { db, dispatch, offers, assignments, projection, rides, stops, shared, poolProjection };
+  return {
+    db,
+    dispatch,
+    offers,
+    assignments,
+    projection,
+    rides,
+    stops,
+    shared,
+    poolProjection,
+    snapshots,
+  };
 }
 
 export async function seedClient(db: Db): Promise<string> {

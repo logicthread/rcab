@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { getNumber } from '../../common/utils/env';
 import { InjectQueue } from '@nestjs/bullmq';
@@ -8,6 +8,14 @@ import type Redis from 'ioredis';
 import { REDIS } from '../../infra/redis/redis.module';
 import { DRIZZLE_DB, type DrizzleDb, type DrizzleTx } from '../../infra/db/drizzle.module';
 import { RealtimeBus } from '../realtime/realtime.bus';
+import { RealtimeSnapshotService } from '../realtime/realtime-snapshot.service';
+import {
+  RIDE_OFFER_OUTCOME,
+  outcomeForAcceptFailure,
+  rideStatusVersion,
+  type OfferOutcome,
+  type RideOfferOutcomePayload,
+} from '../realtime/realtime.protocol';
 import {
   RIDE_OFFER_RESPONSE_EVENT,
   type RideOfferResponseEvent,
@@ -117,6 +125,9 @@ export class DispatchService {
     @Inject(DRIZZLE_DB) private readonly db: DrizzleDb,
     @Inject(ConfigService) config: ConfigService,
     private readonly poolProjection: PoolProjectionService,
+    // R09: Postgres snapshots for the post-commit outcome / pool broadcasts.
+    // Optional so a harness without realtime still builds the service.
+    @Optional() private readonly snapshots?: RealtimeSnapshotService,
   ) {
     this.params = {
       k1: getNumber(config, 'DISPATCH_K1', 5, { integer: true, min: 1 }),
@@ -299,14 +310,53 @@ export class DispatchService {
         ...(result.trip.kind === 'shared' ? { sharedRideId: id } : {}),
       }),
     );
+    // R09: the explicit positive acknowledgement, carrying the committed
+    // assignment (itinerary for shared) so the driver never infers "assigned"
+    // from having received an offer. Replays re-send it (lost-ack recovery).
+    const assignment = await this.assignmentView(driverId, id);
+    this.emitOutcome(driverId, {
+      offerId,
+      outcome: 'assigned',
+      tripKind: result.trip.kind,
+      tripId: id,
+      generation: result.generation,
+      assignment,
+    });
     if (result.replay) return;
     this.notifyRevoked(result.trip, revoked, 'taken');
     if (result.trip.kind === 'solo') {
-      // The booking client joined `ride:<id>` at request time (E4.S6).
+      // Passengers follow `ride:<id>` via an authorized `ride:subscribe`.
       this.safely('ride_state_changed', () =>
-        this.bus.toRide(id, 'ride_state_changed', { rideId: id, state: 'accepted', by: 'driver' }),
+        this.bus.toRide(id, 'ride_state_changed', {
+          rideId: id,
+          state: 'accepted',
+          by: 'driver',
+          version: rideStatusVersion('accepted'),
+        }),
       );
+    } else {
+      // Members learn the committed claim (versioned) on `pool:<id>`.
+      await this.snapshots?.publishPoolUpdate(id);
     }
+  }
+
+  /** The committed assignment for the outcome payload; null when unreadable. */
+  private async assignmentView(
+    driverId: string,
+    tripRef: string,
+  ): Promise<RideOfferOutcomePayload['assignment']> {
+    if (!this.snapshots) return undefined;
+    try {
+      const snap = await this.snapshots.driverAssignment(driverId);
+      return snap.assignment && snap.assignment.tripId === tripRef ? snap.assignment : null;
+    } catch (err) {
+      this.log.warn({ err, driverId }, 'assignment snapshot for outcome failed');
+      return null;
+    }
+  }
+
+  private emitOutcome(driverId: string, payload: RideOfferOutcomePayload): void {
+    this.safely(RIDE_OFFER_OUTCOME, () => this.bus.toDriver(driverId, RIDE_OFFER_OUTCOME, payload));
   }
 
   /** Best-effort `pool:<id>` projection refresh; boot / next write repairs a miss. */
@@ -339,6 +389,12 @@ export class DispatchService {
         detail: reason,
       }),
     );
+    this.emitOutcome(driverId, {
+      offerId,
+      outcome: outcomeForAcceptFailure(reason),
+      ...(trip ? { tripKind: trip.kind, tripId: tripId(trip) } : {}),
+      reason,
+    });
   }
 
   private notifyRevoked(trip: TripRef, revoked: RevokedOffer[], reason: 'taken' | 'revoked'): void {
@@ -352,6 +408,15 @@ export class DispatchService {
           reason,
         }),
       );
+      // The winner's offer is never in `revoked` (revokeLiveForTrip excludes it).
+      const outcome: OfferOutcome = reason === 'taken' ? 'lost' : 'revoked';
+      this.emitOutcome(r.driverId, {
+        offerId: r.offerId,
+        outcome,
+        tripKind: trip.kind,
+        tripId: id,
+        reason,
+      });
     }
   }
 
@@ -517,6 +582,14 @@ export class DispatchService {
       this.safely('ride_no_driver', () =>
         this.bus.toUser(failed.row.passengerId, 'ride_no_driver', { rideId }),
       );
+      this.safely('ride_state_changed', () =>
+        this.bus.toRide(rideId, 'ride_state_changed', {
+          rideId,
+          state: 'no_driver',
+          by: 'system',
+          version: rideStatusVersion('no_driver'),
+        }),
+      );
       await this.removeTimers(rideId, failed.row.dispatchGeneration);
       return;
     }
@@ -536,6 +609,8 @@ export class DispatchService {
     this.notifyRevoked(trip, aborted.revoked, 'revoked');
     await this.removeTimers(rideId, aborted.generation);
     await this.projectPool(rideId);
+    // Members see the terminal `aborted` (versioned) instead of a silent pool.
+    await this.snapshots?.publishPoolUpdate(rideId);
     // Phase-0: an aborted pool is terminal. Re-queueing each member as an
     // individual solo ride is a future enhancement (owner decision F-5).
   }
