@@ -22,6 +22,7 @@ import { DispatchProcessor } from '../../src/modules/dispatch/dispatch.processor
 import { ScheduledDispatchProcessor } from '../../src/modules/scheduled/scheduled.processor';
 import { DispatchReconciler } from '../../src/modules/outbox/dispatch-reconciler.service';
 import { PoolLifecycleService } from '../../src/modules/matching/pool-lifecycle.service';
+import { fixedFare } from './pool-harness';
 import {
   dispatchStartJobId,
   scheduledWakeJobId,
@@ -297,7 +298,7 @@ describe.skipIf(skip)('outbox -> relay -> worker -> dispatch (full Nest wiring)'
       destLng: DEST.lng,
       maxSeats: 2,
       detourBudgetM: 800,
-      quotedFareCents: 9_000,
+      quoteFare: fixedFare(9_000),
     });
     const poolId = opened.rideId;
     poolIds.push(poolId);
@@ -311,7 +312,7 @@ describe.skipIf(skip)('outbox -> relay -> worker -> dispatch (full Nest wiring)'
         dest_lng: DEST.lng,
         joined_at: new Date().toISOString(),
       },
-      quotedFareCents: 9_000,
+      quoteFare: fixedFare(9_000),
     });
     expect(joined).toMatchObject({ joined: true, closedFull: true, seatCount: 2 });
 

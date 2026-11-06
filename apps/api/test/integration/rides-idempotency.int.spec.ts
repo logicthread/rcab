@@ -337,7 +337,7 @@ describe.skipIf(skip)('RidesRepository — idempotency (real Postgres)', () => {
       const seat = (poolId: string, passenger: string, key: string | null) =>
         pool.query(
           `INSERT INTO pool_member (pool_id, passenger_id, origin_lat, origin_lng, dest_lat, dest_lng,
-             quoted_fare_cents, idempotency_key)
+             agreed_fare_cents, idempotency_key)
            VALUES ($1, $2, 26.1, 91.7, 26.2, 91.8, 4200, $3)`,
           [poolId, passenger, key],
         );
@@ -350,13 +350,13 @@ describe.skipIf(skip)('RidesRepository — idempotency (real Postgres)', () => {
         poolId: newer,
         poolState: 'open',
         opened: false,
-        quotedFareCents: 4200,
+        agreedFareCents: 4200,
       });
       expect(await members.findByIdempotencyKey(db as never, passengerId, 'k-old')).toEqual({
         poolId: older,
         poolState: 'completed',
         opened: true,
-        quotedFareCents: 4200,
+        agreedFareCents: 4200,
       });
       // No time heuristic: an unknown key, or another passenger's key, finds nothing.
       expect(await members.findByIdempotencyKey(db as never, passengerId, 'k-none')).toBeNull();

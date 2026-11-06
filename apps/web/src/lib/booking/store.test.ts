@@ -115,6 +115,16 @@ describe('useBookingStore', () => {
     expect(useBookingStore.getState().seatCount).toBe(2);
   });
 
+  it('keeps the agreed fare from join; later pool updates never change it', () => {
+    const fare = { amount: 7_000, currency: 'INR' as const };
+    useBookingStore.getState().setSlotted('ride-2', 2, 'open', fare);
+    expect(useBookingStore.getState().agreedFare).toEqual(fare);
+    useBookingStore.getState().applyPoolUpdate('ride-2', 3, 'closed_full');
+    expect(useBookingStore.getState().agreedFare).toEqual(fare);
+    useBookingStore.getState().reset();
+    expect(useBookingStore.getState().agreedFare).toBeNull();
+  });
+
   it('applyPoolUpdate ignores events from a different sharedRideId', () => {
     useBookingStore.getState().setOpened('ride-1', 1, 'open');
     useBookingStore.getState().applyPoolUpdate('ride-OTHER', 2, 'open');

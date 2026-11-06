@@ -61,6 +61,14 @@ function lockRow(overrides: Partial<PoolLockRow> = {}): PoolLockRow {
   };
 }
 
+const QUOTE = {
+  perSeatPrice: { amount: 9_000, currency: 'INR' as const },
+  seatMultiplier: 0.7,
+  detourFactor: 1.1,
+  policy: 'fixed_at_join' as const,
+};
+const quoteFare = vi.fn();
+
 const JOINER = member({ passenger_id: 'p-joiner', origin_lat: 22.573, dest_lat: 22.581 });
 const TX = { tx: true };
 
@@ -111,13 +119,14 @@ const OPEN = {
   destLng: 88.3701,
   maxSeats: 3,
   detourBudgetM: 800,
-  quotedFareCents: 12_000,
+  quoteFare: (ctx: Parameters<typeof quoteFare>[0]) => quoteFare(ctx),
 };
 
 const SCOPE = { principalId: 'p-x', operation: 'ride.create.shared' as const, key: 'k-1' };
 
 beforeEach(() => {
   enqueueOutbox.mockReset().mockResolvedValue(true);
+  quoteFare.mockReset().mockResolvedValue(QUOTE);
 });
 
 describe('PoolLifecycleService.openPool', () => {
@@ -147,7 +156,7 @@ describe('PoolLifecycleService.openPool', () => {
       expect.objectContaining({
         poolId: 'pool-new',
         passengerId: 'p-opener',
-        quotedFareCents: 12_000,
+        agreedFareCents: 9_000,
         idempotencyKey: 'k-1',
       }),
     );
@@ -163,8 +172,32 @@ describe('PoolLifecycleService.openPool', () => {
       mode: 'opened',
       poolStatus: 'open',
       seatCount: 1,
+      quote: QUOTE,
     });
     expect(idempotency.completeIn).toHaveBeenCalledWith(TX, SCOPE, 'pool-new', { stored: 1 });
+  });
+
+  it('prices the opener inside the txn (seat 1, two-stop itinerary) and a pricing failure rolls the pool back', async () => {
+    const { svc, repo, members, projection } = makeService();
+    await svc.openPool({ ...OPEN, poolId: 'pool-new' });
+    expect(quoteFare).toHaveBeenCalledWith(
+      expect.objectContaining({ poolId: 'pool-new', passengerId: 'p-opener', seatCount: 1 }),
+    );
+    const ctx = quoteFare.mock.calls[0][0] as { stops: Array<{ type: string }> };
+    expect(ctx.stops.map((st) => st.type)).toEqual(['pickup', 'dropoff']);
+    expect(repo.insertOpenPool.mock.invocationCallOrder[0]).toBeLessThan(
+      quoteFare.mock.invocationCallOrder[0],
+    );
+
+    members.insertMember.mockClear();
+    enqueueOutbox.mockClear();
+    quoteFare.mockRejectedValueOnce(new Error('routing_unavailable'));
+    await expect(svc.openPool({ ...OPEN, poolId: 'pool-fail' })).rejects.toThrow(
+      'routing_unavailable',
+    );
+    expect(members.insertMember).not.toHaveBeenCalled();
+    expect(enqueueOutbox).not.toHaveBeenCalled();
+    expect(projection.write).toHaveBeenCalledTimes(1); // only the first, successful open
   });
 
   it('generates an id when none is given and stores a null key without idempotency', async () => {
@@ -272,18 +305,18 @@ describe('PoolLifecycleService.joinPool', () => {
     const res = await svc.joinPool({
       poolId: 'pool-1',
       joiner: JOINER,
-      quotedFareCents: 9_000,
+      quoteFare,
       idempotency: { scope: SCOPE, response },
     });
 
-    expect(res).toEqual({ joined: true, closedFull: false, seatCount: 2 });
+    expect(res).toEqual({ joined: true, closedFull: false, seatCount: 2, quote: QUOTE });
     expect(members.lockPool).toHaveBeenCalledWith(TX, 'pool-1');
     expect(members.insertMember).toHaveBeenCalledWith(
       TX,
       expect.objectContaining({
         poolId: 'pool-1',
         passengerId: 'p-joiner',
-        quotedFareCents: 9_000,
+        agreedFareCents: 9_000,
         idempotencyKey: 'k-1',
       }),
     );
@@ -293,8 +326,78 @@ describe('PoolLifecycleService.joinPool', () => {
       mode: 'slotted',
       poolStatus: 'open',
       seatCount: 2,
+      quote: QUOTE,
     });
     expect(idempotency.completeIn).toHaveBeenCalledWith(TX, SCOPE, 'pool-1', 'stored');
+  });
+
+  it('prices the seat INSIDE the txn from the locked pool state: seat count after join, itinerary incl. joiner', async () => {
+    const { svc, members } = makeService();
+    members.listMembers.mockResolvedValueOnce([member(), member({ passenger_id: 'p-second' })]);
+    const order: string[] = [];
+    members.lockPool.mockImplementationOnce(async () => {
+      order.push('lock');
+      return lockRow({ seatCount: 2, maxSeats: 3 });
+    });
+    quoteFare.mockImplementationOnce(async () => {
+      order.push('quote');
+      return QUOTE;
+    });
+    members.insertMember.mockImplementationOnce(async () => {
+      order.push('insert');
+      return { ok: true, seatCount: 3 };
+    });
+
+    await svc.joinPool({ poolId: 'pool-1', joiner: JOINER, quoteFare });
+
+    expect(order).toEqual(['lock', 'quote', 'insert']);
+    const ctx = quoteFare.mock.calls[0][0] as {
+      poolId: string;
+      passengerId: string;
+      seatCount: number;
+      directRoute: unknown;
+      stops: Array<{ type: string; passengerId: string }>;
+    };
+    expect(ctx).toMatchObject({ poolId: 'pool-1', passengerId: 'p-joiner', seatCount: 3 });
+    expect(ctx.directRoute).toEqual({
+      originLat: JOINER.origin_lat,
+      originLng: JOINER.origin_lng,
+      destLat: JOINER.dest_lat,
+      destLng: JOINER.dest_lng,
+    });
+    // 3 members -> 6 stops, every pickup before every dropoff.
+    expect(ctx.stops).toHaveLength(6);
+    expect(ctx.stops.slice(0, 3).every((st) => st.type === 'pickup')).toBe(true);
+    expect(ctx.stops.map((st) => st.passengerId)).toContain('p-joiner');
+  });
+
+  it('earlier members are never repriced: a join writes exactly one member row', async () => {
+    const { svc, members, db } = makeService();
+    members.insertMember.mockResolvedValueOnce({ ok: true, seatCount: 2 });
+    await svc.joinPool({ poolId: 'pool-1', joiner: JOINER, quoteFare });
+    expect(members.insertMember).toHaveBeenCalledTimes(1);
+    expect(db.execute).not.toHaveBeenCalled();
+  });
+
+  it('a pricing failure fails the join cleanly: nothing inserted, no completion, no post-commit work', async () => {
+    const { svc, members, idempotency, projection, bus, relay } = makeService();
+    quoteFare.mockRejectedValueOnce(new Error('routing_unavailable'));
+
+    await expect(
+      svc.joinPool({
+        poolId: 'pool-1',
+        joiner: JOINER,
+        quoteFare,
+        idempotency: { scope: SCOPE, response: () => 'x' },
+      }),
+    ).rejects.toThrow('routing_unavailable');
+
+    expect(members.insertMember).not.toHaveBeenCalled();
+    expect(idempotency.completeIn).not.toHaveBeenCalled();
+    expect(enqueueOutbox).not.toHaveBeenCalled();
+    expect(projection.write).not.toHaveBeenCalled();
+    expect(bus.toPool).not.toHaveBeenCalled();
+    expect(relay.kick).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -305,10 +408,11 @@ describe('PoolLifecycleService.joinPool', () => {
     const { svc, members, projection } = makeService();
     members.lockPool.mockResolvedValueOnce(lock);
 
-    const res = await svc.joinPool({ poolId: 'pool-1', joiner: JOINER, quotedFareCents: null });
+    const res = await svc.joinPool({ poolId: 'pool-1', joiner: JOINER, quoteFare });
 
     expect(res).toEqual({ joined: false, reason });
     expect(members.insertMember).not.toHaveBeenCalled();
+    expect(quoteFare).not.toHaveBeenCalled(); // no routing call for a doomed join
     expect(projection.write).not.toHaveBeenCalled();
   });
 
@@ -323,7 +427,7 @@ describe('PoolLifecycleService.joinPool', () => {
     const res = await svc.joinPool({
       poolId: 'pool-1',
       joiner: JOINER,
-      quotedFareCents: null,
+      quoteFare,
       idempotency: { scope: SCOPE, response: () => 'x' },
     });
 
@@ -345,9 +449,9 @@ describe('PoolLifecycleService.joinPool', () => {
       row({ poolState: 'closed_full', seatCount: 2, maxSeats: 2 }),
     );
 
-    const res = await svc.joinPool({ poolId: 'pool-1', joiner: JOINER, quotedFareCents: null });
+    const res = await svc.joinPool({ poolId: 'pool-1', joiner: JOINER, quoteFare });
 
-    expect(res).toEqual({ joined: true, closedFull: true, seatCount: 2 });
+    expect(res).toEqual({ joined: true, closedFull: true, seatCount: 2, quote: QUOTE });
     expect(repo.closeOpen).toHaveBeenCalledWith(TX, 'pool-1', 'closed_full');
     expect(members.listMembers).toHaveBeenCalledWith(TX, 'pool-1');
     const stops = members.insertItinerary.mock.calls[0][2] as Array<{
@@ -381,7 +485,7 @@ describe('PoolLifecycleService.joinPool', () => {
     members.insertMember.mockResolvedValueOnce({ ok: true, seatCount: 2 });
     repo.findById.mockResolvedValueOnce(row({ seatCount: 2 }));
 
-    await svc.joinPool({ poolId: 'pool-1', joiner: JOINER, quotedFareCents: null });
+    await svc.joinPool({ poolId: 'pool-1', joiner: JOINER, quoteFare });
 
     expect(bus.joinPool).toHaveBeenCalledWith('p-joiner', 'pool-1');
     expect(bus.toPool).toHaveBeenCalledWith('pool-1', POOL_UPDATE_EVENT, {
@@ -396,7 +500,7 @@ describe('PoolLifecycleService.joinPool', () => {
     const { svc, db } = makeService();
     db.transaction.mockRejectedValue(pgError('40P01'));
     await expect(
-      svc.joinPool({ poolId: 'pool-1', joiner: JOINER, quotedFareCents: null }),
+      svc.joinPool({ poolId: 'pool-1', joiner: JOINER, quoteFare }),
     ).resolves.toEqual({ joined: false, reason: 'conflict' });
     expect(db.transaction).toHaveBeenCalledTimes(3);
   });
@@ -407,7 +511,7 @@ describe('PoolLifecycleService.joinPool', () => {
     relay.kick.mockImplementation(() => {
       throw new Error('relay blew up');
     });
-    await svc.joinPool({ poolId: 'pool-1', joiner: JOINER, quotedFareCents: null });
+    await svc.joinPool({ poolId: 'pool-1', joiner: JOINER, quoteFare });
     expect(bus.toPool).not.toHaveBeenCalled();
   });
 
@@ -417,7 +521,7 @@ describe('PoolLifecycleService.joinPool', () => {
       throw new Error('io down');
     });
     await expect(
-      svc.joinPool({ poolId: 'pool-1', joiner: JOINER, quotedFareCents: null }),
+      svc.joinPool({ poolId: 'pool-1', joiner: JOINER, quoteFare }),
     ).resolves.toMatchObject({ joined: true });
   });
 });

@@ -6,6 +6,7 @@ import type { MatchingService } from '../../src/modules/matching/matching.servic
 import {
   buildPoolStack,
   cleanupPools,
+  fixedFare,
   poolInvariantViolations,
   seedPassenger,
   snapshot,
@@ -77,7 +78,7 @@ describe.skipIf(skip)('MatchingService — integration (Postgres + Redis)', () =
         maxSeats: 3,
         detourBudgetM: 800,
         passengerId: await passenger(),
-        quotedFareCents: null,
+        quoteFare: fixedFare(5_000),
       });
       poolIds.push(res.rideId);
     }
@@ -96,6 +97,7 @@ describe.skipIf(skip)('MatchingService — integration (Postgres + Redis)', () =
       perSeatPrice: { amount: 6_100, currency: 'INR' },
       seatMultiplier: 0.75,
       detourFactor: 1,
+      policy: 'fixed_at_join',
     });
     const pId = await passenger();
     const result = await svc.findOrCreatePool(request(pId), { quote });
@@ -106,12 +108,22 @@ describe.skipIf(skip)('MatchingService — integration (Postgres + Redis)', () =
       poolStatus: 'open',
       seatCount: 2,
     });
-    expect(quote).toHaveBeenCalledWith(expect.objectContaining({ rideId: poolAId, seatCount: 2 }));
+    // Priced inside the seat txn from the locked state: seat count AFTER the join,
+    // itinerary including the joiner (two members -> 4 stops).
+    expect(quote).toHaveBeenCalledWith(
+      expect.objectContaining({
+        poolId: poolAId,
+        passengerId: pId,
+        seatCount: 2,
+        stops: expect.arrayContaining([expect.objectContaining({ passengerId: pId })]),
+      }),
+    );
+    expect((quote.mock.calls[0][0] as { stops: unknown[] }).stops).toHaveLength(4);
     const seat = await admin.query(
-      'SELECT quoted_fare_cents FROM pool_member WHERE pool_id = $1 AND passenger_id = $2',
+      'SELECT agreed_fare_cents FROM pool_member WHERE pool_id = $1 AND passenger_id = $2',
       [poolAId, pId],
     );
-    expect(seat.rows).toEqual([{ quoted_fare_cents: 6_100 }]);
+    expect(seat.rows).toEqual([{ agreed_fare_cents: 6_100 }]);
   });
 
   it('seat_count in Postgres is derived from membership', async () => {
@@ -121,14 +133,14 @@ describe.skipIf(skip)('MatchingService — integration (Postgres + Redis)', () =
   });
 
   it('the seat that fills pool A closes it; the next request opens a new pool', async () => {
-    const filler = await svc.findOrCreatePool(request(await passenger()));
+    const filler = await svc.findOrCreatePool(request(await passenger()), { quote: fixedFare(5_000) });
     expect(filler).toMatchObject({
       mode: 'slotted',
       sharedRideId: poolAId,
       poolStatus: 'closed_full',
     });
 
-    const result = await svc.findOrCreatePool(request(await passenger()));
+    const result = await svc.findOrCreatePool(request(await passenger()), { quote: fixedFare(5_000) });
     expect(result.mode).toBe('opened');
     const newId = (result as { sharedRideId: string }).sharedRideId;
     poolIds.push(newId);
@@ -140,7 +152,7 @@ describe.skipIf(skip)('MatchingService — integration (Postgres + Redis)', () =
   it('a candidate that filled since it was scored is skipped (advisory discovery)', async () => {
     // A stale view of an open pool that is in fact full by the time we join.
     const reqA = request(await passenger());
-    const fresh = await svc.findOrCreatePool(reqA);
+    const fresh = await svc.findOrCreatePool(reqA, { quote: fixedFare(5_000) });
     const target = (fresh as { sharedRideId: string }).sharedRideId;
     const real = (await s.repo.findById(target))!;
     const scorer = { scoreRoutes: vi.fn().mockResolvedValue(0.95) };
@@ -152,7 +164,7 @@ describe.skipIf(skip)('MatchingService — integration (Postgres + Redis)', () =
       target,
     ]);
 
-    const out = await stale.findOrCreatePool(request(await passenger()));
+    const out = await stale.findOrCreatePool(request(await passenger()), { quote: fixedFare(5_000) });
     expect(out.mode).toBe('opened');
     expect((out as { sharedRideId: string }).sharedRideId).not.toBe(target);
     poolIds.push((out as { sharedRideId: string }).sharedRideId);
@@ -166,7 +178,7 @@ describe.skipIf(skip)('MatchingService — integration (Postgres + Redis)', () =
       seatCount: 0,
     };
     vi.spyOn(s.repo, 'findCandidates').mockResolvedValueOnce([ghost]);
-    const out = await svc.findOrCreatePool(request(await passenger()));
+    const out = await svc.findOrCreatePool(request(await passenger()), { quote: fixedFare(5_000) });
     expect(out.mode).toBe('opened');
     poolIds.push((out as { sharedRideId: string }).sharedRideId);
   });

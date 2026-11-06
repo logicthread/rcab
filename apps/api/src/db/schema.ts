@@ -482,9 +482,14 @@ export const poolMember = pgTable(
     originLng: doublePrecision('origin_lng').notNull(),
     destLat: doublePrecision('dest_lat').notNull(),
     destLng: doublePrecision('dest_lng').notNull(),
-    // Per-seat price quoted at join; final shared-fare policy is an owner
-    // decision (F15) — this only preserves what the passenger was shown.
+    // LEGACY (pre-0017): optional per-seat price shown at join. No longer
+    // written; backfilled into agreed_fare_cents.
     quotedFareCents: integer('quoted_fare_cents'),
+    // Phase-0 stand-in policy SHARED_FARE_POLICY = 'fixed_at_join' (F15/R10):
+    // the per-seat fare in integer paise this passenger agreed to, quoted inside
+    // the join transaction and never readjusted. NOT NULL for new rows (trigger
+    // pool_member_agreed_fare_guard, 0017); NULL only on legacy rows.
+    agreedFareCents: integer('agreed_fare_cents'),
     // Durable link from a shared-create idempotency claim to its seat.
     idempotencyKey: text('idempotency_key'),
     active: boolean('active').notNull().default(true),
@@ -497,6 +502,10 @@ export const poolMember = pgTable(
     check(
       'pool_member_fare_check',
       sql`${t.quotedFareCents} IS NULL OR ${t.quotedFareCents} >= 0`,
+    ),
+    check(
+      'pool_member_agreed_fare_check',
+      sql`${t.agreedFareCents} IS NULL OR ${t.agreedFareCents} >= 0`,
     ),
     check('pool_member_left_check', sql`${t.active} = (${t.leftAt} IS NULL)`),
     unique('pool_member_idempotency_uq').on(t.passengerId, t.idempotencyKey),

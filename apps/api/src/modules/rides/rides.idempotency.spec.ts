@@ -171,11 +171,17 @@ function rideRow(o: Partial<RideRow>): RideRow {
  * idempotency_key) holds. The matching fake commits a seat and its idempotency
  * completion together, as the real seat transaction does (R08).
  */
+const SHARED_QUOTE = {
+  perSeatPrice: { amount: 5_000, currency: 'INR' as const },
+  seatMultiplier: 0.7,
+  detourFactor: 1,
+  policy: 'fixed_at_join' as const,
+};
 type FakeSeat = {
   poolId: string;
   poolState: string;
   opened: boolean;
-  quotedFareCents: number | null;
+  agreedFareCents: number | null;
 };
 const seats = new Map<string, FakeSeat>();
 type FindOpts = {
@@ -195,7 +201,7 @@ function harness(stores?: { rides: FakeRidesStore; idem: FakeIdempotencyStore })
           sharedRideId,
           poolStatus: 'open' as const,
           seatCount: 1,
-          quote: null,
+          quote: SHARED_QUOTE,
         };
         if (opts?.idempotency) {
           const { scope, response } = opts.idempotency;
@@ -203,7 +209,7 @@ function harness(stores?: { rides: FakeRidesStore; idem: FakeIdempotencyStore })
             poolId: sharedRideId,
             poolState: 'open',
             opened: true,
-            quotedFareCents: null,
+            agreedFareCents: SHARED_QUOTE.perSeatPrice.amount,
           });
           await idem.completeIn(null, scope, sharedRideId, response(match));
         }
@@ -221,7 +227,7 @@ function harness(stores?: { rides: FakeRidesStore; idem: FakeIdempotencyStore })
   const scheduled = { scheduleWake: vi.fn().mockResolvedValue({}), cancelWake: vi.fn() };
   const ctrl = new RidesController(
     matching as never,
-    { quoteSeat: vi.fn() } as never,
+    { quoteSeatInItinerary: vi.fn() } as never,
     { findById: vi.fn().mockResolvedValue(null) } as never, // priceMatchedSeat → null
     {} as never,
     {} as never,
@@ -477,7 +483,7 @@ describe('shared create idempotency (F15 / R08)', () => {
               sharedRideId: 'pool-x',
               poolStatus: 'open',
               seatCount: 1,
-              quote: null,
+              quote: SHARED_QUOTE,
             });
         }),
     );
@@ -529,7 +535,7 @@ describe('shared create idempotency (F15 / R08)', () => {
       poolId: 'pool-legacy',
       poolState: 'closed_full',
       opened: false,
-      quotedFareCents: 4_200,
+      agreedFareCents: 4_200,
     });
 
     const retry = await h.ctrl.create(as(ALICE), shared(), 'sk');
@@ -539,6 +545,7 @@ describe('shared create idempotency (F15 / R08)', () => {
       mode: 'slotted',
       poolStatus: 'closed_full',
       perSeatPrice: { amount: 4_200, currency: 'INR' },
+      farePolicy: 'fixed_at_join',
     });
     expect(h.matching.findOrCreatePool).toHaveBeenCalledTimes(1); // only the dead attempt
     expect(h.idem.complete).toHaveBeenCalledTimes(1);
@@ -552,7 +559,7 @@ describe('shared create idempotency (F15 / R08)', () => {
       poolId: 'pool-legacy',
       poolState: 'open',
       opened: true,
-      quotedFareCents: null,
+      agreedFareCents: 3_000,
     });
     h.idem.complete.mockRejectedValueOnce(new Error('blip'));
 
@@ -568,7 +575,7 @@ describe('shared create idempotency (F15 / R08)', () => {
       poolId: 'pool-legacy',
       poolState: 'open',
       opened: true,
-      quotedFareCents: null,
+      agreedFareCents: 3_000,
     });
     h.idem.complete.mockRejectedValue(new Error('db down'));
 
@@ -576,6 +583,21 @@ describe('shared create idempotency (F15 / R08)', () => {
       sharedRideId: 'pool-legacy',
     });
     expect(h.idem.complete).toHaveBeenCalledTimes(3);
+  });
+
+  it('a legacy seat without any recorded fare is never answered as a price-less success', async () => {
+    await deadAttempt(ALICE, 'sk');
+    h.idem.age(scopeOf(ALICE, 'sk'), PENDING_RECLAIM_AFTER_MS + 1_000);
+    seats.set(`${ALICE}|sk`, {
+      poolId: 'pool-legacy',
+      poolState: 'open',
+      opened: true,
+      agreedFareCents: null,
+    });
+    await expect(h.ctrl.create(as(ALICE), shared(), 'sk')).rejects.toMatchObject({
+      status: 500,
+      response: { code: 'fare_unavailable', sharedRideId: 'pool-legacy' },
+    });
   });
 
   it('a stale claim with a different fingerprint is a 422, never reclaimed', async () => {
@@ -636,7 +658,7 @@ describe('shared create idempotency (F15 / R08)', () => {
       poolId: 'pool-mine',
       poolState: 'open',
       opened: true,
-      quotedFareCents: 900,
+      agreedFareCents: 900,
     });
     await expect(h.ctrl.create(as(ALICE), shared(), undefined)).resolves.toEqual({
       sharedRideId: 'pool-mine',
@@ -644,6 +666,7 @@ describe('shared create idempotency (F15 / R08)', () => {
       mode: 'opened',
       poolStatus: 'open',
       perSeatPrice: { amount: 900, currency: 'INR' },
+      farePolicy: 'fixed_at_join',
     });
   });
 

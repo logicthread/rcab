@@ -181,8 +181,8 @@ export async function seedClosedPool(
     };
     members.push(m);
     await db.query(
-      `INSERT INTO pool_member (pool_id, passenger_id, origin_lat, origin_lng, dest_lat, dest_lng)
-       VALUES ($1, $2, $3, $4, $5, $6)`,
+      `INSERT INTO pool_member (pool_id, passenger_id, origin_lat, origin_lng, dest_lat, dest_lng, agreed_fare_cents)
+       VALUES ($1, $2, $3, $4, $5, $6, 6000)`,
       [poolId, p, m.origin_lat, m.origin_lng, m.dest_lat, m.dest_lng],
     );
   }

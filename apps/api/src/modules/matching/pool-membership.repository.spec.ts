@@ -9,7 +9,7 @@ const M: NewPoolMember = {
   originLng: 2,
   destLat: 3,
   destLng: 4,
-  quotedFareCents: 5_000,
+  agreedFareCents: 5_000,
   idempotencyKey: 'k-1',
 };
 
@@ -46,11 +46,22 @@ describe('PoolMembershipRepository.insertMember', () => {
         poolId: 'pool-1',
         passengerId: 'p-1',
         seats: 1,
-        quotedFareCents: 5_000,
+        agreedFareCents: 5_000,
         idempotencyKey: 'k-1',
       }),
     );
   });
+
+  it.each([null, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY])(
+    'refuses to seat a passenger with an invalid agreed fare (%s)',
+    async (bad) => {
+      const { tx, values } = makeTx();
+      await expect(
+        repo.insertMember(tx as never, { ...M, agreedFareCents: bad as unknown as number }),
+      ).rejects.toThrow(/invalid agreed fare/);
+      expect(values).not.toHaveBeenCalled();
+    },
+  );
 
   it.each([
     [Constraint.PoolNotOpen, 'pool_closed'],
@@ -211,12 +222,12 @@ describe('PoolMembershipRepository reads', () => {
   });
 
   it('seat lookups map the seat and return null when absent', async () => {
-    const seat = { pool_id: 'pool-1', pool_state: 'open', opened: true, quoted_fare_cents: '700' };
+    const seat = { pool_id: 'pool-1', pool_state: 'open', opened: true, agreed_fare_cents: '700' };
     const { tx } = makeTx({
       selects: [
         [seat],
         [],
-        [{ ...seat, opened: false, quoted_fare_cents: null }],
+        [{ ...seat, opened: false, agreed_fare_cents: null }],
         [],
         [{ pool_id: 'pool-1', pool_state: 'closed_full' }],
         [],
@@ -226,14 +237,14 @@ describe('PoolMembershipRepository reads', () => {
       poolId: 'pool-1',
       poolState: 'open',
       opened: true,
-      quotedFareCents: 700,
+      agreedFareCents: 700,
     });
     await expect(repo.findByIdempotencyKey(tx as never, 'p-1', 'k')).resolves.toBeNull();
     await expect(repo.findSeat(tx as never, 'pool-1', 'p-1')).resolves.toEqual({
       poolId: 'pool-1',
       poolState: 'open',
       opened: false,
-      quotedFareCents: null,
+      agreedFareCents: null,
     });
     await expect(repo.findSeat(tx as never, 'pool-1', 'p-1')).resolves.toBeNull();
     await expect(repo.findActiveForPassenger(tx as never, 'p-1')).resolves.toEqual({

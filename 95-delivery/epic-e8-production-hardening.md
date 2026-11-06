@@ -32,6 +32,7 @@ Completing every story in this epic ⇒ Demo 7 passes.
 | RCAB-E8.S6 | TLS + HSTS + CSP audit | · |
 | RCAB-E8.S7 | [[story-rcab-e8-s7-review-remediation-stage-ab]] — Review remediation Stage A+B (runtime, config, sessions, booking, idempotency) | ▶ |
 | RCAB-E8.S8 | [[story-rcab-e8-s8-review-remediation-stage-c]] — Review remediation Stage C (offer auth, driver exclusivity, durable dispatch, pool transactions) | ▶ |
+| RCAB-E8.S9 | [[story-rcab-e8-s9-shared-fare-readjustment-policy]] — Shared fare readjustment policy (replaces the fixed-at-join stand-in) | · |
 
 ## Demo 7 headline (verbatim from [[delivery-roadmap]])
 

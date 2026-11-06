@@ -35,6 +35,10 @@ export const Constraint = {
   PoolNotOpen: 'pool_member_pool_open',
   /** 23514 — the insert would push seat_count past max_seats (pool full). */
   PoolCapacity: 'shared_rides_seat_capacity_check',
+  /** 23514 — a new member without an agreed fare (trigger pool_member_agreed_fare_guard). */
+  PoolMemberFareRequired: 'pool_member_agreed_fare_required',
+  /** 23514 — an agreed fare is fixed at join and cannot be changed. */
+  PoolMemberFareImmutable: 'pool_member_agreed_fare_immutable',
 } as const;
 
 export type ConstraintName = (typeof Constraint)[keyof typeof Constraint];
