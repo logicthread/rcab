@@ -4,6 +4,8 @@ import { ConfigService } from '@nestjs/config';
 import type { Job, Queue } from 'bullmq';
 import { and, eq, gt, inArray, sql } from 'drizzle-orm';
 import { getNumber } from '../../common/utils/env';
+import { rearmScheduledRide } from '../scheduled/scheduled-retry';
+import { scheduledWindowFromConfig, type ScheduledDispatchWindow } from '../scheduled/scheduled-window';
 import { DRIZZLE_DB, type DrizzleDb } from '../../infra/db/drizzle.module';
 import { dispatchOffer, rides, sharedRide } from '../../db/schema';
 import { HARD_FAIL_JOB, WAVE_TIMEOUT_JOB } from '../dispatch/dispatch.service';
@@ -35,6 +37,8 @@ export interface ReconcileReport {
   wakeRearmed: number;
   dispatchRearmed: number;
   timersRestored: number;
+  /** Scheduled rides re-armed under a new generation because their window closed unanswered. */
+  scheduledRetried: number;
   poolExpireRearmed: number;
   outboxPending: number;
   outboxOldestPendingAgeS: number | null;
@@ -64,6 +68,7 @@ export class DispatchReconciler implements OnApplicationBootstrap, OnModuleDestr
   private readonly waveOneTimeoutMs: number;
   private readonly hardFailMs: number;
   private readonly poolTimeoutMs: number;
+  private readonly scheduledWindow: ScheduledDispatchWindow;
 
   constructor(
     @Inject(DRIZZLE_DB) private readonly db: DrizzleDb,
@@ -80,6 +85,7 @@ export class DispatchReconciler implements OnApplicationBootstrap, OnModuleDestr
       min: 1,
     });
     this.hardFailMs = getNumber(config, 'DISPATCH_HARD_FAIL_MS', 60_000, { integer: true, min: 1 });
+    this.scheduledWindow = scheduledWindowFromConfig(config);
     this.poolTimeoutMs = getNumber(config, 'MATCHING_POOL_TIMEOUT_MS', 60_000, {
       integer: true,
       min: 1,
@@ -119,6 +125,7 @@ export class DispatchReconciler implements OnApplicationBootstrap, OnModuleDestr
       wakeRearmed: 0,
       dispatchRearmed: 0,
       timersRestored: 0,
+      scheduledRetried: 0,
       poolExpireRearmed: 0,
       outboxPending: 0,
       outboxOldestPendingAgeS: null,
@@ -140,7 +147,11 @@ export class DispatchReconciler implements OnApplicationBootstrap, OnModuleDestr
       }
     });
     if (
-      report.wakeRearmed + report.dispatchRearmed + report.timersRestored + report.poolExpireRearmed >
+      report.wakeRearmed +
+        report.dispatchRearmed +
+        report.timersRestored +
+        report.scheduledRetried +
+        report.poolExpireRearmed >
       0
     ) {
       this.log.warn({ ...report }, 'reconcile repaired missing durable work');
@@ -203,7 +214,12 @@ export class DispatchReconciler implements OnApplicationBootstrap, OnModuleDestr
 
   private async reconcileSoloDispatch(report: ReconcileReport): Promise<void> {
     const open = await this.db
-      .select({ id: rides.id, generation: rides.dispatchGeneration })
+      .select({
+        id: rides.id,
+        generation: rides.dispatchGeneration,
+        type: rides.type,
+        updatedAt: rides.updatedAt,
+      })
       .from(rides)
       .where(
         and(
@@ -214,7 +230,10 @@ export class DispatchReconciler implements OnApplicationBootstrap, OnModuleDestr
       )
       .limit(MAX_PER_PASS);
     for (const ride of open) {
-      await this.reconcileDispatching('solo', ride.id, ride.generation, report);
+      await this.reconcileDispatching('solo', ride.id, ride.generation, report, {
+        scheduled: ride.type === 'scheduled',
+        idleSince: ride.updatedAt,
+      });
     }
   }
 
@@ -292,7 +311,11 @@ export class DispatchReconciler implements OnApplicationBootstrap, OnModuleDestr
     tripId: string,
     generation: number,
     report: ReconcileReport,
+    ctx: { scheduled: boolean; idleSince: Date } = { scheduled: false, idleSince: new Date() },
   ): Promise<void> {
+    // Scheduled rides run on their own (longer) window; see scheduled-window.ts.
+    const waveOneTimeoutMs = ctx.scheduled ? this.scheduledWindow.waveOneMs : this.waveOneTimeoutMs;
+    const hardFailMs = ctx.scheduled ? this.scheduledWindow.hardFailMs : this.hardFailMs;
     const startId = dispatchStartJobId(tripId, generation);
     const hardFailIds = [hardFailJobId(tripId, generation), legacyHardFailJobId(tripId)];
     const wave2Ids = [wave2JobId(tripId, generation), legacyWave2JobId(tripId)];
@@ -302,6 +325,20 @@ export class DispatchReconciler implements OnApplicationBootstrap, OnModuleDestr
 
     const offers = await this.offerSummary(kind, tripId, generation);
     const hasHardFail = await this.hasLiveJob(this.dispatchQueue, hardFailIds);
+
+    // A scheduled ride still `requested` after its window, with no timer left to
+    // close that window (lost, or exhausted), is RETRIED under a new generation
+    // with a fresh window, never expired and never capped (owner decision,
+    // RCAB-E8.S8). Same transaction + generation guard as the hard-fail path, so
+    // a concurrent hard-fail / cancel / accept makes this a no-op (null). Not
+    // announced to the passenger from here: only the hard-fail path notifies.
+    if (ctx.scheduled && !hasHardFail) {
+      const windowStart = (offers.firstOfferedAt ?? ctx.idleSince).getTime();
+      if (Date.now() >= windowStart + hardFailMs) {
+        if (await rearmScheduledRide(this.db, tripId, generation)) report.scheduledRetried++;
+        return;
+      }
+    }
 
     if (!hasHardFail && offers.count === 0) {
       // Wave 1 never completed (or its timers were lost): start it again. The
@@ -346,14 +383,14 @@ export class DispatchReconciler implements OnApplicationBootstrap, OnModuleDestr
         { rideId: tripId, kind, generation },
         {
           jobId: hardFailIds[0],
-          delay: Math.max(0, base + this.hardFailMs - now),
+          delay: Math.max(0, base + hardFailMs - now),
           removeOnComplete: true,
           removeOnFail: 100,
         },
       );
       report.timersRestored++;
     }
-    const waveOneEndsAt = base + this.waveOneTimeoutMs;
+    const waveOneEndsAt = base + waveOneTimeoutMs;
     if (now < waveOneEndsAt && !(await this.hasLiveJob(this.dispatchQueue, wave2Ids))) {
       await this.removeFinished(this.dispatchQueue, wave2Ids[0]);
       await this.dispatchQueue.add(

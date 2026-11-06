@@ -1,4 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
+
+const { rearm } = vi.hoisted(() => ({ rearm: vi.fn() }));
+vi.mock('../scheduled/scheduled-retry', () => ({ rearmScheduledRide: rearm }));
+
 import {
   DispatchService,
   computeStops,
@@ -846,5 +850,92 @@ describe('DispatchService.onRideCancelled / releaseDispatch', () => {
     gone.queue.remove.mockRejectedValue(new Error('redis down'));
     await expect(gone.svc.releaseDispatch(RIDE)).resolves.toBeUndefined();
     expect(gone.queue.remove).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('DispatchService: scheduled window (RCAB-E8.S8)', () => {
+  const job = (data: HardFailJob) => ({ data }) as Job<HardFailJob>;
+  const retryResult = (o: Record<string, unknown> = {}) => ({
+    rideId: RIDE,
+    passengerId: 'c-1',
+    previousGeneration: 1,
+    generation: 2,
+    retryCount: 1,
+    firstRetry: true,
+    revokedOffers: [{ offerId: OFFER, driverId: DRIVER }],
+    ...o,
+  });
+
+  it('a scheduled ride arms wave 2 at 120 s and the window end at 240 s by default', async () => {
+    const m = makeService();
+    await m.svc.runSoloWave(soloRide({ id: RIDE, type: 'scheduled' }), 1, 1);
+    expect(m.queue.add).toHaveBeenCalledWith(
+      WAVE_TIMEOUT_JOB,
+      expect.anything(),
+      expect.objectContaining({ delay: 120_000 }),
+    );
+    expect(m.queue.add).toHaveBeenCalledWith(
+      HARD_FAIL_JOB,
+      expect.anything(),
+      expect.objectContaining({ delay: 240_000 }),
+    );
+  });
+
+  it('the scheduled window is configurable and does not move the normal windows', async () => {
+    const m = makeService({
+      SCHEDULED_DISPATCH_WINDOW_MS: '300000',
+      SCHEDULED_DISPATCH_WAVE_ONE_MS: '100000',
+    });
+    await m.svc.runSoloWave(soloRide({ id: RIDE, type: 'scheduled' }), 1, 1);
+    expect(m.queue.add).toHaveBeenCalledWith(WAVE_TIMEOUT_JOB, expect.anything(), expect.objectContaining({ delay: 100_000 }));
+    expect(m.queue.add).toHaveBeenCalledWith(HARD_FAIL_JOB, expect.anything(), expect.objectContaining({ delay: 300_000 }));
+
+    const normal = makeService({ SCHEDULED_DISPATCH_WINDOW_MS: '300000' });
+    await normal.svc.runSoloWave(soloRide({ id: RIDE, type: 'normal' }), 1, 1);
+    expect(normal.queue.add).toHaveBeenCalledWith(WAVE_TIMEOUT_JOB, expect.anything(), expect.objectContaining({ delay: 30_000 }));
+    expect(normal.queue.add).toHaveBeenCalledWith(HARD_FAIL_JOB, expect.anything(), expect.objectContaining({ delay: 60_000 }));
+  });
+
+  it('rejects an invalid scheduled window at construction', () => {
+    expect(() => makeService({ SCHEDULED_DISPATCH_WINDOW_MS: 'soon' })).toThrow(/SCHEDULED_DISPATCH_WINDOW_MS/);
+    expect(() => makeService({ SCHEDULED_DISPATCH_WINDOW_MS: '0' })).toThrow(/SCHEDULED_DISPATCH_WINDOW_MS/);
+    expect(() =>
+      makeService({ SCHEDULED_DISPATCH_WINDOW_MS: '1000', SCHEDULED_DISPATCH_WAVE_ONE_MS: '2000' }),
+    ).toThrow(/SCHEDULED_DISPATCH_WAVE_ONE_MS/);
+  });
+
+  it('hard-fail on a scheduled ride re-arms it instead of marking no_driver; first retry tells the passenger once', async () => {
+    rearm.mockReset().mockResolvedValue(retryResult());
+    const m = makeService();
+    m.ridesRepo.findById.mockResolvedValue(soloRide({ id: RIDE, type: 'scheduled' }));
+    await m.svc.handleHardFail(job({ rideId: RIDE, kind: 'solo', generation: 1 }));
+    expect(rearm).toHaveBeenCalledWith(m.db, RIDE, 1);
+    expect(m.ridesRepo.markNoDriver).not.toHaveBeenCalled();
+    expect(m.bus.toUser).toHaveBeenCalledTimes(1);
+    expect(m.bus.toUser).toHaveBeenCalledWith('c-1', 'ride_dispatch_retry', { rideId: RIDE, retryCount: 1 });
+    expect(m.bus.toUser).not.toHaveBeenCalledWith('c-1', 'ride_no_driver', expect.anything());
+    expect(m.bus.toDriver).toHaveBeenCalledWith(DRIVER, 'ride_offer_revoked', expect.objectContaining({ offerId: OFFER }));
+    expect(m.queue.remove).toHaveBeenCalledWith(hardFailJobId(RIDE, 1));
+  });
+
+  it('later re-arms are silent (no passenger spam) and a stale/cancelled ride is a no-op', async () => {
+    const m = makeService();
+    m.ridesRepo.findById.mockResolvedValue(soloRide({ id: RIDE, type: 'scheduled' }));
+    rearm.mockReset().mockResolvedValue(retryResult({ generation: 3, retryCount: 2, firstRetry: false, previousGeneration: 2 }));
+    await m.svc.handleHardFail(job({ rideId: RIDE, kind: 'solo', generation: 2 }));
+    expect(m.bus.toUser).not.toHaveBeenCalled();
+
+    rearm.mockReset().mockResolvedValue(null);
+    await m.svc.handleHardFail(job({ rideId: RIDE, kind: 'solo', generation: 1 }));
+    expect(m.bus.toUser).not.toHaveBeenCalled();
+    expect(m.ridesRepo.markNoDriver).not.toHaveBeenCalled();
+  });
+
+  it('a normal ride still goes to no_driver (never re-armed)', async () => {
+    rearm.mockReset();
+    const m = makeService();
+    await m.svc.handleHardFail(job({ rideId: RIDE, kind: 'solo', generation: 1 }));
+    expect(rearm).not.toHaveBeenCalled();
+    expect(m.ridesRepo.markNoDriver).toHaveBeenCalledWith(RIDE, 1);
   });
 });

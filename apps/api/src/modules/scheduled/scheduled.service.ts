@@ -14,8 +14,10 @@ export const SCHEDULED_WAKE_JOB = 'scheduled:wake';
 
 /** Wake this many ms BEFORE `scheduled_for` so dispatch has lead time to find a
  *  driver before pickup (RCAB-E6 / [[features-scheduled-booking]]).
- *  NOTE: the accept/escalation window after the wake is NOT changed by Stage C
- *  (contract flag F-1). */
+ *  The accept/escalation window after the wake is 4 minutes
+ *  (`SCHEDULED_DISPATCH_WINDOW_MS`, scheduled-window.ts; owner decision on
+ *  contract flag F-1), and an unanswered window is retried, not expired
+ *  (scheduled-retry.ts). */
 export const SCHEDULED_WAKE_LEAD_MS = 10 * 60 * 1000; // 10 minutes
 
 export interface ScheduledWakeJob {

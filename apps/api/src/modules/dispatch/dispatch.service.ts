@@ -27,6 +27,8 @@ import {
 } from './assignment.repository';
 import { DriverAssignmentProjection } from './driver-assignment.projection';
 import { withTxRetry } from './tx-retry';
+import { rearmScheduledRide } from '../scheduled/scheduled-retry';
+import { scheduledWindowFromConfig, type ScheduledDispatchWindow } from '../scheduled/scheduled-window';
 import {
   wave2JobId as waveTwoJobId,
   hardFailJobId,
@@ -87,6 +89,8 @@ interface DispatchParams {
   r2Meters: number;
   waveOneTimeoutMs: number;
   hardFailMs: number;
+  /** Window for scheduled rides (RCAB-E8.S8): 4 min by default, see scheduled-window.ts. */
+  scheduled: ScheduledDispatchWindow;
 }
 
 /** What the accept transaction decided, plus what to tell people after commit. */
@@ -128,6 +132,7 @@ export class DispatchService {
         min: 1,
       }),
       hardFailMs: getNumber(config, 'DISPATCH_HARD_FAIL_MS', 60_000, { integer: true, min: 1 }),
+      scheduled: scheduledWindowFromConfig(config),
     };
   }
 
@@ -408,7 +413,9 @@ export class DispatchService {
       this.safely('ride_offer', () => this.bus.toDriver(driverId, 'ride_offer', payload));
     }
 
-    if (waveNumber === 1) await this.scheduleTimers(ride.id, 'solo', generation);
+    if (waveNumber === 1) {
+      await this.scheduleTimers(ride.id, 'solo', generation, ride.type === 'scheduled');
+    }
   }
 
   /**
@@ -508,6 +515,13 @@ export class DispatchService {
     const { rideId, kind, generation } = job.data;
 
     if (kind === 'solo') {
+      // A scheduled ride whose window closed with no driver is RETRIED under a
+      // new generation, never expired (RCAB-E8.S8; see scheduled-retry.ts).
+      const current = await this.ridesRepo.findById(rideId);
+      if (current?.type === 'scheduled') {
+        await this.retryScheduledRide(rideId, generation);
+        return;
+      }
       // One transaction (ride lock → no_driver → revoke live offers); a ride
       // claimed / cancelled / re-dispatched in the same instant is untouched.
       const failed = await this.ridesRepo.markNoDriver(rideId, generation);
@@ -538,6 +552,26 @@ export class DispatchService {
     await this.projectPool(rideId);
     // Phase-0: an aborted pool is terminal. Re-queueing each member as an
     // individual solo ride is a future enhancement (owner decision F-5).
+  }
+
+  /**
+   * The scheduled window closed with no acceptance: re-arm under a new
+   * generation (one transaction, outbox intent for the relay) and clean up after
+   * commit. The passenger hears about it on the first re-arm only.
+   */
+  private async retryScheduledRide(rideId: string, generation: number | undefined): Promise<void> {
+    const retried = await rearmScheduledRide(this.db, rideId, generation);
+    if (!retried) return;
+    this.notifyRevoked({ kind: 'solo', rideId }, retried.revokedOffers, 'revoked');
+    if (retried.firstRetry) {
+      this.safely('ride_dispatch_retry', () =>
+        this.bus.toUser(retried.passengerId, 'ride_dispatch_retry', {
+          rideId,
+          retryCount: retried.retryCount,
+        }),
+      );
+    }
+    await this.removeTimers(rideId, retried.previousGeneration);
   }
 
   /**
@@ -580,13 +614,17 @@ export class DispatchService {
     tripRef: string,
     kind: 'solo' | 'pool',
     generation: number,
+    scheduled = false,
   ): Promise<void> {
+    const { waveOneTimeoutMs, hardFailMs } = scheduled
+      ? { waveOneTimeoutMs: this.params.scheduled.waveOneMs, hardFailMs: this.params.scheduled.hardFailMs }
+      : this.params;
     await this.queue.add(
       WAVE_TIMEOUT_JOB,
       { rideId: tripRef, waveNumber: 2, kind, generation } satisfies WaveTimeoutJob,
       {
         jobId: waveTwoJobId(tripRef, generation),
-        delay: this.params.waveOneTimeoutMs,
+        delay: waveOneTimeoutMs,
         removeOnComplete: true,
         removeOnFail: 100,
       },
@@ -596,7 +634,7 @@ export class DispatchService {
       { rideId: tripRef, kind, generation } satisfies HardFailJob,
       {
         jobId: hardFailJobId(tripRef, generation),
-        delay: this.params.hardFailMs,
+        delay: hardFailMs,
         removeOnComplete: true,
         removeOnFail: 100,
       },
