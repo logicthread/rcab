@@ -11,6 +11,7 @@ import {
   ROUTE,
   buildPoolStack,
   cleanupPools,
+  fixedFare,
   memberAt,
   poolInvariantViolations,
   seedPassenger,
@@ -55,7 +56,7 @@ describe.skipIf(skip)('PoolLifecycleService — integration (Postgres + Redis)',
       maxSeats: 3,
       detourBudgetM: 800,
       passengerId: opener,
-      quotedFareCents: 12_345,
+      quoteFare: fixedFare(12_345),
     });
     expect(res).toMatchObject({
       poolState: 'open',
@@ -102,10 +103,10 @@ describe.skipIf(skip)('PoolLifecycleService — integration (Postgres + Redis)',
       aggregate_type: 'shared_ride',
       dedupe_key: `pool.expire.schedule:${poolId}:g0`,
     });
-    const fare = await admin.query('SELECT quoted_fare_cents FROM pool_member WHERE pool_id = $1', [
+    const fare = await admin.query('SELECT agreed_fare_cents FROM pool_member WHERE pool_id = $1', [
       poolId,
     ]);
-    expect(fare.rows).toEqual([{ quoted_fare_cents: 12_345 }]);
+    expect(fare.rows).toEqual([{ agreed_fare_cents: 12_345 }]);
 
     expect(await redis.hgetall(`pool:${poolId}`)).toMatchObject({
       state: 'open',
@@ -131,14 +132,14 @@ describe.skipIf(skip)('PoolLifecycleService — integration (Postgres + Redis)',
       maxSeats: 2,
       detourBudgetM: 800,
       passengerId: opener,
-      quotedFareCents: null,
+      quoteFare: fixedFare(7_000),
     });
     const poolId = res.rideId;
     poolIds.push(poolId);
 
     await expect(
-      s.lifecycle.joinPool({ poolId, joiner: memberAt(joiner, 1), quotedFareCents: 8_000 }),
-    ).resolves.toEqual({ joined: true, closedFull: true, seatCount: 2 });
+      s.lifecycle.joinPool({ poolId, joiner: memberAt(joiner, 1), quoteFare: fixedFare(8_000) }),
+    ).resolves.toMatchObject({ joined: true, closedFull: true, seatCount: 2 });
 
     const db = await snapshot(admin, poolId);
     expect(db).toMatchObject({ poolState: 'closed_full', seatCount: 2, generation: 1, stops: 4 });
@@ -163,7 +164,7 @@ describe.skipIf(skip)('PoolLifecycleService — integration (Postgres + Redis)',
       maxSeats: 3,
       detourBudgetM: 800,
       passengerId: opener,
-      quotedFareCents: null,
+      quoteFare: fixedFare(7_000),
     });
     const poolId = res.rideId;
     poolIds.push(poolId);

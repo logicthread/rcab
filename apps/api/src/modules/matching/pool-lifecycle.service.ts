@@ -15,6 +15,7 @@ import {
   type PoolLockRow,
 } from './pool-membership.repository';
 import { PoolProjectionService } from './pool-projection.service';
+import type { SeatFareQuoter, SeatQuote } from '../pricing/pricing.types';
 import {
   SharedRideRepository,
   type SharedRideMember,
@@ -45,12 +46,17 @@ export interface OpenPoolParams {
   passengerId: string;
 }
 
-/** What a committed seat looks like to the caller (and to its idempotency record). */
+/**
+ * What a committed seat looks like to the caller (and to its idempotency
+ * record). `quote` is the fare the passenger agreed to, priced and persisted in
+ * the same transaction as the seat (SHARED_FARE_POLICY = fixed_at_join).
+ */
 export interface SeatOutcome {
   sharedRideId: string;
   mode: 'opened' | 'slotted';
   poolStatus: 'open' | 'closed_full';
   seatCount: number;
+  quote: SeatQuote;
 }
 
 /**
@@ -79,7 +85,7 @@ export class PoolOpenRejectedError extends Error {
 }
 
 export type JoinPoolResult =
-  | { joined: true; closedFull: boolean; seatCount: number }
+  | { joined: true; closedFull: boolean; seatCount: number; quote: SeatQuote }
   | {
       joined: false;
       reason: InsertMemberFailure | 'not_found' | 'conflict';
@@ -141,14 +147,19 @@ export class PoolLifecycleService {
    */
   async openPool(
     p: OpenPoolParams & {
-      quotedFareCents: number | null;
+      /** Prices the opener's seat INSIDE the transaction; a throw rolls the pool back. */
+      quoteFare: SeatFareQuoter;
       idempotency?: SeatIdempotency;
       /** Pre-generated id (lets the caller quote against it); random otherwise. */
       poolId?: string;
     },
-  ): Promise<SharedRideRow> {
+  ): Promise<SharedRideRow & { quote: SeatQuote }> {
     const poolId = p.poolId ?? randomUUID();
-    const committed = await this.inTx<{ seatCount: number; poolClosedAt: Date } | null>(
+    const committed = await this.inTx<{
+      seatCount: number;
+      poolClosedAt: Date;
+      quote: SeatQuote;
+    } | null>(
       async (tx) => {
         const { poolClosedAt } = await this.repo.insertOpenPool(tx, {
           rideId: poolId,
@@ -160,6 +171,31 @@ export class PoolLifecycleService {
           detourBudgetM: p.detourBudgetM,
           timeoutMs: this.poolTimeoutMs,
         });
+        const quote = await p.quoteFare({
+          poolId,
+          passengerId: p.passengerId,
+          seatCount: 1,
+          directRoute: {
+            originLat: p.originLat,
+            originLng: p.originLng,
+            destLat: p.destLat,
+            destLng: p.destLng,
+          },
+          stops: computeStops({
+            originLat: p.originLat,
+            originLng: p.originLng,
+            members: [
+              {
+                passenger_id: p.passengerId,
+                origin_lat: p.originLat,
+                origin_lng: p.originLng,
+                dest_lat: p.destLat,
+                dest_lng: p.destLng,
+                joined_at: new Date().toISOString(),
+              },
+            ],
+          }),
+        });
         const seat = await this.members.insertMember(tx, {
           poolId,
           passengerId: p.passengerId,
@@ -167,7 +203,7 @@ export class PoolLifecycleService {
           originLng: p.originLng,
           destLat: p.destLat,
           destLng: p.destLng,
-          quotedFareCents: p.quotedFareCents,
+          agreedFareCents: quote.perSeatPrice.amount,
           idempotencyKey: p.idempotency?.scope.key ?? null,
         });
         if (!seat.ok) {
@@ -195,18 +231,20 @@ export class PoolLifecycleService {
               mode: 'opened',
               poolStatus: 'open',
               seatCount: seat.seatCount,
+              quote,
             }),
           );
         }
-        return { seatCount: seat.seatCount, poolClosedAt };
+        return { seatCount: seat.seatCount, poolClosedAt, quote };
       },
       () => null,
     );
     if (committed === null) throw new PoolOpenRejectedError('conflict');
 
     const row = await this.afterCommit(poolId, { joinPassengerId: p.passengerId, kickRelay: true });
-    return (
-      row ?? {
+    const quote = committed.quote;
+    return {
+      ...(row ?? {
         // Post-commit re-read failed: describe the committed pool from the txn.
         rideId: poolId,
         seatCount: committed.seatCount,
@@ -232,20 +270,30 @@ export class PoolLifecycleService {
         claimedAt: null,
         dispatchGeneration: 0,
         stateVersion: 0,
-      }
-    );
+      }),
+      quote,
+    };
   }
 
   /**
    * ONE txn: lock the pool → re-validate open + free capacity (candidate
-   * discovery was advisory) → insert the member (the DB re-checks everything)
+   * discovery was advisory) → price the seat from the locked state (Phase-0
+   * stand-in SHARED_FARE_POLICY = fixed_at_join: seat count after this join,
+   * itinerary incl. the joiner; earlier members are never repriced; a pricing
+   * failure throws and rolls everything back) → insert the member with its
+   * agreed fare (the DB re-checks everything)
    * → close `closed_full` in the same txn when this seat filled it →
    * idempotency complete. Typed failures leave the pool untouched.
    */
   async joinPool(p: {
     poolId: string;
     joiner: SharedRideMember;
-    quotedFareCents: number | null;
+    /**
+     * Prices the joiner's seat INSIDE the transaction, from the locked pool
+     * state (seat count after this join, itinerary including the joiner). A
+     * throw rolls the join back: a seat is never committed without its fare.
+     */
+    quoteFare: SeatFareQuoter;
     idempotency?: SeatIdempotency;
   }): Promise<JoinPoolResult> {
     const result = await this.inTx<JoinPoolResult>(
@@ -255,6 +303,29 @@ export class PoolLifecycleService {
         if (pool.poolState !== 'open') return { joined: false, reason: 'pool_closed' };
         if (pool.seatCount >= pool.maxSeats) return { joined: false, reason: 'pool_full' };
 
+        // Fixed-at-join fare (SHARED_FARE_POLICY): priced from the LOCKED state
+        // so a concurrent join cannot change the seat count under the quote.
+        // Earlier members' fares are never touched.
+        const existing = await this.members.listMembers(tx, p.poolId);
+        const quote = await p.quoteFare({
+          poolId: p.poolId,
+          passengerId: p.joiner.passenger_id,
+          seatCount: pool.seatCount + 1,
+          directRoute: {
+            originLat: p.joiner.origin_lat,
+            originLng: p.joiner.origin_lng,
+            destLat: p.joiner.dest_lat,
+            destLng: p.joiner.dest_lng,
+          },
+          stops: computeStops({
+            originLat: pool.originLat,
+            originLng: pool.originLng,
+            members: [
+              ...existing.filter((m) => m.passenger_id !== p.joiner.passenger_id),
+              p.joiner,
+            ],
+          }),
+        });
         const seat = await this.members.insertMember(tx, {
           poolId: p.poolId,
           passengerId: p.joiner.passenger_id,
@@ -262,7 +333,7 @@ export class PoolLifecycleService {
           originLng: p.joiner.origin_lng,
           destLat: p.joiner.dest_lat,
           destLng: p.joiner.dest_lng,
-          quotedFareCents: p.quotedFareCents,
+          agreedFareCents: quote.perSeatPrice.amount,
           idempotencyKey: p.idempotency?.scope.key ?? null,
         });
         if (!seat.ok) {
@@ -283,10 +354,11 @@ export class PoolLifecycleService {
               mode: 'slotted',
               poolStatus: closedFull ? 'closed_full' : 'open',
               seatCount: seat.seatCount,
+              quote,
             }),
           );
         }
-        return { joined: true, closedFull, seatCount: seat.seatCount };
+        return { joined: true, closedFull, seatCount: seat.seatCount, quote };
       },
       () => ({ joined: false, reason: 'conflict' }),
     );

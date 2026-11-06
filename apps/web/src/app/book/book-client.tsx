@@ -89,6 +89,7 @@ function BookPage() {
     sharedRideId,
     seatCount,
     poolStatus,
+    agreedFare,
     requestError,
     rideId,
     rideStatus,
@@ -318,9 +319,9 @@ function BookPage() {
       const res = await createSharedRide(pickup, dropoff, intentKeys.keyFor(quoteKey));
       intentKeys.clear();
       if (res.mode === 'opened') {
-        setOpened(res.sharedRideId, 1, res.poolStatus);
+        setOpened(res.sharedRideId, 1, res.poolStatus, res.perSeatPrice);
       } else {
-        setSlotted(res.sharedRideId, 2, res.poolStatus);
+        setSlotted(res.sharedRideId, 2, res.poolStatus, res.perSeatPrice);
       }
     } catch (err) {
       setRequestError(createErrorMessage(err));
@@ -614,6 +615,12 @@ function BookPage() {
                 {' · '}
                 {poolStatus ?? 'pending'}
               </div>
+              {agreedFare && (
+                <div style={{ fontSize: 14, marginTop: 6 }} data-testid="agreed-fare">
+                  Your fare: <strong>{formatMoney(agreedFare)}</strong>{' '}
+                  <span style={{ color: '#525252', fontSize: 12 }}>(fixed when you joined)</span>
+                </div>
+              )}
               <PoolBadge seatCount={seatCount} />
               {stage === 'solo_fallback' && (
                 <SoloFallbackBanner soloFare={quote?.soloFare ?? null} />

@@ -104,8 +104,8 @@ function member(passengerId: string): Record<string, unknown> {
 
 async function addMember(c: Client, poolId: string, passengerId: string): Promise<void> {
   await c.query(
-    `INSERT INTO pool_member (pool_id, passenger_id, origin_lat, origin_lng, dest_lat, dest_lng)
-     VALUES ($1, $2, 12.97, 77.59, 12.93, 77.62)`,
+    `INSERT INTO pool_member (pool_id, passenger_id, origin_lat, origin_lng, dest_lat, dest_lng, agreed_fare_cents)
+     VALUES ($1, $2, 12.97, 77.59, 12.93, 77.62, 6000)`,
     [poolId, passengerId],
   );
 }
@@ -124,7 +124,7 @@ describe.skipIf(skip)('Stage C schema invariants (0014–0016)', () => {
     await Promise.all([c?.end(), c2?.end()]);
   });
 
-  it('records 0014–0016 as applied', async () => {
+  it('records 0014–0017 as applied', async () => {
     const { rows } = await c.query<{ name: string }>(
       `SELECT name FROM _rcab_migrations WHERE name >= '0014' ORDER BY name`,
     );
@@ -132,7 +132,41 @@ describe.skipIf(skip)('Stage C schema invariants (0014–0016)', () => {
       '0014_dispatch_offer_assignment.sql',
       '0015_outbox.sql',
       '0016_pool_membership.sql',
+      '0017_pool_member_agreed_fare.sql',
     ]);
+  });
+
+  it('0017 is re-runnable and backfills agreed_fare_cents from legacy quoted_fare_cents (rolled back)', async () => {
+    const passengerId = await seedUser(c, 'client');
+    const poolId = await seedPool(c, { state: 'open', seatCount: 0 });
+    await c.query('BEGIN');
+    try {
+      // Simulate a pre-0017 row: no agreed fare, only the legacy quote.
+      await c.query('ALTER TABLE pool_member DISABLE TRIGGER pool_member_agreed_fare_guard_trg');
+      await c.query(
+        `INSERT INTO pool_member (pool_id, passenger_id, origin_lat, origin_lng, dest_lat, dest_lng, quoted_fare_cents)
+         VALUES ($1, $2, 12.97, 77.59, 12.93, 77.62, 3300)`,
+        [poolId, passengerId],
+      );
+      await c.query(await readFile(join(MIGRATIONS_DIR, '0017_pool_member_agreed_fare.sql'), 'utf-8'));
+      const { rows } = await c.query(
+        'SELECT agreed_fare_cents, quoted_fare_cents FROM pool_member WHERE pool_id = $1',
+        [poolId],
+      );
+      expect(rows).toEqual([{ agreed_fare_cents: 3300, quoted_fare_cents: 3300 }]);
+      // The re-run re-created the guard: a new member without a fare is rejected again.
+      const other = await seedUser(c, 'client');
+      await c.query('SAVEPOINT s');
+      await expect(
+        c.query(
+          `INSERT INTO pool_member (pool_id, passenger_id, origin_lat, origin_lng, dest_lat, dest_lng)
+           VALUES ($1, $2, 1, 2, 3, 4)`,
+          [poolId, other],
+        ),
+      ).rejects.toMatchObject({ constraint: 'pool_member_agreed_fare_required' });
+    } finally {
+      await c.query('ROLLBACK');
+    }
   });
 
   describe('driver_active_assignment (F06)', () => {
@@ -378,6 +412,7 @@ describe.skipIf(skip)('Stage C schema invariants (0014–0016)', () => {
             originLng: 1,
             destLat: 1,
             destLng: 1,
+            agreedFareCents: 100,
           }),
         );
         expect(pgConstraintViolation(err)).toEqual({

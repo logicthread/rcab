@@ -40,7 +40,8 @@ export interface NewPoolMember {
   originLng: number;
   destLat: number;
   destLng: number;
-  quotedFareCents: number | null;
+  /** Integer paise agreed at join (SHARED_FARE_POLICY = fixed_at_join); never null. */
+  agreedFareCents: number;
   idempotencyKey: string | null;
 }
 
@@ -65,15 +66,15 @@ export interface SeatLookup {
   poolState: string;
   /** True when this passenger opened the pool (earliest member). */
   opened: boolean;
-  /** Per-seat price recorded at join (what the passenger was shown), if any. */
-  quotedFareCents: number | null;
+  /** Per-seat fare the passenger agreed to at join; null only for legacy (pre-0017) seats. */
+  agreedFareCents: number | null;
 }
 
 interface SeatDbRow extends Record<string, unknown> {
   pool_id: string;
   pool_state: string;
   opened: boolean;
-  quoted_fare_cents: number | string | null;
+  agreed_fare_cents: number | string | null;
 }
 
 function seatFromDb(r: SeatDbRow): SeatLookup {
@@ -81,13 +82,14 @@ function seatFromDb(r: SeatDbRow): SeatLookup {
     poolId: r.pool_id,
     poolState: r.pool_state,
     opened: Boolean(r.opened),
-    quotedFareCents: r.quoted_fare_cents === null ? null : Number(r.quoted_fare_cents),
+    agreedFareCents: r.agreed_fare_cents === null ? null : Number(r.agreed_fare_cents),
   };
 }
 
 /** Seat columns + "is this the pool's first member" for one pool_member row `m`. */
 const SEAT_SELECT = sql`
-  SELECT m.pool_id, s.pool_state, m.quoted_fare_cents,
+  SELECT m.pool_id, s.pool_state,
+         COALESCE(m.agreed_fare_cents, m.quoted_fare_cents) AS agreed_fare_cents,
          NOT EXISTS (
            SELECT 1 FROM pool_member o
             WHERE o.pool_id = m.pool_id
@@ -168,6 +170,11 @@ export class PoolMembershipRepository {
    * Returns the post-trigger seat_count on success.
    */
   async insertMember(tx: DrizzleTx, m: NewPoolMember): Promise<InsertMemberResult> {
+    // The agreed fare is mandatory (F15): never seat a passenger without one.
+    // The DB trigger enforces it too; this fails earlier with a readable cause.
+    if (!Number.isSafeInteger(m.agreedFareCents) || m.agreedFareCents < 0) {
+      throw new Error(`insertMember: invalid agreed fare ${String(m.agreedFareCents)}`);
+    }
     try {
       await tx.transaction(async (sp) => {
         await sp.insert(poolMember).values({
@@ -178,7 +185,7 @@ export class PoolMembershipRepository {
           originLng: m.originLng,
           destLat: m.destLat,
           destLng: m.destLng,
-          quotedFareCents: m.quotedFareCents,
+          agreedFareCents: m.agreedFareCents,
           idempotencyKey: m.idempotencyKey,
         });
       });

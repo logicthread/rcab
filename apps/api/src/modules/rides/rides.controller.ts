@@ -14,6 +14,7 @@ import {
   UseGuards,
   Req,
   ForbiddenException,
+  InternalServerErrorException,
 } from '@nestjs/common';
 import type { Request } from 'express';
 import { AuthGuard, type JwtPayload } from '../../common/guards/auth.guard';
@@ -24,7 +25,7 @@ import { RideStopRepository } from '../matching/ride-stop.repository';
 import { RouteSimilarityService, type RouteGeometry } from '../matching/route-similarity.service';
 import { PricingService } from '../pricing/pricing.service';
 import type { Money } from '../pricing/money';
-import type { PoolForPricing, SeatQuote } from '../pricing/pricing.types';
+import { SHARED_FARE_POLICY, type SharedFarePolicy } from '../pricing/shared-fare-policy';
 import { CreateRideDto, RideType } from './dto/create-ride.dto';
 import { QuoteRideDto } from './dto/quote-ride.dto';
 import { TransitionRideDto } from './dto/transition-ride.dto';
@@ -56,7 +57,13 @@ export interface CreateRideResponse {
   passengerId: string;
   mode: SeatMatch['mode'];
   poolStatus: PoolStatus;
-  perSeatPrice?: Money;
+  /**
+   * The per-seat fare this passenger agreed to, fixed at join (Phase-0
+   * stand-in policy, SHARED_FARE_POLICY). Always present on a successful seat.
+   */
+  perSeatPrice: Money;
+  farePolicy: SharedFarePolicy;
+  /** Quote breakdown; absent when replaying a legacy seat or a seat re-read from the DB. */
   seatMultiplier?: number;
   detourFactor?: number;
 }
@@ -338,9 +345,10 @@ export class RidesController {
       passengerId,
       mode: m.mode,
       poolStatus: m.poolStatus,
-      perSeatPrice: m.quote?.perSeatPrice,
-      seatMultiplier: m.quote?.seatMultiplier,
-      detourFactor: m.quote?.detourFactor,
+      perSeatPrice: m.quote.perSeatPrice,
+      farePolicy: m.quote.policy,
+      seatMultiplier: m.quote.seatMultiplier,
+      detourFactor: m.quote.detourFactor,
     });
 
     const result = await this.matching.findOrCreatePool(
@@ -352,7 +360,9 @@ export class RidesController {
         destLng: dto.destLng,
       },
       {
-        quote: (target) => this.priceMatchedSeat(target, dto),
+        // Priced inside the seat transaction from the locked pool state; a
+        // routing failure fails the booking (503), never a seat without a fare.
+        quote: (ctx) => this.pricing.quoteSeatInItinerary(ctx),
         idempotency: scope ? { scope, response: toResponse } : undefined,
       },
     );
@@ -743,40 +753,29 @@ export class RidesController {
       });
     }
   }
-
-  /** Seat price for joining `target`; a pricing failure yields no quote (F15: policy open). */
-  private async priceMatchedSeat(
-    target: PoolForPricing,
-    dto: CreateRideDto,
-  ): Promise<SeatQuote | null> {
-    try {
-      return await this.pricing.quoteSeat(target, {
-        route: {
-          originLat: dto.originLat,
-          originLng: dto.originLng,
-          destLat: dto.destLat,
-          destLng: dto.destLng,
-        },
-      });
-    } catch (err) {
-      this.log.warn({ err, sharedRideId: target.rideId }, 'seat pricing failed');
-      return null;
-    }
-  }
 }
 
 /** Response for a seat that already exists (built from its committed row + stored quote). */
 function seatResponse(
   passengerId: string,
-  seat: { poolId: string; poolState: string; opened: boolean; quotedFareCents: number | null },
+  seat: { poolId: string; poolState: string; opened: boolean; agreedFareCents: number | null },
 ): CreateRideResponse {
+  if (seat.agreedFareCents === null) {
+    // Only a pre-0017 seat can lack an agreed fare; never answer success
+    // without a price.
+    throw new InternalServerErrorException({
+      code: 'fare_unavailable',
+      message: 'This shared booking has no recorded fare',
+      sharedRideId: seat.poolId,
+    });
+  }
   return {
     sharedRideId: seat.poolId,
     passengerId,
     mode: seat.opened ? 'opened' : 'slotted',
     poolStatus: seat.poolState as PoolStatus,
-    perSeatPrice:
-      seat.quotedFareCents === null ? undefined : { amount: seat.quotedFareCents, currency: 'INR' },
+    perSeatPrice: { amount: seat.agreedFareCents, currency: 'INR' },
+    farePolicy: SHARED_FARE_POLICY,
   };
 }
 

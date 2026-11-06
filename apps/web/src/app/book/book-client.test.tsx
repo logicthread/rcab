@@ -301,6 +301,7 @@ describe('BookPage idempotency key per booking intent (F18a)', () => {
         passengerId: 'u1',
         mode: 'opened',
         poolStatus: 'open',
+        perSeatPrice: { amount: 7_000, currency: 'INR' },
       });
     render(<BookClient />);
     pickPreset(0);
@@ -314,6 +315,8 @@ describe('BookPage idempotency key per booking intent (F18a)', () => {
     const k1 = createSharedRide.mock.calls[0][2];
     expect(k1).toBeTruthy();
     expect(createSharedRide.mock.calls[1][2]).toBe(k1);
+    // The fare agreed at join is shown, fixed.
+    expect((await screen.findByTestId('agreed-fare')).textContent).toContain('₹70.00');
   });
 });
 
@@ -361,6 +364,7 @@ describe('BookPage idempotency error recovery', () => {
         passengerId: 'u1',
         mode: 'opened',
         poolStatus: 'open',
+        perSeatPrice: { amount: 7_000, currency: 'INR' },
       });
     render(<BookClient />);
     pickPreset(0);

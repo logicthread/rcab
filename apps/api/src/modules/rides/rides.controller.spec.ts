@@ -101,7 +101,7 @@ function makeController(
   const matching = { findOrCreatePool: vi.fn() };
   const pricing = {
     quoteSolo: opts.quoteSolo ?? vi.fn(),
-    quoteSeat: vi.fn(),
+    quoteSeatInItinerary: vi.fn(),
     seatMultiplierFor: vi.fn(),
     quoteSeatFromMetrics: vi.fn(),
   };
@@ -439,7 +439,12 @@ describe('RidesController.create — normal (solo) path', () => {
       mode: 'opened',
       poolStatus: 'open',
       seatCount: 1,
-      quote: null,
+      quote: {
+        perSeatPrice: { amount: 5_000, currency: 'INR' },
+        seatMultiplier: 1,
+        detourFactor: 1,
+        policy: 'fixed_at_join',
+      },
     });
     const sharedDto = { ...(dto as object), type: RideType.Shared } as never;
     const res = await ctrl.create(clientReq as never, sharedDto, undefined);
@@ -447,54 +452,53 @@ describe('RidesController.create — normal (solo) path', () => {
     expect((res as { sharedRideId: string }).sharedRideId).toBe('pool-1');
   });
 
-  it('shared: the seat quote is priced BEFORE the seat txn and returned with the seat', async () => {
+  it('shared: the seat is priced by the itinerary quoter inside the seat txn and the agreed fare is returned', async () => {
     const { ctrl, matching, pricing } = makeController();
     const quote = {
       perSeatPrice: { amount: 7_500, currency: 'INR' },
       seatMultiplier: 0.75,
       detourFactor: 1,
+      policy: 'fixed_at_join',
     };
-    pricing.quoteSeat.mockResolvedValue(quote);
+    pricing.quoteSeatInItinerary.mockResolvedValue(quote);
+    const ctx = { poolId: 'pool-2', passengerId: 'c-1', seatCount: 2, stops: [] };
     matching.findOrCreatePool.mockImplementation(
-      async (_req: unknown, opts: { quote: (t: unknown) => Promise<unknown> }) => ({
+      async (_req: unknown, opts: { quote: (c: unknown) => Promise<unknown> }) => ({
         sharedRideId: 'pool-2',
         mode: 'slotted',
         poolStatus: 'closed_full',
         seatCount: 2,
-        quote: await opts.quote({ rideId: 'pool-2', seatCount: 2 }),
+        quote: await opts.quote(ctx),
       }),
     );
     const sharedDto = { ...(dto as object), type: RideType.Shared } as never;
     const res = await ctrl.create(clientReq as never, sharedDto, undefined);
-    expect(pricing.quoteSeat).toHaveBeenCalledWith(
-      { rideId: 'pool-2', seatCount: 2 },
-      { route: expect.objectContaining({ originLat: expect.any(Number) }) },
-    );
+    expect(pricing.quoteSeatInItinerary).toHaveBeenCalledWith(ctx);
     expect(res).toMatchObject({
       sharedRideId: 'pool-2',
       mode: 'slotted',
       poolStatus: 'closed_full',
       perSeatPrice: quote.perSeatPrice,
+      farePolicy: 'fixed_at_join',
       seatMultiplier: 0.75,
       detourFactor: 1,
     });
   });
 
-  it('shared: a pricing failure yields a seat without a price (F15 policy still open)', async () => {
+  it('shared: a pricing failure fails the booking; it is never a seat with an absent price', async () => {
     const { ctrl, matching, pricing } = makeController();
-    pricing.quoteSeat.mockRejectedValue(new Error('osrm down'));
+    pricing.quoteSeatInItinerary.mockRejectedValue(new Error('osrm down'));
     matching.findOrCreatePool.mockImplementation(
-      async (_req: unknown, opts: { quote: (t: unknown) => Promise<unknown> }) => ({
+      async (_req: unknown, opts: { quote: (c: unknown) => Promise<unknown> }) => ({
         sharedRideId: 'pool-3',
         mode: 'opened',
         poolStatus: 'open',
         seatCount: 1,
-        quote: await opts.quote({ rideId: 'pool-3', seatCount: 1 }),
+        quote: await opts.quote({ poolId: 'pool-3', seatCount: 1 }),
       }),
     );
     const sharedDto = { ...(dto as object), type: RideType.Shared } as never;
-    const res = await ctrl.create(clientReq as never, sharedDto, undefined);
-    expect(res).toMatchObject({ sharedRideId: 'pool-3', perSeatPrice: undefined });
+    await expect(ctrl.create(clientReq as never, sharedDto, undefined)).rejects.toThrow('osrm down');
   });
 });
 

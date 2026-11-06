@@ -3,7 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'node:crypto';
 import { getNumber } from '../../common/utils/env';
 import { DRIZZLE_DB, type DrizzleDb } from '../../infra/db/drizzle.module';
-import type { PoolForPricing, SeatQuote } from '../pricing/pricing.types';
+import type { SeatFareQuoter, SeatQuote } from '../pricing/pricing.types';
 import { RouteSimilarityService, type RouteInput } from './route-similarity.service';
 import { SharedRideRepository, type SharedRideRow } from './shared-ride.repository';
 import { PoolMembershipRepository, type SeatLookup } from './pool-membership.repository';
@@ -24,8 +24,8 @@ export interface SharedRideRequest {
   destLng: number;
 }
 
-/** A seat committed by THIS call, with the quote that was stored on it. */
-export type SeatMatch = SeatOutcome & { quote: SeatQuote | null };
+/** A seat committed by THIS call, with the fare agreed (and stored) on it. */
+export type SeatMatch = SeatOutcome;
 
 export type MatchResult =
   | SeatMatch
@@ -44,10 +44,12 @@ export type MatchResult =
 
 export interface FindOrCreateOptions {
   /**
-   * Seat price for joining `target` (OSRM; called OUTSIDE any transaction,
-   * once per join attempt). Stored on the seat as `quoted_fare_cents`.
+   * Prices the seat INSIDE the seat transaction from the locked pool state
+   * (SHARED_FARE_POLICY = fixed_at_join). Persisted as `agreed_fare_cents`.
+   * Must throw when the fare cannot be determined: the seat is then not
+   * committed and the error propagates (no seat without a price).
    */
-  quote?: (target: PoolForPricing) => Promise<SeatQuote | null>;
+  quote: SeatFareQuoter;
   /** Shared-create idempotency, completed inside the seat transaction. */
   idempotency?: {
     scope: SeatIdempotency['scope'];
@@ -99,7 +101,7 @@ export class MatchingService {
    */
   async findOrCreatePool(
     request: SharedRideRequest,
-    opts: FindOrCreateOptions = {},
+    opts: FindOrCreateOptions,
   ): Promise<MatchResult> {
     const candidates = await this.repo.findCandidates(
       request.originLat, request.originLng,
@@ -143,17 +145,6 @@ export class MatchingService {
     const joinedAt = new Date().toISOString();
 
     for (const { pool } of qualified) {
-      // Priced as the seat it would become (advisory count + 1); the stored
-      // quote is what this passenger is shown (final fare policy: F15, open).
-      const quote = await this.quote(opts, {
-        rideId: pool.rideId,
-        originLat: pool.originLat,
-        originLng: pool.originLng,
-        destLat: pool.destLat,
-        destLng: pool.destLng,
-        seatCount: pool.seatCount + 1,
-        maxSeats: pool.maxSeats,
-      });
       const joined = await this.lifecycle.joinPool({
         poolId: pool.rideId,
         joiner: {
@@ -164,8 +155,8 @@ export class MatchingService {
           dest_lng:     request.destLng,
           joined_at:    joinedAt,
         },
-        quotedFareCents: quote?.perSeatPrice.amount ?? null,
-        idempotency: this.seatIdempotency(opts, quote),
+        quoteFare: opts.quote,
+        idempotency: opts.idempotency,
       });
       if (joined.joined) {
         return {
@@ -173,7 +164,7 @@ export class MatchingService {
           sharedRideId: pool.rideId,
           poolStatus: joined.closedFull ? 'closed_full' : 'open',
           seatCount: joined.seatCount,
-          quote,
+          quote: joined.quote,
         };
       }
       switch (joined.reason) {
@@ -197,16 +188,7 @@ export class MatchingService {
     }
 
     const poolId = randomUUID();
-    const quote = await this.quote(opts, {
-      rideId: poolId,
-      originLat: request.originLat,
-      originLng: request.originLng,
-      destLat: request.destLat,
-      destLng: request.destLng,
-      seatCount: 1,
-      maxSeats: this.maxSeats,
-    });
-    let opened: SharedRideRow;
+    let opened: SharedRideRow & { quote: SeatQuote };
     try {
       opened = await this.lifecycle.openPool({
         poolId,
@@ -217,8 +199,8 @@ export class MatchingService {
         maxSeats:        this.maxSeats,
         detourBudgetM:   this.detourBudgetM,
         passengerId:     request.passengerId,
-        quotedFareCents: quote?.perSeatPrice.amount ?? null,
-        idempotency:     this.seatIdempotency(opts, quote),
+        quoteFare:       opts.quote,
+        idempotency:     opts.idempotency,
       });
     } catch (err) {
       if (!(err instanceof PoolOpenRejectedError)) throw err;
@@ -237,7 +219,7 @@ export class MatchingService {
       sharedRideId: opened.rideId,
       poolStatus: 'open',
       seatCount: opened.seatCount,
-      quote,
+      quote: opened.quote,
     };
   }
 
@@ -249,21 +231,5 @@ export class MatchingService {
   /** The passenger's seat in a given pool, if any. */
   async findSeat(poolId: string, passengerId: string): Promise<SeatLookup | null> {
     return this.members.findSeat(this.db, poolId, passengerId);
-  }
-
-  private async quote(
-    opts: FindOrCreateOptions,
-    target: PoolForPricing,
-  ): Promise<SeatQuote | null> {
-    return opts.quote ? opts.quote(target) : null;
-  }
-
-  private seatIdempotency(
-    opts: FindOrCreateOptions,
-    quote: SeatQuote | null,
-  ): SeatIdempotency | undefined {
-    const idem = opts.idempotency;
-    if (!idem) return undefined;
-    return { scope: idem.scope, response: (outcome) => idem.response({ ...outcome, quote }) };
   }
 }

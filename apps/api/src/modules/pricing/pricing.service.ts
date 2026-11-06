@@ -7,11 +7,11 @@ import type Redis from 'ioredis';
 import { REDIS } from '../../infra/redis/redis.module';
 import { OsrmUnavailableException } from '../matching/osrm-unavailable.exception';
 import { inr, mulMoney, sumMoney, type Money } from './money';
+import { SHARED_FARE_POLICY } from './shared-fare-policy';
 import type {
-  PoolForPricing,
   RouteMetrics,
   RouteSpec,
-  SeatContext,
+  SeatFareContext,
   SeatQuote,
   SoloQuote,
 } from './pricing.types';
@@ -59,7 +59,11 @@ function geohash7(lat: number, lng: number): string {
 
 interface OsrmRouteResponse {
   code: string;
-  routes: Array<{ distance: number; duration: number }>;
+  routes: Array<{
+    distance: number;
+    duration: number;
+    legs?: Array<{ distance: number; duration: number }>;
+  }>;
 }
 
 interface FareParams {
@@ -80,6 +84,12 @@ export class PricingService {
   private readonly osrmBase: string;
   private readonly fare: FareParams;
   private readonly shared: SharedParams;
+  /**
+   * Bound on one OSRM call. Seat pricing runs INSIDE the join transaction
+   * (holding the pool row lock), so an unbounded routing call would stall every
+   * other joiner of that pool.
+   */
+  private readonly osrmTimeoutMs: number;
 
   constructor(
     private readonly http: HttpService,
@@ -88,6 +98,11 @@ export class PricingService {
   ) {
     this.osrmBase =
       config.get<string>('OSRM_BASE_URL') ?? config.get<string>('OSRM_URL') ?? 'http://osrm:5000';
+
+    this.osrmTimeoutMs = getNumber(config, 'PRICING_OSRM_TIMEOUT_MS', 3000, {
+      integer: true,
+      min: 1,
+    });
 
     this.fare = {
       baseCents: getNumber(config, 'FARE_BASE_CENTS', 4000, { min: 0 }),
@@ -126,7 +141,7 @@ export class PricingService {
     const cap = 1.0 / seatMultiplier;
     const detourFactor = clamp(rawDetour, 1.0, cap);
     const perSeatPrice = mulMoney(input.soloPrice, seatMultiplier * detourFactor);
-    return { perSeatPrice, seatMultiplier, detourFactor };
+    return { perSeatPrice, seatMultiplier, detourFactor, policy: SHARED_FARE_POLICY };
   }
 
   driverPayout(seatPrices: Money[]): Money {
@@ -147,23 +162,71 @@ export class PricingService {
     return { fare: this.quoteSoloFromMetrics(metrics), ...metrics };
   }
 
-  async quoteSeat(pool: PoolForPricing, seat: SeatContext): Promise<SeatQuote> {
-    const [direct, poolMetrics] = await Promise.all([
-      this.getRouteMetrics(seat.route),
-      this.getRouteMetrics({
-        originLat: pool.originLat,
-        originLng: pool.originLng,
-        destLat: pool.destLat,
-        destLng: pool.destLng,
-      }),
-    ]);
-    const soloPrice = this.quoteSoloFromMetrics(direct);
+  /**
+   * Fare for one seat under the Phase-0 stand-in policy (SHARED_FARE_POLICY).
+   * Detour is the passenger's own ride along the ACTUAL ordered itinerary: the
+   * routed distance from this passenger's pickup stop, through every
+   * intermediate stop, to their dropoff stop, divided by their direct routed
+   * distance. (Previously: pool endpoints route vs direct, which ignored the
+   * stops the passenger actually rides through.) Throws on any routing failure;
+   * it never yields an absent price.
+   */
+  async quoteSeatInItinerary(ctx: SeatFareContext): Promise<SeatQuote> {
+    const pickupIdx = ctx.stops.findIndex(
+      (s) => s.type === 'pickup' && s.passengerId === ctx.passengerId,
+    );
+    const dropoffIdx = ctx.stops.findIndex(
+      (s) => s.type === 'dropoff' && s.passengerId === ctx.passengerId,
+    );
+    if (pickupIdx < 0 || dropoffIdx <= pickupIdx) {
+      throw new Error(
+        `quoteSeatInItinerary: passenger ${ctx.passengerId} needs a pickup before a dropoff in the itinerary`,
+      );
+    }
+    const direct = await this.getRouteMetrics(ctx.directRoute);
+    let rideDistanceM = direct.distanceM;
+    // A one-passenger itinerary IS the direct route; otherwise route the legs.
+    if (ctx.stops.length > 2) {
+      const legs = await this.getItineraryLegs(ctx.stops);
+      rideDistanceM = legs
+        .slice(pickupIdx, dropoffIdx)
+        .reduce((sum, leg) => sum + leg.distanceM, 0);
+    }
     return this.quoteSeatFromMetrics({
-      soloPrice,
-      seatCount: pool.seatCount,
+      soloPrice: this.quoteSoloFromMetrics(direct),
+      seatCount: ctx.seatCount,
       directDistanceM: direct.distanceM,
-      poolDistanceM: poolMetrics.distanceM,
+      poolDistanceM: rideDistanceM,
     });
+  }
+
+  /**
+   * Routed distance/duration of each consecutive leg of an ordered stop list
+   * (one OSRM call). Malformed or missing legs are an OsrmUnavailableException,
+   * never a partial price.
+   */
+  async getItineraryLegs(stops: ReadonlyArray<{ lat: number; lng: number }>): Promise<RouteMetrics[]> {
+    if (stops.length < 2) return [];
+    const coords = stops.map((s) => `${s.lng},${s.lat}`).join(';');
+    const url = `${this.osrmBase}/route/v1/driving/${coords}?overview=false`;
+    try {
+      const { data } = await firstValueFrom(
+        this.http.get<OsrmRouteResponse>(url, { timeout: this.osrmTimeoutMs }),
+      );
+      const legs = data.routes?.[0]?.legs;
+      if (data.code !== 'Ok' || !Array.isArray(legs) || legs.length !== stops.length - 1) {
+        throw new Error(`unexpected OSRM itinerary response (code=${String(data.code)})`);
+      }
+      return legs.map((leg) => {
+        if (!Number.isFinite(leg.distance) || leg.distance < 0 || !Number.isFinite(leg.duration)) {
+          throw new Error('non-finite OSRM leg');
+        }
+        return { distanceM: leg.distance, durationS: leg.duration };
+      });
+    } catch (err) {
+      this.log.warn({ err, url }, 'OSRM unreachable for itinerary pricing');
+      throw new OsrmUnavailableException();
+    }
   }
 
   async getRouteMetrics(route: RouteSpec): Promise<RouteMetrics> {
@@ -186,7 +249,9 @@ export class PricingService {
 
     let distanceM: number, durationS: number;
     try {
-      const { data } = await firstValueFrom(this.http.get<OsrmRouteResponse>(url));
+      const { data } = await firstValueFrom(
+        this.http.get<OsrmRouteResponse>(url, { timeout: this.osrmTimeoutMs }),
+      );
       distanceM = data.routes[0].distance;
       durationS = data.routes[0].duration;
     } catch (err) {

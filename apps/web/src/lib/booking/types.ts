@@ -36,7 +36,12 @@ export interface CreateRideResponse {
   passengerId: string;
   mode: 'opened' | 'slotted';
   poolStatus: PoolStatus;
-  perSeatPrice?: Money;
+  /**
+   * Per-seat fare this passenger agreed to, fixed at join (Phase-0 stand-in
+   * policy `fixed_at_join`; RCAB-E8.S9 revisits it). Always present on success.
+   */
+  perSeatPrice: Money;
+  farePolicy?: 'fixed_at_join';
   seatMultiplier?: number;
   detourFactor?: number;
 }

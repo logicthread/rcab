@@ -22,6 +22,7 @@ import {
   holdPoolLock,
   releaseLeakedPoolLocks,
   memberAt,
+  fixedFare,
   poolInvariantViolations,
   seedPassenger,
   snapshot,
@@ -55,7 +56,7 @@ describe.skipIf(skip)('Pool membership — transactional invariants (R08, multi-
       maxSeats,
       detourBudgetM: 800,
       passengerId,
-      quotedFareCents: 10_000,
+      quoteFare: fixedFare(10_000),
     });
     poolIds.push(row.rideId);
     return { poolId: row.rideId, opener: passengerId };
@@ -103,7 +104,7 @@ describe.skipIf(skip)('Pool membership — transactional invariants (R08, multi-
       contenders[i].lifecycle.joinPool({
         poolId,
         joiner: memberAt(p, i + 1),
-        quotedFareCents: 9_000 + i,
+        quoteFare: fixedFare(9_000 + i),
       }),
     );
     await waitForLockWaiters(admin, joiners.length, undefined, lock.pid);
@@ -131,12 +132,12 @@ describe.skipIf(skip)('Pool membership — transactional invariants (R08, multi-
     expect(db.expireIntents).toBe(1);
 
     // Each winner's agreed fare is recorded on its own seat.
-    const fares = await admin.query<{ passenger_id: string; quoted_fare_cents: number }>(
-      'SELECT passenger_id, quoted_fare_cents FROM pool_member WHERE pool_id = $1',
+    const fares = await admin.query<{ passenger_id: string; agreed_fare_cents: number }>(
+      'SELECT passenger_id, agreed_fare_cents FROM pool_member WHERE pool_id = $1',
       [poolId],
     );
     expect(fares.rows).toHaveLength(4);
-    expect(fares.rows.every((r) => Number.isInteger(r.quoted_fare_cents))).toBe(true);
+    expect(fares.rows.every((r) => Number.isInteger(r.agreed_fare_cents))).toBe(true);
 
     await expectInvariants();
     await expectProjectionMatches(poolId);
@@ -155,8 +156,8 @@ describe.skipIf(skip)('Pool membership — transactional invariants (R08, multi-
       await Promise.all(clients.map((c) => c.query('BEGIN')));
       const insert = (c: Client, p: string) =>
         c.query(
-          `INSERT INTO pool_member (pool_id, passenger_id, origin_lat, origin_lng, dest_lat, dest_lng)
-           VALUES ($1, $2, 1, 2, 3, 4)`,
+          `INSERT INTO pool_member (pool_id, passenger_id, origin_lat, origin_lng, dest_lat, dest_lng, agreed_fare_cents)
+           VALUES ($1, $2, 1, 2, 3, 4, 100)`,
           [poolId, p],
         );
       await insert(clients[0], a);
@@ -197,13 +198,13 @@ describe.skipIf(skip)('Pool membership — transactional invariants (R08, multi-
     await expect(owner.lifecycle.closeIfOpen(poolId, 'closed_timeout')).resolves.toBe('closed');
     // …so the stale join is rejected under the lock.
     await expect(
-      joinerStack.lifecycle.joinPool({ poolId, joiner: memberAt(late), quotedFareCents: null }),
+      joinerStack.lifecycle.joinPool({ poolId, joiner: memberAt(late), quoteFare: fixedFare(1) }),
     ).resolves.toEqual({ joined: false, reason: 'pool_closed' });
     // The trigger rejects even a raw insert that bypasses the service.
     await expect(
       admin.query(
-        `INSERT INTO pool_member (pool_id, passenger_id, origin_lat, origin_lng, dest_lat, dest_lng)
-         VALUES ($1, $2, 1, 2, 3, 4)`,
+        `INSERT INTO pool_member (pool_id, passenger_id, origin_lat, origin_lng, dest_lat, dest_lng, agreed_fare_cents)
+         VALUES ($1, $2, 1, 2, 3, 4, 100)`,
         [poolId, late],
       ),
     ).rejects.toMatchObject({ code: '23514', constraint: 'pool_member_pool_open' });
@@ -230,14 +231,14 @@ describe.skipIf(skip)('Pool membership — transactional invariants (R08, multi-
     const join = joinerStack.lifecycle.joinPool({
       poolId,
       joiner: memberAt(joiner, 1),
-      quotedFareCents: 1,
+      quoteFare: fixedFare(1),
     });
     await waitForLockWaiters(admin, 1, undefined, lock.pid);
     const close = timerStack.lifecycle.closeIfOpen(poolId, 'closed_timeout');
     await waitForLockWaiters(admin, 2, undefined, lock.pid);
     await lock.release();
 
-    await expect(join).resolves.toEqual({ joined: true, closedFull: false, seatCount: 2 });
+    await expect(join).resolves.toMatchObject({ joined: true, closedFull: false, seatCount: 2 });
     await expect(close).resolves.toBe('closed');
     const db = await snapshot(admin, poolId);
     expect(db).toMatchObject({
@@ -265,7 +266,7 @@ describe.skipIf(skip)('Pool membership — transactional invariants (R08, multi-
     const join = joinerStack.lifecycle.joinPool({
       poolId,
       joiner: memberAt(joiner, 1),
-      quotedFareCents: 1,
+      quoteFare: fixedFare(1),
     });
     await waitForLockWaiters(admin, 2, undefined, lock.pid);
     await lock.release();
@@ -291,7 +292,7 @@ describe.skipIf(skip)('Pool membership — transactional invariants (R08, multi-
 
     const lock = await holdPoolLock(poolId);
     const both = Promise.all([
-      a.lifecycle.joinPool({ poolId, joiner: memberAt(joiner, 1), quotedFareCents: null }),
+      a.lifecycle.joinPool({ poolId, joiner: memberAt(joiner, 1), quoteFare: fixedFare(1) }),
       b.lifecycle.closeIfOpen(poolId, 'closed_timeout'),
     ]);
     await waitForLockWaiters(admin, 2, undefined, lock.pid);
@@ -362,8 +363,8 @@ describe.skipIf(skip)('Pool membership — transactional invariants (R08, multi-
     });
 
     const results = await Promise.all([
-      a.matching().findOrCreatePool(req, { idempotency: { scope, response } }),
-      b.matching().findOrCreatePool(req, { idempotency: { scope, response } }),
+      a.matching().findOrCreatePool(req, { quote: fixedFare(5_000), idempotency: { scope, response } }),
+      b.matching().findOrCreatePool(req, { quote: fixedFare(5_000), idempotency: { scope, response } }),
     ]);
     const seated = results.filter((r) => r.mode === 'opened');
     const replays = results.filter((r) => r.mode === 'existing');
@@ -414,8 +415,8 @@ describe.skipIf(skip)('Pool membership — transactional invariants (R08, multi-
     const response = (m: { sharedRideId: string }) => ({ id: m.sharedRideId });
 
     const results = await Promise.all([
-      a.matching().findOrCreatePool(req, { idempotency: { scope: scopeOf('k-a'), response } }),
-      b.matching().findOrCreatePool(req, { idempotency: { scope: scopeOf('k-b'), response } }),
+      a.matching().findOrCreatePool(req, { quote: fixedFare(5_000), idempotency: { scope: scopeOf('k-a'), response } }),
+      b.matching().findOrCreatePool(req, { quote: fixedFare(5_000), idempotency: { scope: scopeOf('k-b'), response } }),
     ]);
     const seated = results.find((r) => r.mode === 'opened') as { sharedRideId: string };
     expect(seated).toBeDefined();
@@ -429,14 +430,14 @@ describe.skipIf(skip)('Pool membership — transactional invariants (R08, multi-
     // Sequentially: the live pool is a candidate (same route) — a third key is
     // still a different request → conflict, not a silent second seat.
     await expect(
-      a.matching().findOrCreatePool(req, { idempotency: { scope: scopeOf('k-c'), response } }),
+      a.matching().findOrCreatePool(req, { quote: fixedFare(5_000), idempotency: { scope: scopeOf('k-c'), response } }),
     ).resolves.toEqual({
       mode: 'conflict',
       reason: 'passenger_has_active_pool',
       existingPoolId: seated.sharedRideId,
     });
     // A keyless duplicate gets its existing seat back.
-    await expect(a.matching().findOrCreatePool(req)).resolves.toEqual({
+    await expect(a.matching().findOrCreatePool(req, { quote: fixedFare(5_000) })).resolves.toEqual({
       mode: 'existing',
       reason: 'already_member',
       sharedRideId: seated.sharedRideId,
@@ -450,7 +451,7 @@ describe.skipIf(skip)('Pool membership — transactional invariants (R08, multi-
     ]);
     const again = await a
       .matching()
-      .findOrCreatePool(req, { idempotency: { scope: scopeOf('k-d'), response } });
+      .findOrCreatePool(req, { quote: fixedFare(5_000), idempotency: { scope: scopeOf('k-d'), response } });
     expect(again.mode).toBe('opened');
     poolIds.push((again as { sharedRideId: string }).sharedRideId);
     await expectInvariants();
@@ -463,8 +464,9 @@ describe.skipIf(skip)('Pool membership — transactional invariants (R08, multi-
       perSeatPrice: { amount: 7_700, currency: 'INR' },
       seatMultiplier: 1,
       detourFactor: 1,
+      policy: 'fixed_at_join',
     };
-    const pricing = { quoteSeat: vi.fn().mockResolvedValue(quote) };
+    const pricing = { quoteSeatInItinerary: vi.fn().mockResolvedValue(quote) };
     const ctrl = new RidesController(
       s.matching(),
       pricing as never,
@@ -503,11 +505,11 @@ describe.skipIf(skip)('Pool membership — transactional invariants (R08, multi-
       status: 409,
       response: { code: 'passenger_has_active_pool', sharedRideId: first.sharedRideId },
     });
-    const seat = await admin.query<{ quoted_fare_cents: number; idempotency_key: string }>(
-      'SELECT quoted_fare_cents, idempotency_key FROM pool_member WHERE passenger_id = $1',
+    const seat = await admin.query<{ agreed_fare_cents: number; idempotency_key: string }>(
+      'SELECT agreed_fare_cents, idempotency_key FROM pool_member WHERE passenger_id = $1',
       [pId],
     );
-    expect(seat.rows).toEqual([{ quoted_fare_cents: 7_700, idempotency_key: 'key-1' }]);
+    expect(seat.rows).toEqual([{ agreed_fare_cents: 7_700, idempotency_key: 'key-1' }]);
     // key-2's claim was released (no stuck pending record).
     const rec = await admin.query(
       `SELECT state FROM idempotency_record WHERE principal_id = $1 ORDER BY idempotency_key`,
@@ -534,7 +536,7 @@ describe.skipIf(skip)('Pool membership — transactional invariants (R08, multi-
       s.lifecycle.joinPool({
         poolId,
         joiner: memberAt(pId, 1),
-        quotedFareCents: 5,
+        quoteFare: fixedFare(5),
         idempotency: idem,
       }),
     ).rejects.toThrow('injected: disk full');
@@ -555,10 +557,10 @@ describe.skipIf(skip)('Pool membership — transactional invariants (R08, multi-
       s.lifecycle.joinPool({
         poolId,
         joiner: memberAt(pId, 1),
-        quotedFareCents: 5,
+        quoteFare: fixedFare(5),
         idempotency: idem,
       }),
-    ).resolves.toEqual({ joined: true, closedFull: true, seatCount: 2 });
+    ).resolves.toMatchObject({ joined: true, closedFull: true, seatCount: 2 });
     db = await snapshot(admin, poolId);
     expect(db).toMatchObject({ poolState: 'closed_full', seatCount: 2, generation: 1, stops: 4 });
     expect(db.dispatchIntents).toHaveLength(1);
@@ -609,8 +611,8 @@ describe.skipIf(skip)('Pool membership — transactional invariants (R08, multi-
     s.bus.joinPool.mockRejectedValueOnce(new Error('ws down'));
 
     await expect(
-      s.lifecycle.joinPool({ poolId, joiner: memberAt(pId, 1), quotedFareCents: null }),
-    ).resolves.toEqual({ joined: true, closedFull: false, seatCount: 2 });
+      s.lifecycle.joinPool({ poolId, joiner: memberAt(pId, 1), quoteFare: fixedFare(1) }),
+    ).resolves.toMatchObject({ joined: true, closedFull: false, seatCount: 2 });
     // Projection is stale (still the opener's version) …
     expect(await redis.hget(`pool:${poolId}`, 'seat_count')).toBe('1');
     // … and also survives total Redis loss: rebuild restores it from Postgres.
@@ -639,7 +641,7 @@ describe.skipIf(skip)('Pool membership — transactional invariants (R08, multi-
     const owner = stack();
     const { poolId, opener } = await openPool(owner, 3);
     const p2 = await passenger();
-    await owner.lifecycle.joinPool({ poolId, joiner: memberAt(p2, 1), quotedFareCents: null });
+    await owner.lifecycle.joinPool({ poolId, joiner: memberAt(p2, 1), quoteFare: fixedFare(1) });
     const row = (await owner.repo.findById(poolId))!;
     expect(row.seatCount).toBe(2);
     expect(row.members.map((m) => m.passenger_id)).toEqual([opener, p2]);

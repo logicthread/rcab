@@ -19,6 +19,7 @@ import { PoolLifecycleService } from '../../src/modules/matching/pool-lifecycle.
 import { MatchingService } from '../../src/modules/matching/matching.service';
 import { IdempotencyRepository } from '../../src/modules/rides/idempotency.repository';
 import type { SharedRideMember } from '../../src/db/schema';
+import type { SeatFareQuoter } from '../../src/modules/pricing/pricing.types';
 
 export interface PoolStack {
   pg: Pool;
@@ -93,6 +94,16 @@ export async function seedPassenger(q: Pool | Client): Promise<string> {
     [id, `fb-pool-${id}`, uniquePhone()],
   );
   return id;
+}
+
+/** A SeatFareQuoter that agrees to a fixed per-seat fare (paise) for any seat. */
+export function fixedFare(cents: number): SeatFareQuoter {
+  return async () => ({
+    perSeatPrice: { amount: cents, currency: 'INR' },
+    seatMultiplier: 1,
+    detourFactor: 1,
+    policy: 'fixed_at_join',
+  });
 }
 
 export const ROUTE = { originLat: 22.5727, originLng: 88.364, destLat: 22.5801, destLng: 88.3701 };
