@@ -51,6 +51,10 @@ export interface VersionGate {
   event(id: string, version: number | undefined): boolean;
 }
 
+/** Total subscribe attempts on `unavailable` (1 initial + 4 retries). */
+const SUBSCRIBE_MAX_TRIES = 5;
+const SUBSCRIBE_BACKOFF_MS = [1_000, 2_000, 4_000, 8_000];
+
 export function createVersionGate(): VersionGate {
   let followed: string | null = null;
   let applied = Number.NEGATIVE_INFINITY;
@@ -129,14 +133,54 @@ export function connectBookingSocket(getToken: TokenProvider): BookingSocket {
   const poolSnapshotHandlers = new Set<Handler<PoolSnapshotEvent>>();
   const rideHandlers = new Set<Handler<RideStateChangedEvent>>();
 
-  const subscribePoolNow = () => {
-    const id = poolGate.current();
-    if (id) socket.emit(POOL_SUBSCRIBE_EVENT, { sharedRideId: id });
+  // Subscribe acks: `{ ok:false, reason:'unavailable' }` is a transient server
+  // failure (Redis / DB hiccup) after which the socket would otherwise stay
+  // deaf until the next reconnect. Retry with backoff while the socket is
+  // connected and the followed id is unchanged; any other refusal
+  // (forbidden / not_member) is final.
+  let closed = false;
+  const makeSubscriber = (
+    event: string,
+    key: 'sharedRideId' | 'rideId',
+    gate: VersionGate,
+  ) => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let run = 0; // bumps on every fresh subscribe: stale acks / timers are ignored
+    const clear = () => {
+      if (timer) clearTimeout(timer);
+      timer = null;
+    };
+    const attempt = (n: number, myRun: number) => {
+      const id = gate.current();
+      if (closed || !id || myRun !== run) return;
+      socket.emit(event, { [key]: id }, (ack?: { ok?: boolean; reason?: string }) => {
+        if (closed || myRun !== run || gate.current() !== id) return;
+        if (!ack || ack.ok !== false || ack.reason !== 'unavailable') return;
+        if (n >= SUBSCRIBE_MAX_TRIES) return;
+        clear();
+        timer = setTimeout(() => {
+          timer = null;
+          if (closed || myRun !== run || !socket.connected || gate.current() !== id) return;
+          attempt(n + 1, myRun);
+        }, SUBSCRIBE_BACKOFF_MS[n - 1] ?? SUBSCRIBE_BACKOFF_MS[SUBSCRIBE_BACKOFF_MS.length - 1]);
+      });
+    };
+    return {
+      now() {
+        clear();
+        run += 1;
+        attempt(1, run);
+      },
+      cancel() {
+        clear();
+        run += 1;
+      },
+    };
   };
-  const subscribeRideNow = () => {
-    const id = rideGate.current();
-    if (id) socket.emit(RIDE_SUBSCRIBE_EVENT, { rideId: id });
-  };
+  const poolSub = makeSubscriber(POOL_SUBSCRIBE_EVENT, 'sharedRideId', poolGate);
+  const rideSub = makeSubscriber(RIDE_SUBSCRIBE_EVENT, 'rideId', rideGate);
+  const subscribePoolNow = () => poolSub.now();
+  const subscribeRideNow = () => rideSub.now();
 
   // One listener per server event; the gates decide what reaches the app.
   socket.on(POOL_SNAPSHOT_EVENT, (snap: PoolSnapshotEvent) => {
@@ -212,6 +256,9 @@ export function connectBookingSocket(getToken: TokenProvider): BookingSocket {
       if (socket.connected) subscribeRideNow();
     },
     close() {
+      closed = true;
+      poolSub.cancel();
+      rideSub.cancel();
       poolHandlers.clear();
       poolSnapshotHandlers.clear();
       rideHandlers.clear();

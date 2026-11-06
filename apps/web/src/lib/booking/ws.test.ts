@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const ioMock = vi.fn();
 vi.mock('socket.io-client', () => ({ io: (...a: unknown[]) => ioMock(...a) }));
@@ -108,8 +108,8 @@ describe('connectBookingSocket pool subscription (F10 / T30)', () => {
     s.fire('connect');
     s.fire('connect'); // reconnect
     expect(s.emit.mock.calls).toEqual([
-      ['pool:subscribe', { sharedRideId: 'pool-1' }],
-      ['pool:subscribe', { sharedRideId: 'pool-1' }],
+      ['pool:subscribe', { sharedRideId: 'pool-1' }, expect.any(Function)],
+      ['pool:subscribe', { sharedRideId: 'pool-1' }, expect.any(Function)],
     ]);
   });
 
@@ -117,7 +117,11 @@ describe('connectBookingSocket pool subscription (F10 / T30)', () => {
     s.connected = true;
     const conn = connectBookingSocket(() => Promise.resolve('t'));
     conn.subscribePool('pool-1');
-    expect(s.emit).toHaveBeenCalledWith('pool:subscribe', { sharedRideId: 'pool-1' });
+    expect(s.emit).toHaveBeenCalledWith(
+      'pool:subscribe',
+      { sharedRideId: 'pool-1' },
+      expect.any(Function),
+    );
   });
 
   it('applies the snapshot, then only newer updates; reconnect snapshot reconciles a missed completion', () => {
@@ -176,7 +180,9 @@ describe('connectBookingSocket pool subscription (F10 / T30)', () => {
     s.emit.mockClear();
     s.fire('ride:completed', { rideId: 'pool-1' });
     s.fire('ride:completed', { rideId: 'another' });
-    expect(s.emit.mock.calls).toEqual([['pool:subscribe', { sharedRideId: 'pool-1' }]]);
+    expect(s.emit.mock.calls).toEqual([
+      ['pool:subscribe', { sharedRideId: 'pool-1' }, expect.any(Function)],
+    ]);
   });
 
   it('close() detaches app handlers', () => {
@@ -210,7 +216,7 @@ describe('connectBookingSocket solo ride subscription', () => {
     conn.onRideStateChanged((p) => states.push(p.state));
     conn.subscribeRide('r1');
     s.fire('connect');
-    expect(s.emit).toHaveBeenCalledWith('ride:subscribe', { rideId: 'r1' });
+    expect(s.emit).toHaveBeenCalledWith('ride:subscribe', { rideId: 'r1' }, expect.any(Function));
 
     s.fire('ride:snapshot', { rideId: 'r1', version: 3, status: 'accepted', terminal: false });
     // Legacy event without version: ranked from its state → stale, dropped.
@@ -222,5 +228,109 @@ describe('connectBookingSocket solo ride subscription', () => {
     s.fire('ride_state_changed', { rideId: 'r-old', state: 'cancelled', by: 'client' });
 
     expect(states).toEqual(['accepted', 'en_route', 'completed']);
+  });
+});
+
+describe('subscribe ack retry on unavailable', () => {
+  let s: ReturnType<typeof fakeSocket>;
+  beforeEach(() => {
+    vi.useFakeTimers();
+    ioMock.mockReset();
+    s = fakeSocket(true);
+    ioMock.mockReturnValue(s);
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  type Ack = (a: unknown) => void;
+  const lastAck = (): Ack => s.emit.mock.calls[s.emit.mock.calls.length - 1][2] as Ack;
+  const UNAVAILABLE = { ok: false, reason: 'unavailable' };
+
+  it('retries pool:subscribe with 1s,2s,4s,8s backoff, 5 tries max', () => {
+    const conn = connectBookingSocket(() => Promise.resolve('t'));
+    conn.subscribePool('pool-1');
+    expect(s.emit).toHaveBeenCalledTimes(1);
+
+    lastAck()(UNAVAILABLE);
+    vi.advanceTimersByTime(999);
+    expect(s.emit).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(1);
+    expect(s.emit).toHaveBeenCalledTimes(2);
+
+    lastAck()(UNAVAILABLE);
+    vi.advanceTimersByTime(2_000);
+    expect(s.emit).toHaveBeenCalledTimes(3);
+
+    lastAck()(UNAVAILABLE);
+    vi.advanceTimersByTime(4_000);
+    expect(s.emit).toHaveBeenCalledTimes(4);
+
+    lastAck()(UNAVAILABLE);
+    vi.advanceTimersByTime(8_000);
+    expect(s.emit).toHaveBeenCalledTimes(5);
+
+    lastAck()(UNAVAILABLE); // 5th failure: give up
+    vi.advanceTimersByTime(60_000);
+    expect(s.emit).toHaveBeenCalledTimes(5);
+  });
+
+  it('retries ride:subscribe too and stops once an ack succeeds', () => {
+    const conn = connectBookingSocket(() => Promise.resolve('t'));
+    conn.subscribeRide('r1');
+    lastAck()(UNAVAILABLE);
+    vi.advanceTimersByTime(1_000);
+    expect(s.emit).toHaveBeenCalledTimes(2);
+    expect(s.emit.mock.calls[1].slice(0, 2)).toEqual(['ride:subscribe', { rideId: 'r1' }]);
+    lastAck()({ ok: true });
+    vi.advanceTimersByTime(60_000);
+    expect(s.emit).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(['forbidden', 'not_member'])('does not retry a %s refusal', (reason) => {
+    const conn = connectBookingSocket(() => Promise.resolve('t'));
+    conn.subscribePool('pool-1');
+    lastAck()({ ok: false, reason });
+    vi.advanceTimersByTime(60_000);
+    expect(s.emit).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not retry when the socket dropped or the followed id changed', () => {
+    const conn = connectBookingSocket(() => Promise.resolve('t'));
+    conn.subscribePool('pool-1');
+    lastAck()(UNAVAILABLE);
+    s.connected = false;
+    vi.advanceTimersByTime(1_000);
+    expect(s.emit).toHaveBeenCalledTimes(1);
+
+    s.connected = true;
+    conn.subscribePool('pool-1'); // fresh subscribe (same id) restarts the series
+    expect(s.emit).toHaveBeenCalledTimes(2);
+    lastAck()(UNAVAILABLE);
+    conn.subscribePool('pool-2'); // followed id changed: pending retry is void
+    expect(s.emit).toHaveBeenCalledTimes(3);
+    vi.advanceTimersByTime(1_000);
+    expect(s.emit).toHaveBeenCalledTimes(3);
+  });
+
+  it('a late ack from a superseded subscribe schedules nothing', () => {
+    const conn = connectBookingSocket(() => Promise.resolve('t'));
+    conn.subscribePool('pool-1');
+    const stale = lastAck();
+    s.fire('connect'); // re-subscribe supersedes the first attempt
+    expect(s.emit).toHaveBeenCalledTimes(2);
+    stale(UNAVAILABLE);
+    vi.advanceTimersByTime(60_000);
+    expect(s.emit).toHaveBeenCalledTimes(2);
+  });
+
+  it('close() clears pending retry timers', () => {
+    const conn = connectBookingSocket(() => Promise.resolve('t'));
+    conn.subscribePool('pool-1');
+    lastAck()(UNAVAILABLE);
+    conn.close();
+    expect(vi.getTimerCount()).toBe(0);
+    vi.advanceTimersByTime(60_000);
+    expect(s.emit).toHaveBeenCalledTimes(1);
   });
 });
