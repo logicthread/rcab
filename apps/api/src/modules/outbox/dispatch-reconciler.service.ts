@@ -344,6 +344,9 @@ export class DispatchReconciler implements OnApplicationBootstrap, OnModuleDestr
       // Wave 1 never completed (or its timers were lost): start it again. The
       // wave is idempotent per generation, so a duplicate is harmless.
       await this.removeFinished(this.dispatchQueue, startId);
+      // A failed/retained hard-fail job for this generation would make the
+      // re-armed wave's own hard-fail add a jobId no-op: clear it first.
+      await this.removeFinished(this.dispatchQueue, hardFailIds[0]);
       const topic: OutboxTopicName =
         kind === 'solo' ? OutboxTopic.RideDispatchRequested : OutboxTopic.PoolDispatchRequested;
       const exists = await this.outbox.rearm({ topic, aggregateId: tripId, generation });
