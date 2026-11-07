@@ -4,32 +4,44 @@ import { randomUUID } from 'node:crypto';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import * as schema from '../../src/db/schema';
 import { RidesRepository } from '../../src/modules/rides/rides.repository';
+import { IdempotencyRepository } from '../../src/modules/rides/idempotency.repository';
 
 const skip = process.env.RCAB_INT_SKIPPED === '1';
 
 describe.skipIf(skip)('RidesRepository — idempotency (real Postgres)', () => {
   let pool: Pool;
   let repo: RidesRepository;
+  let idem: IdempotencyRepository;
   let passengerId: string;
+  let otherPassengerId: string;
 
-  beforeAll(async () => {
-    pool = new Pool({ connectionString: process.env.TEST_POSTGRES_URI });
-    const db = drizzle(pool, { schema });
-    repo = new RidesRepository(db as never);
-    // rides.passenger_id references app_user — seed a client to satisfy the FK.
-    passengerId = randomUUID();
+  async function seedClient(id: string) {
     const phone = `+91${Math.floor(Math.random() * 1e10)
       .toString()
       .padStart(10, '0')}`;
     await pool.query(
       `INSERT INTO app_user (id, firebase_uid, phone_e164, role) VALUES ($1, $2, $3, 'client')`,
-      [passengerId, `fb-${passengerId}`, phone],
+      [id, `fb-${id}`, phone],
     );
+  }
+
+  beforeAll(async () => {
+    pool = new Pool({ connectionString: process.env.TEST_POSTGRES_URI });
+    const db = drizzle(pool, { schema });
+    repo = new RidesRepository(db as never);
+    idem = new IdempotencyRepository(db as never);
+    // rides.passenger_id references app_user — seed clients to satisfy the FK.
+    passengerId = randomUUID();
+    otherPassengerId = randomUUID();
+    await seedClient(passengerId);
+    await seedClient(otherPassengerId);
   });
 
   afterAll(async () => {
-    await pool.query('DELETE FROM rides WHERE passenger_id = $1', [passengerId]);
-    await pool.query('DELETE FROM app_user WHERE id = $1', [passengerId]);
+    const ids = [passengerId, otherPassengerId];
+    await pool.query('DELETE FROM idempotency_record WHERE principal_id = ANY($1)', [ids]);
+    await pool.query('DELETE FROM rides WHERE passenger_id = ANY($1)', [ids]);
+    await pool.query('DELETE FROM app_user WHERE id = ANY($1)', [ids]);
     await pool.end();
   });
 
@@ -154,5 +166,178 @@ describe.skipIf(skip)('RidesRepository — idempotency (real Postgres)', () => {
     );
     expect(rows[0].type).toBe('scheduled');
     expect(new Date(rows[0].scheduled_for).getTime()).toBe(when.getTime());
+  });
+  // F07 / R05 (migration 0013): the key is scoped to (passenger, operation).
+  it('the same key under two accounts → two independent rides (no global UNIQUE)', async () => {
+    const key = `idem-${randomUUID()}`;
+    const a = await repo.create({ ...params(key), requestFingerprint: 'fp-a' });
+    const b = await repo.create({
+      ...params(key),
+      passengerId: otherPassengerId,
+      requestFingerprint: 'fp-b',
+    });
+
+    expect(a.created).toBe(true);
+    expect(b.created).toBe(true);
+    expect(b.row.id).not.toBe(a.row.id);
+    expect(b.row.passengerId).toBe(otherPassengerId);
+
+    // Scoped lookup never crosses accounts.
+    const bobsView = await repo.findByIdempotencyScope(otherPassengerId, 'ride.create.solo', key);
+    expect(bobsView?.row.id).toBe(b.row.id);
+    expect(bobsView?.requestFingerprint).toBe('fp-b');
+  });
+
+  it('a duplicate in scope returns the stored fingerprint (for the caller to compare)', async () => {
+    const key = `idem-${randomUUID()}`;
+    await repo.create({ ...params(key), requestFingerprint: 'fp-original' });
+    const dup = await repo.create({ ...params(key), requestFingerprint: 'fp-different' });
+    expect(dup.created).toBe(false);
+    expect(dup.requestFingerprint).toBe('fp-original');
+  });
+
+  it('the same key for solo and scheduled operations does not collide', async () => {
+    const key = `idem-${randomUUID()}`;
+    const solo = await repo.create(params(key));
+    const sched = await repo.create({
+      ...params(key),
+      type: 'scheduled',
+      scheduledFor: new Date(Date.now() + 3 * 3600_000),
+    });
+    expect(sched.created).toBe(true);
+    expect(sched.row.id).not.toBe(solo.row.id);
+    const { rows } = await pool.query<{ idempotency_operation: string }>(
+      'SELECT idempotency_operation FROM rides WHERE id = $1',
+      [sched.row.id],
+    );
+    expect(rows[0].idempotency_operation).toBe('ride.create.scheduled');
+  });
+
+  it('migration 0013 replaced the global unique with the scoped one', async () => {
+    const { rows } = await pool.query<{ conname: string }>(
+      `SELECT conname FROM pg_constraint WHERE conrelid = 'rides'::regclass AND contype = 'u'`,
+    );
+    const names = rows.map((r) => r.conname);
+    expect(names).toContain('rides_idempotency_scope_uq');
+    expect(names).not.toContain('rides_idempotency_key_key');
+  });
+
+  // F15: durable claim for shared create.
+  it('idempotency_record: concurrent first use → exactly one claim; scoped per principal', async () => {
+    const scope = {
+      principalId: passengerId,
+      operation: 'ride.create.shared' as const,
+      key: `k-${randomUUID()}`,
+    };
+    const [x, y] = await Promise.all([idem.claim(scope, 'fp'), idem.claim(scope, 'fp')]);
+    expect([x.kind, y.kind].sort()).toEqual(['claimed', 'existing']);
+
+    // Another principal with the same key claims independently.
+    const other = await idem.claim({ ...scope, principalId: otherPassengerId }, 'fp-other');
+    expect(other.kind).toBe('claimed');
+
+    const resourceId = randomUUID();
+    await idem.complete(scope, resourceId, { sharedRideId: resourceId, mode: 'opened' });
+    const again = await idem.claim(scope, 'fp');
+    expect(again).toEqual({
+      kind: 'existing',
+      record: {
+        requestFingerprint: 'fp',
+        state: 'completed',
+        resourceId,
+        response: { sharedRideId: resourceId, mode: 'opened' },
+      },
+    });
+
+    // release only drops a pending claim, never a completed one.
+    await idem.release(scope);
+    expect((await idem.find(scope))?.state).toBe('completed');
+    const otherScope = { ...scope, principalId: otherPassengerId };
+    await idem.release(otherScope);
+    expect(await idem.find(otherScope)).toBeNull();
+  });
+  // F15 reclaim: a pending claim stranded by a crash / failed complete().
+  it('idempotency_record: stale pending claim is reclaimed by exactly one same-fingerprint retry', async () => {
+    const scope = {
+      principalId: passengerId,
+      operation: 'ride.create.shared' as const,
+      key: `k-${randomUUID()}`,
+    };
+    expect((await idem.claim(scope, 'fp')).kind).toBe('claimed');
+    // Fresh pending → still just "existing" (409 at the controller).
+    expect((await idem.claim(scope, 'fp')).kind).toBe('existing');
+
+    await pool.query(
+      `UPDATE idempotency_record SET created_at = now() - interval '2 minutes'
+        WHERE principal_id = $1 AND idempotency_key = $2`,
+      [scope.principalId, scope.key],
+    );
+    // A different intent never takes over someone else's claim.
+    expect((await idem.claim(scope, 'other-fp')).kind).toBe('existing');
+
+    const [x, y] = await Promise.all([idem.claim(scope, 'fp'), idem.claim(scope, 'fp')]);
+    expect([x.kind, y.kind].sort()).toEqual(['existing', 'reclaimed']);
+    const won = [x, y].find((c) => c.kind === 'reclaimed');
+    expect(
+      won?.kind === 'reclaimed' && Date.now() - won.previousAttemptAt.getTime(),
+    ).toBeGreaterThan(60_000);
+
+    // Reclaiming restamped it: it is fresh again, and can then complete.
+    expect((await idem.claim(scope, 'fp')).kind).toBe('existing');
+    const resourceId = randomUUID();
+    await idem.complete(scope, resourceId, { sharedRideId: resourceId });
+    expect((await idem.find(scope))?.state).toBe('completed');
+  });
+
+  it('a completed record is never reclaimed, however old', async () => {
+    const scope = {
+      principalId: passengerId,
+      operation: 'ride.create.shared' as const,
+      key: `k-${randomUUID()}`,
+    };
+    await idem.claim(scope, 'fp');
+    await idem.complete(scope, randomUUID(), { ok: true });
+    await pool.query(
+      `UPDATE idempotency_record SET created_at = now() - interval '1 day'
+        WHERE principal_id = $1 AND idempotency_key = $2`,
+      [scope.principalId, scope.key],
+    );
+    expect((await idem.claim(scope, 'fp')).kind).toBe('existing');
+  });
+
+  it('findRecentPoolMembership finds the passenger seat in an open pool, only if recent', async () => {
+    const rideId = randomUUID();
+    const joinedAt = new Date();
+    await pool.query(
+      `INSERT INTO shared_rides (ride_id, seat_count, max_seats, pool_state, pool_closed_at,
+         detour_budget_m, origin_lat, origin_lng, dest_lat, dest_lng, members)
+       VALUES ($1, 1, 3, 'open', now() + interval '1 minute', 1500, 26.1, 91.7, 26.2, 91.8, $2::jsonb)`,
+      [
+        rideId,
+        JSON.stringify([
+          {
+            passenger_id: passengerId,
+            origin_lat: 26.1,
+            origin_lng: 91.7,
+            dest_lat: 26.2,
+            dest_lng: 91.8,
+            joined_at: joinedAt.toISOString(),
+          },
+        ]),
+      ],
+    );
+    try {
+      const found = await repo.findRecentPoolMembership(passengerId, new Date(Date.now() - 30_000));
+      expect(found).toEqual({ sharedRideId: rideId, poolState: 'open', opened: true });
+      // Membership older than the dead attempt's start is not "its" seat.
+      expect(
+        await repo.findRecentPoolMembership(passengerId, new Date(Date.now() + 60_000)),
+      ).toBeNull();
+      expect(
+        await repo.findRecentPoolMembership(otherPassengerId, new Date(Date.now() - 30_000)),
+      ).toBeNull();
+    } finally {
+      await pool.query('DELETE FROM shared_rides WHERE ride_id = $1', [rideId]);
+    }
   });
 });

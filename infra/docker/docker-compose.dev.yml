@@ -8,6 +8,10 @@ services:
     build:
       context: ./postgres
     networks: [rcab_dev_net]
+    # Host 5432 is usually taken by a locally-installed Postgres, so publish on 55432.
+    # Used by Drizzle Studio / psql from the host; containers still talk to postgres:5432.
+    ports:
+      - "55432:5432"
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-rcab}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-rcab}
@@ -26,6 +30,8 @@ services:
     image: redis:7-alpine
     networks: [rcab_dev_net]
     command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
+    ports:
+      - "6379:6379"
     volumes:
       - redis-data:/data
     healthcheck:
@@ -109,6 +115,9 @@ services:
     env_file:
       - ../../.env.dev
     environment:
+      # Must stay "development": any other value (or unset) makes the api fail
+      # closed without a >=32-byte JWT_SECRET and https CORS_ORIGINS (rem/api-auth).
+      # Overrides whatever .env.dev says.
       NODE_ENV: development
       PORT: 3000
       DATABASE_URL: postgres://${POSTGRES_USER:-rcab}:${POSTGRES_PASSWORD:-rcab}@postgres:5432/${POSTGRES_DB:-rcab}

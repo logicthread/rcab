@@ -11,6 +11,7 @@ import type { RideRow } from './rides.repository';
 import type { JwtPayload } from '../../common/guards/auth.guard';
 import type { SharedRideRow } from '../matching/shared-ride.repository';
 import type { RideStopRow } from '../matching/ride-stop.repository';
+import { IdempotencyOperation, requestFingerprint } from './idempotency';
 
 const DRIVER_ID = 'driver-1';
 const RIDE_ID = 'ride-1';
@@ -87,7 +88,8 @@ function makeController(
     verify?: ReturnType<typeof vi.fn>;
     ridesCreate?: ReturnType<typeof vi.fn>;
     ridesFindById?: ReturnType<typeof vi.fn>;
-    redisGet?: ReturnType<typeof vi.fn>;
+    ridesFindByScope?: ReturnType<typeof vi.fn>;
+    idempotency?: Record<string, ReturnType<typeof vi.fn>>;
     apply?: ReturnType<typeof vi.fn>;
     cancel?: ReturnType<typeof vi.fn>;
     scheduleWake?: ReturnType<typeof vi.fn>;
@@ -116,12 +118,14 @@ function makeController(
   const ridesRepo = {
     create: opts.ridesCreate ?? vi.fn(),
     findById: opts.ridesFindById ?? vi.fn(),
+    findByIdempotencyScope: opts.ridesFindByScope ?? vi.fn().mockResolvedValue(null),
   };
   const stateMachine = { apply: opts.apply ?? vi.fn(), cancel: opts.cancel ?? vi.fn() };
   const bus = { joinRide: vi.fn().mockResolvedValue(undefined) };
-  const redis = {
-    get: opts.redisGet ?? vi.fn().mockResolvedValue(null),
-    set: vi.fn().mockResolvedValue('OK'),
+  const idempotency = opts.idempotency ?? {
+    claim: vi.fn().mockResolvedValue({ kind: 'claimed' }),
+    complete: vi.fn().mockResolvedValue(undefined),
+    release: vi.fn().mockResolvedValue(undefined),
   };
   const events = { emit: vi.fn() };
   const scheduled = {
@@ -140,7 +144,7 @@ function makeController(
     bus as never,
     events as never,
     scheduled as never,
-    redis as never,
+    idempotency as never,
   );
   return {
     ctrl,
@@ -152,7 +156,7 @@ function makeController(
     ridesRepo,
     stateMachine,
     bus,
-    redis,
+    idempotency,
     events,
     matching,
     scheduled,
@@ -314,7 +318,7 @@ describe('RidesController.create — normal (solo) path', () => {
 
   it('creates a requested ride with the fare locked from the quote token', async () => {
     const ridesCreate = vi.fn().mockResolvedValue({ row: row(), created: true });
-    const { ctrl, redis, events, bus } = makeController({
+    const { ctrl, events, bus } = makeController({
       verify: vi.fn().mockReturnValue(claims),
       ridesCreate,
     });
@@ -326,31 +330,41 @@ describe('RidesController.create — normal (solo) path', () => {
       fare: { amount: 18500, currency: 'INR' },
     });
     expect(ridesCreate).toHaveBeenCalledWith(
-      expect.objectContaining({ passengerId: 'c-1', fareCents: 18500, idempotencyKey: 'idem-1' }),
+      expect.objectContaining({
+        passengerId: 'c-1',
+        fareCents: 18500,
+        idempotencyKey: 'idem-1',
+        idempotencyOperation: 'ride.create.solo',
+        requestFingerprint: requestFingerprint(IdempotencyOperation.Solo, dto),
+      }),
     );
-    expect(redis.set).toHaveBeenCalledWith('idem:rides:idem-1', 'ride-9', 'EX', 86_400);
     // The booking client joins the ride room so it receives ride_state_changed.
     expect(bus.joinRide).toHaveBeenCalledWith('c-1', 'ride-9');
     // A freshly-created ride triggers dispatch.
     expect(events.emit).toHaveBeenCalledWith('ride.requested', { rideId: 'ride-9' });
   });
 
-  it('replays the original ride from Redis without inserting again', async () => {
+  it('replays the caller\'s own ride from the durable record without inserting again', async () => {
     const ridesCreate = vi.fn();
-    const { ctrl, events } = makeController({
-      redisGet: vi.fn().mockResolvedValue('ride-9'),
-      ridesFindById: vi.fn().mockResolvedValue(row()),
-      ridesCreate,
+    const ridesFindByScope = vi.fn().mockResolvedValue({
+      row: row(),
+      requestFingerprint: requestFingerprint(IdempotencyOperation.Solo, dto),
     });
+    const { ctrl, events } = makeController({ ridesFindByScope, ridesCreate });
     const res = await ctrl.create(clientReq as never, dto, 'idem-1');
     expect((res as { rideId: string }).rideId).toBe('ride-9');
+    expect(ridesFindByScope).toHaveBeenCalledWith('c-1', 'ride.create.solo', 'idem-1');
     expect(ridesCreate).not.toHaveBeenCalled();
     // A replay must not re-dispatch.
     expect(events.emit).not.toHaveBeenCalled();
   });
 
-  it('returns the same ride for a duplicate key when not in Redis (DB backstop)', async () => {
-    const ridesCreate = vi.fn().mockResolvedValue({ row: row(), created: false });
+  it('returns the same ride for a concurrent duplicate that lost the insert race (DB backstop)', async () => {
+    const ridesCreate = vi.fn().mockResolvedValue({
+      row: row(),
+      created: false,
+      requestFingerprint: requestFingerprint(IdempotencyOperation.Solo, dto),
+    });
     const { ctrl, events } = makeController({
       verify: vi.fn().mockReturnValue(claims),
       ridesCreate,
@@ -478,11 +492,16 @@ describe('RidesController.create — scheduled path (RCAB-E6.S2)', () => {
   });
 
   it('a replay does not re-schedule the wake', async () => {
+    const when = inWindow();
     const { ctrl, scheduled } = makeController({
-      redisGet: vi.fn().mockResolvedValue('ride-9'),
-      ridesFindById: vi.fn().mockResolvedValue(soloRideRow({ type: 'scheduled' })),
+      ridesFindByScope: vi.fn().mockResolvedValue({
+        row: soloRideRow({ type: 'scheduled' }),
+        requestFingerprint: requestFingerprint(IdempotencyOperation.Scheduled, {
+          ...(scheduledDto(when) as object),
+        } as never),
+      }),
     });
-    await ctrl.create(clientReq as never, scheduledDto(inWindow()), 'idem-1');
+    await ctrl.create(clientReq as never, scheduledDto(when), 'idem-1');
     expect(scheduled.scheduleWake).not.toHaveBeenCalled();
   });
 

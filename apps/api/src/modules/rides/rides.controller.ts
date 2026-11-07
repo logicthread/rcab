@@ -6,7 +6,6 @@ import {
   Body,
   Headers,
   HttpCode,
-  Inject,
   BadRequestException,
   ConflictException,
   NotImplementedException,
@@ -17,9 +16,7 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import type { Request } from 'express';
-import type Redis from 'ioredis';
 import { AuthGuard, type JwtPayload } from '../../common/guards/auth.guard';
-import { REDIS } from '../../infra/redis/redis.module';
 import { MatchingService, type MatchResult } from '../matching/matching.service';
 import { SharedRideRepository } from '../matching/shared-ride.repository';
 import { RideStopRepository } from '../matching/ride-stop.repository';
@@ -33,7 +30,17 @@ import { TransitionRideDto } from './dto/transition-ride.dto';
 import { CancelRideDto } from './dto/cancel-ride.dto';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { QuoteTokenService, type QuoteClaims } from './quote-token.service';
-import { RidesRepository, type RideRow } from './rides.repository';
+import { RidesRepository, type RideIdempotencyOperation, type RideRow } from './rides.repository';
+import { IdempotencyRepository } from './idempotency.repository';
+import {
+  IdempotencyOperation,
+  fingerprintMatches,
+  idempotencyKeyConflict,
+  idempotencyRequestInProgress,
+  parseIdempotencyKey,
+  requestFingerprint,
+} from './idempotency';
+import type { IdempotencyScope } from './idempotency.repository';
 import { RideStateMachine } from './ride-state-machine.service';
 import { RealtimeBus } from '../realtime/realtime.bus';
 import { RIDE_REQUESTED_EVENT, type RideRequestedEventPayload } from '../dispatch/dispatch.service';
@@ -129,7 +136,7 @@ export class RidesController {
     private readonly bus: RealtimeBus,
     private readonly events: EventEmitter2,
     private readonly scheduled: ScheduledDispatchService,
-    @Inject(REDIS) private readonly redis: Redis,
+    private readonly idempotency: IdempotencyRepository,
   ) {}
 
   @Post('quote')
@@ -209,9 +216,125 @@ export class RidesController {
         message: `type='${dto.type}' is not implemented in Phase-0 yet (see RCAB-E6)`,
       });
     }
+    return this.createShared(req.user.sub, dto, idempotencyKey);
+  }
 
-    const passengerId = req.user.sub;
+  /**
+   * Shared (pooled) booking request. Honors `Idempotency-Key` with the same
+   * account-scoped contract as solo (F15): the key is claimed durably BEFORE a
+   * seat is allocated, so a retried identical request replays the original
+   * result instead of taking a second seat, and a concurrent duplicate gets 409
+   * `idempotency_request_in_progress` rather than racing the allocation.
+   *
+   * The header is optional here only because the web client does not send it
+   * for shared yet; without it the request is not retry-safe (legacy).
+   * A `pending` claim older than `PENDING_RECLAIM_AFTER_MS` is reclaimed by a
+   * same-fingerprint retry, which first looks for a seat the dead attempt
+   * already took. TODO(R08): that lookup is best effort (passenger + time, not a
+   * durable link) — folding claim/complete into the pool-membership transaction
+   * would close the remaining gap (e.g. a seat taken but not yet visible, or a
+   * live first request still running past the bound).
+   */
+  private async createShared(
+    passengerId: string,
+    dto: CreateRideDto,
+    rawKey: string | undefined,
+  ): Promise<CreateRideResponse> {
+    const key = parseIdempotencyKey(rawKey, false);
+    if (!key) return this.allocateSharedSeat(passengerId, dto);
 
+    const scope = { principalId: passengerId, operation: IdempotencyOperation.Shared, key };
+    const fingerprint = requestFingerprint(IdempotencyOperation.Shared, dto);
+    const claim = await this.idempotency.claim(scope, fingerprint);
+    if (claim.kind === 'existing') {
+      const { record } = claim;
+      if (record.requestFingerprint !== fingerprint) throw idempotencyKeyConflict();
+      if (record.state === 'completed' && record.response) {
+        return record.response as CreateRideResponse;
+      }
+      throw idempotencyRequestInProgress();
+    }
+
+    let response: CreateRideResponse;
+    try {
+      // A reclaimed claim means a previous attempt died (or failed to record
+      // its result) after possibly taking a seat: return that seat if it exists.
+      response =
+        (claim.kind === 'reclaimed'
+          ? await this.existingSharedSeat(passengerId, dto, claim.previousAttemptAt)
+          : null) ?? (await this.allocateSharedSeat(passengerId, dto));
+    } catch (err) {
+      // Allocation failed: free the key so the client's retry can proceed.
+      await this.idempotency
+        .release(scope)
+        .catch((releaseErr: unknown) =>
+          this.log.error({ err: releaseErr, key }, 'idempotency release failed'),
+        );
+      throw err;
+    }
+    await this.completeClaim(scope, response);
+    return response;
+  }
+
+  /**
+   * Records the replayable result. The seat is already allocated, so a failure
+   * here must not fail the request; it is retried briefly, and if it still
+   * fails the claim stays `pending` until `PENDING_RECLAIM_AFTER_MS` lets the
+   * next retry reclaim it and find the seat via `existingSharedSeat` (rather
+   * than 409-ing forever).
+   */
+  private async completeClaim(
+    scope: IdempotencyScope,
+    response: CreateRideResponse,
+  ): Promise<void> {
+    const backoffMs = [0, 50, 200];
+    let lastErr: unknown;
+    for (const wait of backoffMs) {
+      if (wait) await new Promise((r) => setTimeout(r, wait));
+      try {
+        await this.idempotency.complete(scope, response.sharedRideId, response);
+        return;
+      } catch (err) {
+        lastErr = err;
+      }
+    }
+    this.log.error(
+      { err: lastErr, key: scope.key, sharedRideId: response.sharedRideId },
+      'idempotency complete failed; claim left pending for reclaim',
+    );
+  }
+
+  /** Seat the passenger already holds from a dead earlier attempt, if any. */
+  private async existingSharedSeat(
+    passengerId: string,
+    dto: CreateRideDto,
+    since: Date,
+  ): Promise<CreateRideResponse | null> {
+    const held = await this.ridesRepo.findRecentPoolMembership(passengerId, since);
+    if (!held) return null;
+    const result: MatchResult = held.opened
+      ? { mode: 'opened', sharedRideId: held.sharedRideId, poolStatus: 'open' }
+      : {
+          mode: 'slotted',
+          sharedRideId: held.sharedRideId,
+          poolStatus: held.poolState === 'closed_full' ? 'closed_full' : 'open',
+        };
+    const seatQuote = await this.priceMatchedSeat(result, dto);
+    return {
+      sharedRideId: result.sharedRideId,
+      passengerId,
+      mode: result.mode,
+      poolStatus: result.poolStatus,
+      perSeatPrice: seatQuote?.perSeatPrice,
+      seatMultiplier: seatQuote?.seatMultiplier,
+      detourFactor: seatQuote?.detourFactor,
+    };
+  }
+
+  private async allocateSharedSeat(
+    passengerId: string,
+    dto: CreateRideDto,
+  ): Promise<CreateRideResponse> {
     const result = await this.matching.findOrCreatePool({
       passengerId,
       originLat: dto.originLat,
@@ -235,63 +358,50 @@ export class RidesController {
 
   /**
    * Solo (normal) booking request. Idempotent: an `Idempotency-Key` header is
-   * required; a Redis entry gives fast replay and the `rides.idempotency_key`
-   * UNIQUE constraint is the durable backstop. The fare is locked from the
-   * signed quote token (rejected if expired/tampered). Persists `requested`;
-   * dispatch is RCAB-E4.S3.
+   * required, scoped to (passenger, `ride.create.solo`, key) and bound to the
+   * request's fingerprint (F07). A replay returns the caller's own ride; a
+   * mismatched intent is 422. The fare is locked from the signed quote token
+   * (rejected if expired/tampered) — but only for a NEW booking: a replay of an
+   * accepted one is returned even after its quote has expired. Persists
+   * `requested`; dispatch is RCAB-E4.S3.
    */
   private async createNormal(
     passengerId: string,
     dto: CreateRideDto,
-    idempotencyKey: string | undefined,
+    rawKey: string | undefined,
   ): Promise<SoloRideResponse> {
-    if (!idempotencyKey) {
-      throw new BadRequestException({
-        code: 'idempotency_key_required',
-        message: 'Idempotency-Key header is required',
-      });
-    }
+    const key = parseIdempotencyKey(rawKey, true);
     if (!dto.quoteToken) {
       throw new BadRequestException({ code: 'invalid_quote', message: 'quoteToken is required' });
     }
+    const operation = IdempotencyOperation.Solo;
+    const fingerprint = requestFingerprint(operation, dto);
 
-    // Fast replay: a key we've already seen returns the original ride.
-    const cachedRideId = await this.redis.get(idemKey(idempotencyKey));
-    if (cachedRideId) {
-      const existing = await this.ridesRepo.findById(cachedRideId);
-      if (existing) return soloResponse(existing);
-    }
+    const replay = await this.replaySolo(passengerId, operation, key, fingerprint);
+    if (replay) return replay;
 
-    let claims: QuoteClaims;
-    try {
-      claims = this.quoteToken.verify(dto.quoteToken);
-    } catch (err) {
-      const expired = err instanceof Error && err.name === 'TokenExpiredError';
-      throw new BadRequestException({
-        code: expired ? 'quote_expired' : 'invalid_quote',
-        message: expired ? 'Quote expired — please re-quote' : 'Invalid quote token',
-      });
-    }
-    if (!coordsMatch(claims, dto)) {
-      throw new BadRequestException({
-        code: 'quote_mismatch',
-        message: 'Quote does not match the requested route',
-      });
-    }
-
-    const { row, created } = await this.ridesRepo.create({
+    const claims = this.verifyQuote(dto);
+    const {
+      row,
+      created,
+      requestFingerprint: stored,
+    } = await this.ridesRepo.create({
       passengerId,
       originLat: dto.originLat,
       originLng: dto.originLng,
       destLat: dto.destLat,
       destLng: dto.destLng,
       fareCents: claims.soloFareCents,
-      idempotencyKey,
+      idempotencyKey: key,
+      idempotencyOperation: operation,
+      requestFingerprint: fingerprint,
     });
-    // 24 h replay window (≫ the 5-min quote TTL).
-    await this.redis.set(idemKey(idempotencyKey), row.id, 'EX', 86_400);
+    // Lost a concurrent first-use race to a request with a different intent.
+    if (!created && !fingerprintMatches(stored, fingerprint)) throw idempotencyKeyConflict();
 
     // Only a freshly-created ride triggers dispatch — a replay must not re-dispatch.
+    // TODO(F08/R07): if the process dies after the insert but before the emit,
+    // a retry replays the row without dispatching it; Stage C's outbox owns this.
     if (created) {
       // Join the booking client to the ride room so it receives
       // `ride_state_changed` once a driver starts advancing the ride (E4.S6).
@@ -306,22 +416,19 @@ export class RidesController {
 
   /**
    * Scheduled (future) booking request. Same idempotent + quote-locked flow as
-   * `createNormal`, but the ride is persisted `type='scheduled'` with a future
-   * `scheduled_for` (15 min – 24 h out) and a BullMQ wake job is enqueued
-   * (~10 min before pickup, RCAB-E6.S1) INSTEAD of dispatching now. The wake
-   * worker (RCAB-E6.S3) runs the normal dispatch path when it fires.
+   * `createNormal` (scope `ride.create.scheduled`), but the ride is persisted
+   * `type='scheduled'` with a future `scheduled_for` (15 min – 24 h out) and a
+   * BullMQ wake job is enqueued (~10 min before pickup, RCAB-E6.S1) INSTEAD of
+   * dispatching now. The wake worker (RCAB-E6.S3) runs the normal dispatch path
+   * when it fires. A replay is resolved BEFORE the window check, so a late
+   * retry still recovers the committed booking (R05).
    */
   private async createScheduled(
     passengerId: string,
     dto: CreateRideDto,
-    idempotencyKey: string | undefined,
+    rawKey: string | undefined,
   ): Promise<SoloRideResponse> {
-    if (!idempotencyKey) {
-      throw new BadRequestException({
-        code: 'idempotency_key_required',
-        message: 'Idempotency-Key header is required',
-      });
-    }
+    const key = parseIdempotencyKey(rawKey, true);
     if (!dto.quoteToken) {
       throw new BadRequestException({ code: 'invalid_quote', message: 'quoteToken is required' });
     }
@@ -331,6 +438,12 @@ export class RidesController {
         message: 'scheduledFor is required for a scheduled ride',
       });
     }
+    const operation = IdempotencyOperation.Scheduled;
+    const fingerprint = requestFingerprint(operation, dto);
+
+    const replay = await this.replaySolo(passengerId, operation, key, fingerprint);
+    if (replay) return replay;
+
     const scheduledFor = new Date(dto.scheduledFor);
     const leadMs = scheduledFor.getTime() - Date.now();
     if (
@@ -344,16 +457,62 @@ export class RidesController {
       });
     }
 
-    // Fast replay: a key we've already seen returns the original ride.
-    const cachedRideId = await this.redis.get(idemKey(idempotencyKey));
-    if (cachedRideId) {
-      const existing = await this.ridesRepo.findById(cachedRideId);
-      if (existing) return soloResponse(existing);
+    const claims = this.verifyQuote(dto);
+    const {
+      row,
+      created,
+      requestFingerprint: stored,
+    } = await this.ridesRepo.create({
+      passengerId,
+      originLat: dto.originLat,
+      originLng: dto.originLng,
+      destLat: dto.destLat,
+      destLng: dto.destLng,
+      fareCents: claims.soloFareCents,
+      idempotencyKey: key,
+      idempotencyOperation: operation,
+      requestFingerprint: fingerprint,
+      type: 'scheduled',
+      scheduledFor,
+    });
+    if (!created && !fingerprintMatches(stored, fingerprint)) throw idempotencyKeyConflict();
+
+    // A freshly-created scheduled ride enqueues a delayed wake instead of
+    // dispatching now (a replay must not double-schedule).
+    // TODO(F08/R07): if scheduleWake fails after the insert, a retry replays the
+    // row and never re-enqueues the wake; Stage C's outbox/reconciler owns this.
+    if (created) {
+      await this.bus.joinRide(passengerId, row.id);
+      await this.scheduled.scheduleWake(row.id, scheduledFor);
     }
 
+    return soloResponse(row);
+  }
+
+  /**
+   * Replay lookup for solo/scheduled creates, against the durable row only and
+   * only within the caller's own (passenger, operation) scope — another
+   * account's identical key is simply not found (F07). Same intent → the
+   * original ride; different intent → 422 with no mutation.
+   */
+  private async replaySolo(
+    passengerId: string,
+    operation: RideIdempotencyOperation,
+    key: string,
+    fingerprint: string,
+  ): Promise<SoloRideResponse | null> {
+    const existing = await this.ridesRepo.findByIdempotencyScope(passengerId, operation, key);
+    if (!existing) return null;
+    if (!fingerprintMatches(existing.requestFingerprint, fingerprint)) {
+      throw idempotencyKeyConflict();
+    }
+    return soloResponse(existing.row);
+  }
+
+  private verifyQuote(dto: CreateRideDto): QuoteClaims {
     let claims: QuoteClaims;
     try {
-      claims = this.quoteToken.verify(dto.quoteToken);
+      claims = this.quoteToken.verify(dto.quoteToken ?? '');
     } catch (err) {
       const expired = err instanceof Error && err.name === 'TokenExpiredError';
       throw new BadRequestException({
@@ -367,28 +526,7 @@ export class RidesController {
         message: 'Quote does not match the requested route',
       });
     }
-
-    const { row, created } = await this.ridesRepo.create({
-      passengerId,
-      originLat: dto.originLat,
-      originLng: dto.originLng,
-      destLat: dto.destLat,
-      destLng: dto.destLng,
-      fareCents: claims.soloFareCents,
-      idempotencyKey,
-      type: 'scheduled',
-      scheduledFor,
-    });
-    await this.redis.set(idemKey(idempotencyKey), row.id, 'EX', 86_400);
-
-    // A freshly-created scheduled ride enqueues a delayed wake instead of
-    // dispatching now (a replay must not double-schedule).
-    if (created) {
-      await this.bus.joinRide(passengerId, row.id);
-      await this.scheduled.scheduleWake(row.id, scheduledFor);
-    }
-
-    return soloResponse(row);
+    return claims;
   }
 
   @Get(':id/stops')
@@ -591,10 +729,6 @@ export class RidesController {
       return null;
     }
   }
-}
-
-function idemKey(key: string): string {
-  return `idem:rides:${key}`;
 }
 
 function soloResponse(row: RideRow): SoloRideResponse {

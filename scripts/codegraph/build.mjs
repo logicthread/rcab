@@ -10,7 +10,7 @@
 //
 // Usage: node scripts/codegraph/build.mjs [--output <dir>] [--markdown-only]
 import { execFileSync } from 'node:child_process';
-import { readFileSync, writeFileSync, mkdirSync, globSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, globSync, rmSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs as parseArgsUtil } from 'node:util';
@@ -104,6 +104,10 @@ function main() {
   console.log(`  edges: ${Object.entries(c.byEdgeKind).map(([k, v]) => `${v} ${k}`).join(', ')}`);
 
   if (values['push-memory']) pushToMemory(json);
+
+  // The mark-codegraph-stale PostToolUse hook drops this flag when source changes;
+  // a successful rebuild is what clears it.
+  rmSync(join(values.output, '.stale'), { force: true });
 }
 
 function pushToMemory(json) {

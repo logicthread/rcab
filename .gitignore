@@ -67,3 +67,6 @@ apps/driver-app/android/app/google-services.json
 # Generated API client / migrations artifacts
 apps/*/src/generated/
 apps/api/migrations/*.snapshot
+
+# Claude Code agent worktrees
+.claude/worktrees/

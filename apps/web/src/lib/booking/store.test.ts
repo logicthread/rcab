@@ -75,6 +75,16 @@ describe('useBookingStore', () => {
     expect(useBookingStore.getState().stage).toBe('idle');
   });
 
+  it('setPoint with the same coordinates but a new label keeps the quote (label-only update)', () => {
+    useBookingStore.getState().setPoint('pickup', PICKUP);
+    useBookingStore.setState({ quote: quoteFixture(), stage: 'quoted' });
+    useBookingStore.getState().setPoint('pickup', { ...PICKUP, label: 'Reverse-geocoded name' });
+    const s = useBookingStore.getState();
+    expect(s.pickup?.label).toBe('Reverse-geocoded name');
+    expect(s.quote).not.toBeNull();
+    expect(s.stage).toBe('quoted');
+  });
+
   it('applyPreset sets both endpoints and clears the quote', () => {
     useBookingStore.setState({ quote: quoteFixture(), stage: 'quoted' });
     useBookingStore.getState().applyPreset(PRESET_TRIPS[0]);
@@ -133,6 +143,32 @@ describe('useBookingStore', () => {
     expect(useBookingStore.getState().stage).toBe('opened');
     expect(useBookingStore.getState().seatCount).toBe(3);
     expect(useBookingStore.getState().poolStatus).toBe('closed_full');
+  });
+
+  it('every quote-clearing action bumps quoteEpoch, even with unchanged coordinates', () => {
+    const st = () => useBookingStore.getState();
+    st().applyPreset(PRESET_TRIPS[0]);
+    const e1 = st().quoteEpoch;
+    st().setQuote(quoteFixture());
+    expect(st().quoteEpoch).toBe(e1); // quoting/quoted never bump it
+    st().applyPreset(PRESET_TRIPS[0]);
+    expect(st().quote).toBeNull();
+    expect(st().quoteEpoch).toBeGreaterThan(e1);
+    const e2 = st().quoteEpoch;
+    st().setQuote(quoteFixture());
+    st().invalidateQuote();
+    expect(st().quote).toBeNull();
+    expect(st().stage).toBe('idle');
+    expect(st().quoteEpoch).toBeGreaterThan(e2);
+  });
+
+  it('label-only setPoint does not bump quoteEpoch', () => {
+    const st = () => useBookingStore.getState();
+    st().applyPreset(PRESET_TRIPS[0]);
+    st().setQuote(quoteFixture());
+    const e = st().quoteEpoch;
+    st().setPoint('pickup', { ...st().pickup!, label: 'Renamed' });
+    expect(st().quoteEpoch).toBe(e);
   });
 
   it('reset returns the store to initial values', () => {

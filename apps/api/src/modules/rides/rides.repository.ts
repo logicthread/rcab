@@ -1,7 +1,25 @@
 import { Injectable, Inject } from '@nestjs/common';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { DRIZZLE_DB, type DrizzleDb } from '../../infra/db/drizzle.module';
-import { rides } from '../../db/schema';
+import { rides, type SharedRideMember } from '../../db/schema';
+import { IdempotencyOperation } from './idempotency';
+
+/** The idempotency operations that persist as a `rides` row. */
+export type RideIdempotencyOperation =
+  | typeof IdempotencyOperation.Solo
+  | typeof IdempotencyOperation.Scheduled;
+
+function operationForType(type: string): RideIdempotencyOperation {
+  return type === 'scheduled' ? IdempotencyOperation.Scheduled : IdempotencyOperation.Solo;
+}
+
+/** A pool seat the passenger already holds (idempotency reclaim, F15). */
+export interface PoolMembershipRow {
+  sharedRideId: string;
+  poolState: string;
+  /** True when the passenger is the sole member, i.e. they opened the pool. */
+  opened: boolean;
+}
 
 export interface RideRow {
   id: string;
@@ -108,9 +126,12 @@ export class RidesRepository {
   constructor(@Inject(DRIZZLE_DB) private readonly db: DrizzleDb) {}
 
   /**
-   * Insert a solo ride in `requested` state. The `idempotency_key` UNIQUE
-   * constraint is the durable dedup backstop: on conflict we return the existing
-   * row instead of inserting a duplicate. `created` is false on a replay.
+   * Insert a solo/scheduled ride in `requested` state. Idempotency is scoped to
+   * `(passenger, operation, key)` — the `rides_idempotency_scope_uq` constraint
+   * is the durable dedup backstop (F07 / migration 0013): on conflict we return
+   * the caller's OWN existing row plus its stored fingerprint, so the caller can
+   * replay it or reject a mismatched intent. Another passenger's identical key
+   * never conflicts. `created` is false on a replay.
    */
   async create(params: {
     passengerId: string;
@@ -122,7 +143,13 @@ export class RidesRepository {
     idempotencyKey: string;
     type?: string;
     scheduledFor?: Date | null;
-  }): Promise<{ row: RideRow; created: boolean }> {
+    /** Defaults from `type` (scheduled → ride.create.scheduled, else solo). */
+    idempotencyOperation?: RideIdempotencyOperation;
+    requestFingerprint?: string | null;
+  }): Promise<{ row: RideRow; created: boolean; requestFingerprint: string | null }> {
+    const type = params.type ?? 'normal';
+    const operation = params.idempotencyOperation ?? operationForType(type);
+    const fingerprint = params.requestFingerprint ?? null;
     const inserted = await this.db
       .insert(rides)
       .values({
@@ -133,19 +160,31 @@ export class RidesRepository {
         destLng: params.destLng,
         fareCents: params.fareCents,
         status: 'requested',
-        type: params.type ?? 'normal',
+        type,
         scheduledFor: params.scheduledFor ?? null,
         idempotencyKey: params.idempotencyKey,
+        idempotencyOperation: operation,
+        requestFingerprint: fingerprint,
       })
-      .onConflictDoNothing({ target: rides.idempotencyKey })
+      .onConflictDoNothing({
+        target: [rides.passengerId, rides.idempotencyOperation, rides.idempotencyKey],
+      })
       .returning();
 
     if (inserted.length > 0) {
-      return { row: toRow(inserted[0]), created: true };
+      return { row: toRow(inserted[0]), created: true, requestFingerprint: fingerprint };
     }
-    const existing = await this.findByIdempotencyKey(params.idempotencyKey);
-    // The conflict guarantees a row exists; the non-null assertion is safe.
-    return { row: existing!, created: false };
+    const existing = await this.findByIdempotencyScope(
+      params.passengerId,
+      operation,
+      params.idempotencyKey,
+    );
+    if (!existing) {
+      // The conflicting row vanished between INSERT and SELECT (deleted user
+      // cascade) — surface it rather than pretend a ride exists.
+      throw new Error('idempotency conflict without a matching ride');
+    }
+    return { ...existing, created: false };
   }
 
   async findById(id: string): Promise<RideRow | null> {
@@ -153,9 +192,28 @@ export class RidesRepository {
     return rows[0] ? toRow(rows[0]) : null;
   }
 
-  async findByIdempotencyKey(key: string): Promise<RideRow | null> {
-    const rows = await this.db.select().from(rides).where(eq(rides.idempotencyKey, key)).limit(1);
-    return rows[0] ? toRow(rows[0]) : null;
+  /**
+   * The caller's own ride for an idempotency scope, with its stored request
+   * fingerprint (`null` for legacy pre-0013 rows). There is deliberately no
+   * global by-key lookup: a key is meaningless outside its owner + operation.
+   */
+  async findByIdempotencyScope(
+    passengerId: string,
+    operation: RideIdempotencyOperation,
+    key: string,
+  ): Promise<{ row: RideRow; requestFingerprint: string | null } | null> {
+    const rows = await this.db
+      .select()
+      .from(rides)
+      .where(
+        and(
+          eq(rides.passengerId, passengerId),
+          eq(rides.idempotencyOperation, operation),
+          eq(rides.idempotencyKey, key),
+        ),
+      )
+      .limit(1);
+    return rows[0] ? { row: toRow(rows[0]), requestFingerprint: rows[0].requestFingerprint } : null;
   }
 
   /**
@@ -280,5 +338,47 @@ export class RidesRepository {
         .returning();
       return { ok: true, row: toRow(updated[0]) };
     });
+  }
+
+  /**
+   * The newest pool (open or already full) in which `passengerId` holds a seat
+   * joined at/after `since`. Used when a stale shared-create claim is reclaimed:
+   * if the dead attempt got as far as taking a seat, the retry returns it
+   * instead of allocating a second one. Best effort — it matches by passenger +
+   * time, not by a durable claim↔seat link (TODO(R08)).
+   */
+  async findRecentPoolMembership(
+    passengerId: string,
+    since: Date,
+  ): Promise<PoolMembershipRow | null> {
+    const result = await this.db.execute<{
+      ride_id: string;
+      pool_state: string;
+      members: SharedRideMember[] | string | null;
+    }>(sql`
+      SELECT ride_id, pool_state, members
+        FROM shared_rides
+       WHERE pool_state IN ('open', 'closed_full')
+         AND members @> ${JSON.stringify([{ passenger_id: passengerId }])}::jsonb
+       ORDER BY created_at DESC
+       LIMIT 20
+    `);
+    // joined_at is stamped by the app clock, `since` by the DB clock: allow a
+    // little skew rather than miss the dead attempt's own seat.
+    const floorMs = since.getTime() - 2_000;
+    for (const r of result.rows) {
+      const members: SharedRideMember[] =
+        typeof r.members === 'string'
+          ? (JSON.parse(r.members) as SharedRideMember[])
+          : (r.members ?? []);
+      const mine = members.find((m) => m.passenger_id === passengerId);
+      if (!mine || new Date(mine.joined_at).getTime() < floorMs) continue;
+      return {
+        sharedRideId: r.ride_id,
+        poolState: r.pool_state,
+        opened: members.length === 1,
+      };
+    }
+    return null;
   }
 }

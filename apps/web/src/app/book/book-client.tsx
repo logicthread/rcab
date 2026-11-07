@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { withAuth } from '../../lib/auth/with-auth';
 import { useAuthStore } from '../../lib/auth/store';
@@ -23,6 +23,7 @@ import {
   submitRating,
 } from '../../lib/booking/api';
 import { connectBookingSocket } from '../../lib/booking/ws';
+import { createIntentKeyTracker } from '../../lib/booking/intent';
 import { reverseGeocode } from '../../lib/geo/nominatim';
 import { AddressSearch } from './address-search';
 import { RideTypeToggle } from './ride-type-toggle';
@@ -58,11 +59,24 @@ function formatMoney(m: Money | null | undefined): string {
   return `₹${(m.amount / 100).toFixed(2)}`;
 }
 
+const IDEMPOTENCY_CONFLICT_MSG =
+  'Your booking details changed since the last attempt, so we refreshed the quote. Please review it and confirm again.';
+const IDEMPOTENCY_IN_PROGRESS_MSG =
+  'Your previous request is still being processed. Please wait a moment and try again.';
+const IDEMPOTENCY_INVALID_MSG = 'Something went wrong preparing your request. Please try again.';
+
+const QUOTE_EXPIRED_MSG =
+  'Your fare quote expired, so we are refreshing it. Please review the new fare and confirm again.';
+
 const ROUTING_UNAVAILABLE_MSG =
   "We can't route between these points yet — try pickup and drop within the city.";
 
 function BookPage() {
   const { user, jwt, signOut } = useAuthStore();
+  // Effects depend on *whether* we are authenticated, never on the token value:
+  // a background token refresh must not re-run quotes or tear down sockets.
+  const authed = jwt !== null;
+  const getToken = useCallback(() => useAuthStore.getState().getAccessToken(), []);
   const {
     rideType,
     pickup,
@@ -71,6 +85,7 @@ function BookPage() {
     stage,
     quote,
     quoteError,
+    quoteEpoch,
     sharedRideId,
     seatCount,
     poolStatus,
@@ -84,6 +99,7 @@ function BookPage() {
     setPoint,
     applyPreset,
     swapPoints,
+    invalidateQuote,
     startQuoting,
     setQuote,
     setQuoteError,
@@ -99,25 +115,37 @@ function BookPage() {
     reset,
   } = useBookingStore();
 
-  const lastQuoteKey = useRef<string>('');
   const bothSet = pickup !== null && dropoff !== null;
+  // Request identity = ride type + route coordinates. Deliberately excludes
+  // stage/quote/labels: those are changed *by* the request itself.
   const quoteKey = bothSet
     ? `${rideType}|${pickup!.lat},${pickup!.lng}|${dropoff!.lat},${dropoff!.lng}`
     : '';
+  const tracking = stage === 'tracking';
+  // Bumped by "Retry" to re-quote an unchanged route after an error/expiry.
+  const [quoteNonce, setQuoteNonce] = useState(0);
 
-  // Quote whenever both endpoints are set and the route (or ride type) changes.
+  // Quote whenever both endpoints are set and the route (or ride type) changes,
+  // or whenever the store invalidated the quote (quoteEpoch) — a clear that
+  // leaves the coordinates untouched must still re-quote, otherwise the page
+  // is left with no quote, no request and no retry control. quoteEpoch is only
+  // bumped by clears, never by startQuoting/setQuote, so there is no loop and
+  // the in-flight request is not aborted by its own stage change.
+  // One AbortController per effect run: a superseded run (route change, unmount,
+  // StrictMode double-invoke) aborts its fetch and can no longer apply state.
   useEffect(() => {
-    if (!jwt || !pickup || !dropoff || stage === 'tracking') return;
-    if (lastQuoteKey.current === quoteKey) return;
-    lastQuoteKey.current = quoteKey;
-    let cancelled = false;
+    if (!authed || !quoteKey || tracking) return;
+    const { pickup: from, dropoff: to, rideType: type } = useBookingStore.getState();
+    if (!from || !to) return;
+    const controller = new AbortController();
+    let superseded = false;
     startQuoting();
-    fetchQuote(pickup, dropoff, apiRideType(rideType), jwt)
+    fetchQuote(from, to, apiRideType(type), controller.signal)
       .then((res) => {
-        if (!cancelled) setQuote(res);
+        if (!superseded) setQuote(res);
       })
       .catch((err: unknown) => {
-        if (cancelled) return;
+        if (superseded) return;
         let message = 'Quote failed';
         if (err instanceof BookingApiError) {
           message = err.isRoutingUnavailable ? ROUTING_UNAVAILABLE_MSG : err.message;
@@ -125,13 +153,50 @@ function BookPage() {
         setQuoteError(message);
       });
     return () => {
-      cancelled = true;
+      superseded = true;
+      controller.abort();
     };
-  }, [quoteKey, jwt, pickup, dropoff, rideType, stage, startQuoting, setQuote, setQuoteError]);
+  }, [quoteKey, quoteNonce, quoteEpoch, authed, tracking, startQuoting, setQuote, setQuoteError]);
+
+  // One idempotency key per booking intent (ride type + route), reused across
+  // retries and rotated only on a changed intent or a confirmed success.
+  const intentKeys = useMemo(() => createIntentKeyTracker(), []);
+
+  // Maps a failed create to user-facing copy, applying the idempotency recovery
+  // the API contract requires:
+  //  - 422 idempotency_key_conflict: the key now names a different request, so
+  //    rotate it and re-quote (the fare/quote the user saw is stale).
+  //  - 400 idempotency_key_invalid: rotate; a retry gets a fresh key.
+  //  - 409 idempotency_request_in_progress: already replayed once in the api
+  //    layer; keep the key so a manual retry still dedupes server-side.
+  const createErrorMessage = useCallback(
+    (err: unknown): string => {
+      if (!(err instanceof BookingApiError)) return 'Request failed';
+      if (err.isQuoteExpired) {
+        // The quote token lapsed before submit: the booking was never created,
+        // so rotate the key (the retry carries a new token) and re-quote.
+        intentKeys.clear();
+        invalidateQuote();
+        return QUOTE_EXPIRED_MSG;
+      }
+      if (err.isIdempotencyConflict) {
+        intentKeys.clear();
+        setQuoteNonce((n) => n + 1);
+        return IDEMPOTENCY_CONFLICT_MSG;
+      }
+      if (err.isIdempotencyKeyInvalid) {
+        intentKeys.clear();
+        return IDEMPOTENCY_INVALID_MSG;
+      }
+      if (err.isIdempotencyInProgress) return IDEMPOTENCY_IN_PROGRESS_MSG;
+      return err.message;
+    },
+    [intentKeys, invalidateQuote],
+  );
 
   useEffect(() => {
-    if (!jwt || !sharedRideId) return;
-    const conn = connectBookingSocket(jwt);
+    if (!authed || !sharedRideId) return;
+    const conn = connectBookingSocket(getToken);
     const unsub = conn.onPoolUpdate((payload) => {
       applyPoolUpdate(payload.sharedRideId, payload.seatCount, payload.poolStatus);
     });
@@ -139,12 +204,12 @@ function BookPage() {
       unsub();
       conn.close();
     };
-  }, [jwt, sharedRideId, applyPoolUpdate]);
+  }, [authed, getToken, sharedRideId, applyPoolUpdate]);
 
   // Solo live-tracking: follow the ride room for status + driver position.
   useEffect(() => {
-    if (!jwt || !rideId) return;
-    const conn = connectBookingSocket(jwt);
+    if (!authed || !rideId) return;
+    const conn = connectBookingSocket(getToken);
     conn.subscribeRide(rideId);
     const unsubState = conn.onRideStateChanged((p) => applyRideState(p.state));
     const unsubLoc = conn.onDriverLocation((p) =>
@@ -155,17 +220,17 @@ function BookPage() {
       unsubLoc();
       conn.close();
     };
-  }, [jwt, rideId, applyRideState, applyDriverLocation]);
+  }, [authed, getToken, rideId, applyRideState, applyDriverLocation]);
 
   // Reconnect-restore: a saved active ride (full page reload) rehydrates the
   // tracking view from GET /v1/rides/:id; terminal rides clear the marker.
   useEffect(() => {
-    if (!jwt || rideId || sharedRideId) return;
+    if (!authed || rideId || sharedRideId) return;
     const saved =
       typeof window !== 'undefined' ? window.localStorage.getItem(ACTIVE_RIDE_KEY) : null;
     if (!saved) return;
     let cancelled = false;
-    fetchRide(saved, jwt)
+    fetchRide(saved)
       .then((r) => {
         if (cancelled) return;
         if (['completed', 'no_driver', 'cancelled'].includes(r.status)) {
@@ -188,7 +253,7 @@ function BookPage() {
     };
     // mount-time restore; deps intentionally minimal
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [jwt]);
+  }, [authed]);
 
   // Stop persisting a ride once it reaches a terminal state.
   useEffect(() => {
@@ -202,18 +267,30 @@ function BookPage() {
   }, [rideStatus]);
 
   const submitSolo = useCallback(async () => {
-    if (!jwt || rideType !== 'private' || !pickup || !dropoff || !quote?.quoteToken) return;
+    if (!authed || rideType !== 'private' || !pickup || !dropoff || !quote?.quoteToken) return;
     startRequest();
     try {
-      const key = crypto.randomUUID();
-      const res = await createNormalRide(pickup, dropoff, quote.quoteToken, jwt, key);
+      const key = intentKeys.keyFor(quoteKey);
+      const res = await createNormalRide(pickup, dropoff, quote.quoteToken, key);
+      intentKeys.clear();
       if (typeof window !== 'undefined') window.localStorage.setItem(ACTIVE_RIDE_KEY, res.rideId);
       setSoloRequested(res.rideId, res.status);
     } catch (err) {
-      const message = err instanceof BookingApiError ? err.message : 'Request failed';
-      setRequestError(message);
+      setRequestError(createErrorMessage(err));
     }
-  }, [jwt, rideType, pickup, dropoff, quote, startRequest, setSoloRequested, setRequestError]);
+  }, [
+    authed,
+    rideType,
+    pickup,
+    dropoff,
+    quote,
+    quoteKey,
+    intentKeys,
+    startRequest,
+    setSoloRequested,
+    setRequestError,
+    createErrorMessage,
+  ]);
 
   // Tap the map → set the active endpoint, then resolve a human label.
   const handleMapClick = useCallback(
@@ -235,49 +312,68 @@ function BookPage() {
   );
 
   const submit = useCallback(async () => {
-    if (!jwt || rideType !== 'shared' || !pickup || !dropoff) return;
+    if (!authed || rideType !== 'shared' || !pickup || !dropoff) return;
     startRequest();
     try {
-      const res = await createSharedRide(pickup, dropoff, jwt);
+      const res = await createSharedRide(pickup, dropoff, intentKeys.keyFor(quoteKey));
+      intentKeys.clear();
       if (res.mode === 'opened') {
         setOpened(res.sharedRideId, 1, res.poolStatus);
       } else {
         setSlotted(res.sharedRideId, 2, res.poolStatus);
       }
     } catch (err) {
-      const message = err instanceof BookingApiError ? err.message : 'Request failed';
-      setRequestError(message);
+      setRequestError(createErrorMessage(err));
     }
-  }, [jwt, rideType, pickup, dropoff, startRequest, setOpened, setSlotted, setRequestError]);
+  }, [
+    authed,
+    rideType,
+    pickup,
+    dropoff,
+    quoteKey,
+    intentKeys,
+    startRequest,
+    setOpened,
+    setSlotted,
+    setRequestError,
+    createErrorMessage,
+  ]);
 
   const indicativeSeatPrice = rideType === 'shared' ? quote?.sharedEstimate?.perSeatPrice : null;
   const routeCoords = quote?.geometry?.coordinates ?? null;
   const mapCenter = pickup ?? MAP_DEFAULT_CENTER;
-  const tracking = stage === 'tracking';
 
   const clearActiveRide = useCallback(() => {
     if (typeof window !== 'undefined') window.localStorage.removeItem(ACTIVE_RIDE_KEY);
+    intentKeys.clear();
     reset();
-  }, [reset]);
+  }, [reset, intentKeys]);
+
+  // Sign out drops every per-account trace: booking state, the persisted active
+  // ride, the pending idempotency key; then logs out server-side.
+  const handleSignOut = useCallback(() => {
+    clearActiveRide();
+    void signOut();
+  }, [clearActiveRide, signOut]);
 
   const cancelActiveRide = useCallback(() => {
-    if (!jwt || !rideId) return;
-    cancelRide(rideId, jwt)
+    if (!authed || !rideId) return;
+    cancelRide(rideId)
       .then((res) => applyRideState(res.status))
       // A 409 (already terminal / not cancellable) is benign — the
       // `ride_state_changed` socket event reconciles the true state.
       .catch(() => undefined);
-  }, [jwt, rideId, applyRideState]);
+  }, [authed, rideId, applyRideState]);
 
   const rateActiveRide = useCallback(
     (stars: number, text: string) => {
-      if (!jwt || !rideId) return;
+      if (!authed || !rideId) return;
       // Fire-and-mark: any failure (incl. a 409 already_rated) is benign — we
       // still collapse the prompt so the rider isn't stuck re-rating.
-      submitRating(rideId, stars, text, jwt).catch(() => undefined);
+      submitRating(rideId, stars, text).catch(() => undefined);
       markRated();
     },
-    [jwt, rideId, markRated],
+    [authed, rideId, markRated],
   );
 
   return (
@@ -298,7 +394,7 @@ function BookPage() {
         }}
       >
         <h1 style={{ fontSize: 22, margin: 0 }}>Book a ride</h1>
-        <button type="button" onClick={signOut} style={{ fontSize: 13 }}>
+        <button type="button" onClick={handleSignOut} style={{ fontSize: 13 }}>
           Sign out
         </button>
       </header>
@@ -428,6 +524,14 @@ function BookPage() {
             {quoteError && (
               <div data-testid="quote-error" style={{ color: '#b91c1c', marginTop: 4 }}>
                 {quoteError}
+                <button
+                  type="button"
+                  data-testid="quote-retry"
+                  onClick={() => setQuoteNonce((n) => n + 1)}
+                  style={{ marginLeft: 8, fontSize: 12 }}
+                >
+                  Retry
+                </button>
               </div>
             )}
             {quote && stage !== 'error' && (

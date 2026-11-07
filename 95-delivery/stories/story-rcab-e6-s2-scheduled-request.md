@@ -1,7 +1,7 @@
 ---
 title: RCAB-E6.S2 — type=scheduled flow at quote + request (+ migration)
 tags: [layer/delivery, kind/story]
-status: in_progress
+status: done
 phase: 0
 epic: [[epic-e6-scheduled-booking]]
 demo: 5

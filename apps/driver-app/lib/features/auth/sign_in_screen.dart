@@ -113,12 +113,13 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
     return Scaffold(
       key: const Key('sign_in_screen'),
       appBar: AppBar(title: const Text('Sign In')),
-      body: Padding(
+      // Scrollable so the form never overflows when the keyboard shrinks the
+      // viewport (was a RenderFlex overflow on small heights).
+      body: SingleChildScrollView(
         padding: const EdgeInsets.all(24),
         child: Form(
           key: _formKey,
           child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               if (!_isCodeStep) ...[

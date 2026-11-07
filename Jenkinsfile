@@ -21,7 +21,20 @@ pipeline {
         stage('Lint') {
             steps {
                 sh 'pnpm lint'
-                sh 'pnpm exec tsc --noEmit'
+                // The repo root has no tsconfig, so a root-level `tsc --noEmit` checks
+                // nothing. Type-check every workspace package instead; workspace
+                // libs are built first because the api/web resolve them via dist/.
+                sh 'pnpm --filter @rcab/shared --filter @rcab/api-client build'
+                sh 'pnpm -r exec tsc --noEmit'
+            }
+        }
+
+        stage('API artifact') {
+            steps {
+                // Production build must ship the Lua assets and the compiled
+                // services must be able to read them; dev loader must inject.
+                sh 'pnpm --filter @rcab/api run test:artifact'
+                sh 'pnpm --filter @rcab/api run test:dev-loader'
             }
         }
 
@@ -64,7 +77,16 @@ pipeline {
                         -t ${IMAGE_API}:${env.GIT_COMMIT} \\
                         -t ${IMAGE_API}:latest \\
                         .
+                    # NEXT_PUBLIC_* are inlined at build time: define them as Jenkins
+                    # job/folder environment variables (public values only). The
+                    # Dockerfile fails the build when a required one is empty.
                     docker build \\
+                        --build-arg NEXT_PUBLIC_API_URL="\$NEXT_PUBLIC_API_URL" \\
+                        --build-arg NEXT_PUBLIC_FIREBASE_API_KEY="\$NEXT_PUBLIC_FIREBASE_API_KEY" \\
+                        --build-arg NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN="\$NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN" \\
+                        --build-arg NEXT_PUBLIC_FIREBASE_PROJECT_ID="\$NEXT_PUBLIC_FIREBASE_PROJECT_ID" \\
+                        --build-arg NEXT_PUBLIC_FIREBASE_APP_ID="\$NEXT_PUBLIC_FIREBASE_APP_ID" \\
+                        --build-arg NEXT_PUBLIC_NOMINATIM_URL="\${NEXT_PUBLIC_NOMINATIM_URL:-https://nominatim.openstreetmap.org}" \\
                         -f infra/docker/web/Dockerfile.prod \\
                         -t ${IMAGE_WEB}:${env.GIT_COMMIT} \\
                         -t ${IMAGE_WEB}:latest \\

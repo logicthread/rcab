@@ -21,7 +21,12 @@ audience: both
 | POST | `/v1/auth/google/link` 🔒 | Body: `{ google_id_token }` → links to current user |
 | POST | `/v1/auth/google/login` | Body: `{ google_id_token }` → JWT if linked |
 | POST | `/v1/auth/refresh` | Body: `{ refresh_token }` → new JWT |
-| POST | `/v1/auth/logout` 🔒 | revokes refresh token |
+| POST | `/v1/auth/logout` 🔒 | revokes the current refresh session (web cookie) |
+| POST | `/v1/auth/native/firebase-exchange` | Native clients. Body `{ id_token }` → 200 tokens JSON (no cookie, no CSRF) |
+| POST | `/v1/auth/native/refresh` | Native. Body `{ refresh_token }` → 200 rotated tokens; replay revokes the session family |
+| POST | `/v1/auth/native/logout` 🔒 | Native. Body `{ refresh_token }` → 204 |
+
+Auth errors: 403 `account_disabled` (exchange/Google login), 401 `account_disabled` (refresh). See [[module-auth]].
 
 ## clients (🧍)
 | Method | Path | Description |

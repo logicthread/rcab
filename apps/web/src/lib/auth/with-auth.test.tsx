@@ -21,6 +21,7 @@ describe('withAuth', () => {
     useAuthStore.setState({
       user: null,
       jwt: null,
+      signedOut: false,
       silentRefresh: vi.fn().mockResolvedValue(undefined),
     });
   });
@@ -67,5 +68,15 @@ describe('withAuth', () => {
     });
 
     expect(mockReplace).not.toHaveBeenCalledWith('/signin');
+  });
+
+  it('does not silently refresh after an explicit sign-out; goes to /signin', async () => {
+    const mockSilentRefresh = vi.fn().mockResolvedValue(undefined);
+    useAuthStore.setState({ silentRefresh: mockSilentRefresh, signedOut: true });
+
+    render(<ProtectedDummy />);
+
+    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith('/signin'));
+    expect(mockSilentRefresh).not.toHaveBeenCalled();
   });
 });

@@ -28,7 +28,7 @@ audience: both
 | RCAB-E1.S2 | [[story-rcab-e1-s2-docker-dev]] — `docker-compose.dev.yml` + devcontainer | ■ |
 | RCAB-E1.S3 | [[story-rcab-e1-s3-docker-test]] — `docker-compose.test.yml` + testcontainers harness | ■ |
 | RCAB-E1.S4 | [[story-rcab-e1-s4-docker-prod]] — `docker-compose.prod.yml` + nginx + Let's Encrypt | ■ |
-| RCAB-E1.S5 | [[story-rcab-e1-s5-ci-cd]] — GitHub Actions: lint / unit / integration / build / deploy | ■ |
+| RCAB-E1.S5 | [[story-rcab-e1-s5-ci-cd]] — Jenkins in docker-compose: lint / unit / integration / build / deploy | ■ |
 | RCAB-E1.S6 | [[story-rcab-e1-s6-observability]] — Loki + Prometheus + Grafana + Uptime Kuma | ■ |
 | RCAB-E1.S7 | [[story-rcab-e1-s7-db-bootstrap]] — Postgres + Redis + OSRM containers, migration runner | ■ |
 | RCAB-E1.S8 | [[story-rcab-e1-s8-health-endpoints]] — `/v1/health/live`, `/v1/health/ready` | ■ |
@@ -97,9 +97,9 @@ audience: both
 | ID | Title | Status |
 |---|---|---|
 | RCAB-E6.S1 | [[story-rcab-e6-s1-bullmq-runner]] — BullMQ runner + Redis configuration | ■ |
-| RCAB-E6.S2 | `type=scheduled` flow at quote + request | · |
+| RCAB-E6.S2 | [[story-rcab-e6-s2-scheduled-request]] — `type=scheduled` flow at quote + request | ■ |
 | RCAB-E6.S3 | [[story-rcab-e6-s3-wake-worker]] — wake-up worker → reuse normal dispatch path | ■ |
-| RCAB-E6.S4 | [[story-rcab-e6-s4-cancel-scheduled]] — cancellation before/after wake | ▶ |
+| RCAB-E6.S4 | [[story-rcab-e6-s4-cancel-scheduled]] — cancellation before/after wake | ■ |
 
 ## E7 — Rating & dashboards → Demo 6 · "Dashboards & ratings"
 *Two-sided rating store + aggregation; history + earnings dashboards.* See [[epic-e7-rating-dashboards]].
@@ -122,6 +122,7 @@ audience: both
 | RCAB-E8.S4 | Security checklist sweep — every item green | · |
 | RCAB-E8.S5 | k6 load test: confirm Phase-0 perf budget on target VPS class | · |
 | RCAB-E8.S6 | TLS + HSTS + CSP audit | · |
+| RCAB-E8.S7 | [[story-rcab-e8-s7-review-remediation-stage-ab]] — Review remediation Stage A+B (runtime, config, sessions, booking, idempotency) | ▶ |
 
 ## E9 — Pilot rollout → Demo 8 · "Real drivers, real city"
 *Closed pilot, observation, iteration to Phase-0 scale.* See [[epic-e9-pilot-rollout]].

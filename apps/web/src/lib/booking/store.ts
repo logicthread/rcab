@@ -36,6 +36,10 @@ export interface BookingState {
   stage: BookingStage;
   quote: QuoteResponse | null;
   quoteError: string | null;
+  // Bumped every time the quote is invalidated (CLEAR_QUOTE). The quote effect
+  // depends on it so a clear that leaves the coordinates unchanged (same preset
+  // re-applied, quote expired at submit, ...) still triggers a fresh quote.
+  quoteEpoch: number;
   sharedRideId: string | null;
   seatCount: number;
   poolStatus: PoolStatus | null;
@@ -53,6 +57,8 @@ export interface BookingState {
   setPoint: (field: PointField, place: Place) => void;
   applyPreset: (trip: PresetTrip) => void;
   swapPoints: () => void;
+  /** Drop the current quote (e.g. expired at submit) and request a fresh one. */
+  invalidateQuote: () => void;
   startQuoting: () => void;
   setQuote: (quote: QuoteResponse) => void;
   setQuoteError: (message: string) => void;
@@ -76,6 +82,7 @@ const INITIAL_STATE = {
   stage: 'idle' as BookingStage,
   quote: null as QuoteResponse | null,
   quoteError: null as string | null,
+  quoteEpoch: 0,
   sharedRideId: null as string | null,
   seatCount: 0,
   poolStatus: null as PoolStatus | null,
@@ -108,13 +115,14 @@ function normalizeStatus(state: string): RideStatus {
 
 // Any change to the chosen points invalidates the current quote.
 const CLEAR_QUOTE = { quote: null, quoteError: null, stage: 'idle' as BookingStage };
+const clearQuote = (epoch: number) => ({ ...CLEAR_QUOTE, quoteEpoch: epoch + 1 });
 
 export const useBookingStore = create<BookingState>((set, get) => ({
   ...INITIAL_STATE,
 
   setRideType(next) {
     if (next === get().rideType) return;
-    set({ rideType: next, ...CLEAR_QUOTE });
+    set({ rideType: next, ...clearQuote(get().quoteEpoch) });
   },
 
   setActiveField(field) {
@@ -122,19 +130,39 @@ export const useBookingStore = create<BookingState>((set, get) => ({
   },
 
   setPoint(field, place) {
+    const existing = get()[field];
+    // Same coordinates, new label (reverse-geocode landing): the route is
+    // unchanged, so keep the valid quote instead of wiping it.
+    if (existing && existing.lat === place.lat && existing.lng === place.lng) {
+      set({ [field]: place } as Partial<BookingState>);
+      return;
+    }
     const other: PointField = field === 'pickup' ? 'dropoff' : 'pickup';
     // After setting a point, move focus to the other endpoint if it's still empty.
     const nextActive = get()[other] === null ? other : field;
-    set({ [field]: place, activeField: nextActive, ...CLEAR_QUOTE } as Partial<BookingState>);
+    set({
+      [field]: place,
+      activeField: nextActive,
+      ...clearQuote(get().quoteEpoch),
+    } as Partial<BookingState>);
   },
 
   applyPreset(trip) {
-    set({ pickup: trip.pickup, dropoff: trip.dropoff, activeField: 'pickup', ...CLEAR_QUOTE });
+    set({
+      pickup: trip.pickup,
+      dropoff: trip.dropoff,
+      activeField: 'pickup',
+      ...clearQuote(get().quoteEpoch),
+    });
   },
 
   swapPoints() {
     const { pickup, dropoff } = get();
-    set({ pickup: dropoff, dropoff: pickup, ...CLEAR_QUOTE });
+    set({ pickup: dropoff, dropoff: pickup, ...clearQuote(get().quoteEpoch) });
+  },
+
+  invalidateQuote() {
+    set({ ...clearQuote(get().quoteEpoch) });
   },
 
   startQuoting() {
@@ -202,6 +230,6 @@ export const useBookingStore = create<BookingState>((set, get) => ({
   },
 
   reset() {
-    set({ ...INITIAL_STATE });
+    set({ ...INITIAL_STATE, quoteEpoch: get().quoteEpoch + 1 });
   },
 }));

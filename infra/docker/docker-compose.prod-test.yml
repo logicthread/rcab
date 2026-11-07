@@ -37,12 +37,30 @@ services:
       DATABASE_URL: postgres://rcab:rcab@postgres:5432/rcab
       REDIS_URL: redis://:testpass@redis:6379
       OSRM_URL: http://osrm:5000
+      # Throwaway CI-only values. NODE_ENV=production makes the api fail closed
+      # without a >=32-byte JWT_SECRET, https CORS_ORIGINS and Firebase Admin
+      # credentials (rem/api-auth). None of these is valid anywhere real.
+      JWT_SECRET: ci-prod-test-0f8e6d4c2a1b3957e8d6c4a2f0b1d3e5
+      CORS_ORIGINS: https://app.rcab.example
+      FIREBASE_PROJECT_ID: rcab-ci
+      # A syntactically valid (parseable PEM) service-account key is required at
+      # boot. `pnpm prod:up` (scripts/prod-up.sh) generates a fresh throwaway one
+      # per run so no key material is committed.
+      FIREBASE_SERVICE_ACCOUNT_JSON: ${FIREBASE_SERVICE_ACCOUNT_JSON:-}
 
   web:
+    build:
+      # Throwaway public values so the CI image builds; real values come from the
+      # compose .env in production.
+      args:
+        NEXT_PUBLIC_API_URL: https://api.rcab.example
+        NEXT_PUBLIC_FIREBASE_API_KEY: ci-placeholder-api-key
+        NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: rcab-ci.example
+        NEXT_PUBLIC_FIREBASE_PROJECT_ID: rcab-ci
+        NEXT_PUBLIC_FIREBASE_APP_ID: ci-placeholder-app-id
     environment:
       NODE_ENV: production
       PORT: "3000"
-      NEXT_PUBLIC_API_URL: https://api.rcab.example
 
   migrator:
     env_file: []

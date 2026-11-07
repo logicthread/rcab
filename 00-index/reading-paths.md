@@ -122,6 +122,12 @@ Build, test, deploy pipeline.
 
 ## Cross-cutting
 
+### `path:review-remediation`
+Work on or verify the repository-review fixes (auth sessions, config, idempotency).
+- [[story-rcab-e8-s7-review-remediation-stage-ab]]
+- [[module-auth]] · [[module-rides]]
+- [[rest-endpoints]] · [[security-checklist]]
+
 ### `path:add-new-entity`
 Add a new domain entity to the vault and code.
 - [[data-model]] · [[conventions]]

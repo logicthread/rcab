@@ -18,10 +18,20 @@ export interface BookingSocket {
   close(): void;
 }
 
-export function connectBookingSocket(jwt: string): BookingSocket {
+/** Resolves a currently-valid access token (refreshing if needed), or null. */
+export type TokenProvider = () => Promise<string | null>;
+
+export function connectBookingSocket(getToken: TokenProvider): BookingSocket {
   const socket = io(WS_BASE, {
     transports: ['websocket'],
-    auth: { token: jwt },
+    // Callback form: socket.io evaluates it on every (re)connect, so a reconnect
+    // after the access token lapsed authenticates with a fresh one.
+    auth: (cb) => {
+      getToken().then(
+        (token) => cb({ token: token ?? '' }),
+        () => cb({ token: '' }),
+      );
+    },
     reconnection: true,
     reconnectionDelayMax: 5_000,
   });

@@ -26,6 +26,18 @@ audience: both
 - `RidesService` — DTO-level operations
 - `RideStateMachine` — guarded forward (`apply`) + terminal (`cancel`) transitions
 
+## Idempotency contract
+
+`POST /v1/rides` honors `Idempotency-Key` (1-128 visible ASCII; 400 `idempotency_key_required` / `idempotency_key_invalid`). Required for solo/scheduled, optional for shared until the web client always sends it.
+
+- **Scope** is `(passenger, operation, key)`; operation is the ride type. Another account or operation using the same key is an independent request and never sees the first result.
+- **Fingerprint:** SHA-256 of the business intent (route at 6 dp, `scheduledFor` as epoch ms; **not** the quote token, so a re-quoted retry of the same intent replays the original ride; never the access token). Same scope + same intent replays the stored result; same scope + different intent returns **422 `idempotency_key_conflict`** with no mutation.
+- **Durable, not cached:** replay is served from Postgres (`rides.idempotency_operation`, `rides.request_fingerprint`, composite UNIQUE; legacy rows have NULL fingerprint and are replayable by their owner only). The Redis `idem:rides:*` cache is removed, so a cold cache or restart behaves identically.
+- **Stale pending reclaim:** a `pending` claim older than 60 s (`PENDING_RECLAIM_AFTER_MS`) can be taken over by a same-fingerprint retry; shared create first returns a seat the dead attempt already holds (best effort until R08).
+- Replay is resolved **before** quote verification and the scheduled-window check, so a late retry recovers an already-accepted booking.
+- **Shared create** claims the key in `idempotency_record` (pending) before seat allocation, completes it with the replayable response, and releases it if allocation throws. A retried identical request replays the original seat; a concurrent duplicate gets **409 `idempotency_request_in_progress`**.
+- Migration: `0013_idempotency_scope.sql`. Known gap: dispatch hand-off after commit is not yet durable (F08, Stage C).
+
 ## Persistence
 
 - Tables: `ride`, `ride_request`, `ride_location_sample`.

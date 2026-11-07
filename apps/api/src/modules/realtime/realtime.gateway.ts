@@ -17,6 +17,7 @@ import type Redis from 'ioredis';
 import { REDIS } from '../../infra/redis/redis.module';
 import { RealtimeBus } from './realtime.bus';
 import type { JwtPayload } from '../../common/guards/auth.guard';
+import { verifyAccessToken } from '../../common/guards/access-token';
 
 export const RIDE_OFFER_RESPONSE_EVENT = 'dispatch.ride_offer_response';
 export const STOP_CONFIRM_REQUEST_EVENT = 'ride-lifecycle.stop_confirm_request';
@@ -131,7 +132,7 @@ export class RealtimeGateway
       return;
     }
     try {
-      const payload = this.jwt.verify<JwtPayload>(token, { issuer: 'rcab' });
+      const payload: JwtPayload = verifyAccessToken(this.jwt, token);
       client.data.userId = payload.sub;
       client.data.role = payload.role;
       void client.join(`user:${payload.sub}`);

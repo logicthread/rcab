@@ -263,6 +263,7 @@ describe('RealtimeGateway — handleConnection reconnect state replay', () => {
     (jwt.verify as ReturnType<typeof vi.fn>).mockReturnValue({
       sub: DRIVER_ID,
       role: 'driver',
+      typ: 'access',
     });
 
     const client = makeSocket();
@@ -285,6 +286,7 @@ describe('RealtimeGateway — handleConnection reconnect state replay', () => {
     (jwt.verify as ReturnType<typeof vi.fn>).mockReturnValue({
       sub: DRIVER_ID,
       role: 'driver',
+      typ: 'access',
     });
 
     const client = makeSocket();

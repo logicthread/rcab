@@ -1,7 +1,7 @@
 ---
 title: RCAB-E6.S1 — BullMQ runner + Redis config for scheduled booking
 tags: [layer/delivery, kind/story]
-status: in_progress
+status: done
 phase: 0
 epic: [[epic-e6-scheduled-booking]]
 demo: 5

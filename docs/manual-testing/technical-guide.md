@@ -1,5 +1,11 @@
 # rcab — Technical Guide (What's Built, What to Test)
 
+> ⚠️ **Superseded (2026-07-17).** This guide predates E4/E5/E6 and contains several
+> speculative names that never shipped (web port, `users`/`pools`/`dispatch_offers`
+> tables, event names). Use **`docs/ARCHITECTURE.md`** (code-verified) as the
+> authoritative architecture reference and **`docs/manual-testing/RUN-GUIDE.md`** for
+> current bring-up + demo flows. Kept for history.
+
 Read this alongside [`demo-walkthrough.md`](./demo-walkthrough.md). This doc explains **what exists**, **why it's structured this way**, and **what to probe** as you test. Source of truth for architecture lives in the Obsidian vault (`00-index/HOME.md`); this guide is a flattened, testing-focused view of just the shipped parts.
 
 ---
@@ -149,7 +155,7 @@ Core tables (shipped):
 | `dispatch_offers` | One row per offer made | `id`, `ride_id`, `driver_id`, `expires_at`, `outcome` |
 | `pools` | Shared-ride pools | `id`, `state`, `seats_filled`, `open_until`, `route_centroid` |
 | `ratings` | Two-sided rating rows | `ride_id`, `rater_id`, `ratee_id`, `score`, `comment`, `created_at` |
-| `jwt_revocations` | Logout / refresh-bumping | `jti`, `revoked_at` |
+| `auth_refresh_token` | Hashed refresh sessions (replaces the non-existent `jwt_revocations`) | `token_hash`, `family_id`, `revoked_at` |
 
 (Open Drizzle Studio for the authoritative shape — column names may have drifted slightly.)
 
@@ -161,7 +167,7 @@ Core tables (shipped):
 /db-migrate migrate       # apply
 ```
 
-Migrations live in `apps/api/drizzle/`.
+Hand-authored migrations live in `apps/api/migrations/` (latest `0013_idempotency_scope.sql`; `0012_refresh_token_hash.sql` before it). Apply with `npx tsx src/migrate.ts` inside the api container (see RUN-GUIDE §1.3). The api itself runs in dev via `node --watch` + an SWC loader (tsx drops decorator metadata and breaks DI). `JWT_SECRET` and `CORS_ORIGINS` are only defaulted when `NODE_ENV` is `development`/`test`; elsewhere startup fails if they are weak or missing.
 
 ---
 
@@ -407,7 +413,9 @@ redis-cli ZRANGE drivers:geo 0 -1 WITHSCORES
 /pool-inspect
 
 # Watch a ride row evolve
-watch -n1 'psql postgres://postgres:postgres@localhost:5432/rcab \
+# Postgres has no host port in dev — go through the container:
+watch -n1 'docker compose --env-file .env.dev -f infra/docker/docker-compose.dev.yml \
+  exec -T postgres psql -U rcab -d rcab \
   -c "SELECT id,state,driver_id,quoted_fare FROM rides ORDER BY created_at DESC LIMIT 5"'
 
 # Tail API logs only

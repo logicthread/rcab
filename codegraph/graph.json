@@ -1,19 +1,19 @@
 {
   "version": 1,
-  "generatedAt": "2026-07-17T08:59:24+05:30",
-  "gitSha": "bb0f24b2dfeb832673fc4065d5fcd1340aeee76e",
+  "generatedAt": "2026-07-17T09:29:28+05:30",
+  "gitSha": "d679c633de12eb5b306ffd6e3c5da184447593ba",
   "counts": {
-    "nodes": 246,
-    "edges": 388,
+    "nodes": 247,
+    "edges": 390,
     "byNodeKind": {
-      "file": 142,
+      "file": 143,
       "module": 17,
       "symbol": 56,
       "route": 22,
       "table": 9
     },
     "byEdgeKind": {
-      "imports": 273,
+      "imports": 275,
       "di-import": 31,
       "di-provides": 34,
       "route": 22,
@@ -1280,6 +1280,14 @@
       "kind": "file",
       "path": "apps/driver-app/lib/core/api/api_client.dart",
       "name": "api_client.dart",
+      "app": "driver-app"
+    },
+    {
+      "meta": {},
+      "id": "apps/driver-app/lib/core/api/cookie_util.dart",
+      "kind": "file",
+      "path": "apps/driver-app/lib/core/api/cookie_util.dart",
+      "name": "cookie_util.dart",
       "app": "driver-app"
     },
     {
@@ -4493,10 +4501,26 @@
     },
     {
       "from": "apps/driver-app/lib/core/api/api_client.dart",
+      "to": "apps/driver-app/lib/core/api/cookie_util.dart",
+      "kind": "imports",
+      "meta": {
+        "spec": "cookie_util.dart"
+      }
+    },
+    {
+      "from": "apps/driver-app/lib/core/api/api_client.dart",
       "to": "apps/driver-app/lib/core/auth/token_store.dart",
       "kind": "imports",
       "meta": {
         "spec": "../auth/token_store.dart"
+      }
+    },
+    {
+      "from": "apps/driver-app/lib/core/auth/auth_notifier.dart",
+      "to": "apps/driver-app/lib/core/api/cookie_util.dart",
+      "kind": "imports",
+      "meta": {
+        "spec": "../api/cookie_util.dart"
       }
     },
     {

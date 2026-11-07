@@ -15,10 +15,13 @@ audience: both
 ## Auth
 
 - [ ] All endpoints behind `AuthGuard` except `/v1/auth/*` and `/v1/health/*`.
-- [ ] JWT `exp` ≤ 15 min; refresh tokens rotated on use.
-- [ ] Refresh tokens stored hashed in DB; revoked on logout.
+- [x] JWT `exp` ≤ 15 min; refresh tokens rotated on use. *(single-use atomic rotation + family revocation on reuse, RCAB-E8.S7)*
+- [x] Refresh tokens stored hashed in DB; revoked on logout. *(SHA-256 digests, migration 0012; web and native logout revoke server-side)*
 - [ ] Role enforcement via `RolesGuard` on every driver-only / client-only route.
 - [ ] Firebase ID token never persisted server-side.
+- [x] Production fails closed on weak/missing `JWT_SECRET` and invalid `CORS_ORIGINS`; access tokens validate `iss`/`aud`/`typ`. *(RCAB-E8.S7)*
+- [x] Suspended/deleted accounts cannot sign in or refresh; their refresh tokens are revoked. *(RCAB-E8.S7)*
+- [x] Idempotency keys are scoped per account + operation and bound to a request fingerprint. *(RCAB-E8.S7)*
 
 ## Transport
 

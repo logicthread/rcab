@@ -3,6 +3,7 @@ import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import type { Request, Response } from 'express';
 import { FirebaseExchangeDto } from './dto/firebase-exchange.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
+import { NativeRefreshTokenDto } from './dto/native-refresh-token.dto';
 import { GoogleIdTokenDto } from './dto/google-id-token.dto';
 import { AuthService, type TokenResponse } from './auth.service';
 import { AuthGuard, type JwtPayload } from '../../common/guards/auth.guard';
@@ -69,6 +70,38 @@ export class AuthController {
       await this.auth.revoke(token, req.user.sub);
     }
     res.clearCookie(REFRESH_COOKIE_NAME, clearCookieOptions());
+  }
+
+  // ─── Native (mobile) session contract ──────────────────────────────────────
+  // No cookies and no CSRF: the client keeps the rotating refresh token in
+  // secure storage and sends it in the body. These routes never read the
+  // refresh cookie, and web routes never return the refresh token in JSON.
+  // Contract fixture: test/fixtures/native-auth-contract.json.
+
+  @Post('native/firebase-exchange')
+  @HttpCode(200)
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  async nativeFirebaseExchange(@Body() dto: FirebaseExchangeDto): Promise<TokenResponse> {
+    return this.auth.exchangeFirebaseToken(dto.id_token);
+  }
+
+  @Post('native/refresh')
+  @HttpCode(200)
+  async nativeRefresh(@Body() dto: NativeRefreshTokenDto): Promise<TokenResponse> {
+    return this.auth.refresh(dto.refresh_token);
+  }
+
+  /**
+   * Possession-based: the refresh token in the body is the credential, so a
+   * sign-out after the 15-min access token lapsed still revokes the session.
+   * No AuthGuard; any Authorization header is ignored. Always 204 (idempotent,
+   * no token-existence oracle); throttled like the exchange.
+   */
+  @Post('native/logout')
+  @HttpCode(204)
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  async nativeLogout(@Body() dto: NativeRefreshTokenDto): Promise<void> {
+    await this.auth.revokePresented(dto.refresh_token);
   }
 
   @Post('google/link')

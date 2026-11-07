@@ -46,7 +46,7 @@ A demo is `done` when **all** of:
 
 1. Every story in the epic is `■ done`.
 2. The demo flow runs against `docker compose up` from a fresh checkout — no manual steps beyond README.
-3. CI (GitHub Actions) is green: unit + integration + the demo's e2e.
+3. CI (Jenkins) is green: unit + integration + the demo's e2e.
 4. Relevant Grafana panels show real data; [[performance-budget]] numbers are within budget for this stage.
 5. Developer has personally walked the demo flow and issued sign-off (see [[hitl-touchpoints]]).
 
