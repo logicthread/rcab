@@ -11,6 +11,9 @@ export async function setup(): Promise<void> {
   // on shutdown with `Connection is closed.`, breaking suite-level results.
   // Specs that need a real worker should run it explicitly.
   process.env.RCAB_DISABLE_BULL_AUTORUN = '1';
+  // Same reason for the outbox relay + reconciler timers: specs that need them
+  // construct them explicitly and drive drainOnce()/reconcile() deterministically.
+  process.env.RCAB_DISABLE_OUTBOX_RELAY = '1';
 
   if (process.env.RCAB_SKIP_INT === '1') {
     process.env.RCAB_INT_SKIPPED = '1';

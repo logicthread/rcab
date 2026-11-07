@@ -4,8 +4,8 @@ import {
   RIDE_OFFER_RESPONSE_EVENT,
   STOP_CONFIRM_REQUEST_EVENT,
   DRIVER_FIRST_LOCATION_EVENT,
-  RIDE_SUBSCRIBE_REQUEST_EVENT,
 } from './realtime.gateway';
+import type { RealtimeSnapshotService } from './realtime-snapshot.service';
 import { JwtService } from '@nestjs/jwt';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { RealtimeBus } from './realtime.bus';
@@ -37,6 +37,24 @@ function buildBus() {
   } as unknown as RealtimeBus;
 }
 
+function buildSnapshots(overrides: Partial<Record<keyof RealtimeSnapshotService, unknown>> = {}) {
+  return {
+    isPoolMember: vi.fn().mockResolvedValue(false),
+    isRideParty: vi.fn().mockResolvedValue(false),
+    poolSnapshot: vi.fn().mockResolvedValue(null),
+    rideSnapshot: vi.fn().mockResolvedValue(null),
+    driverAssignment: vi.fn().mockResolvedValue({ driverId: DRIVER_ID, assignment: null }),
+    ...overrides,
+  };
+}
+
+function gw(
+  snapshots: ReturnType<typeof buildSnapshots> = buildSnapshots(),
+  jwt: JwtService = buildJwt(),
+): RealtimeGateway {
+  return new RealtimeGateway(jwt, buildBus(), buildEvents(), buildRedis() as never, snapshots as never);
+}
+
 function buildEvents() {
   return new EventEmitter2();
 }
@@ -46,6 +64,7 @@ function makeSocket(overrides: { userId?: string; role?: string } = {}): Socket 
     data: { userId: overrides.userId ?? DRIVER_ID, role: overrides.role ?? 'driver' },
     emit: vi.fn(),
     join: vi.fn().mockResolvedValue(undefined),
+    leave: vi.fn().mockResolvedValue(undefined),
     disconnect: vi.fn(),
     handshake: { auth: {}, headers: {} },
   } as unknown as Socket;
@@ -62,7 +81,7 @@ describe('RealtimeGateway — driver:location handler', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     redis = buildRedis();
-    gateway = new RealtimeGateway(buildJwt(), buildBus(), buildEvents(), redis as never);
+    gateway = new RealtimeGateway(buildJwt(), buildBus(), buildEvents(), redis as never, buildSnapshots() as never);
   });
 
   afterEach(() => {
@@ -130,52 +149,59 @@ describe('RealtimeGateway — driver:location handler', () => {
 });
 
 describe('RealtimeGateway — ride_offer_response handler', () => {
+  const OFFER = '00000000-0000-4000-8000-000000000001';
   let gateway: RealtimeGateway;
   let events: EventEmitter2;
 
   beforeEach(() => {
     events = new EventEmitter2();
-    gateway = new RealtimeGateway(buildJwt(), buildBus(), events, buildRedis() as never);
+    gateway = new RealtimeGateway(buildJwt(), buildBus(), events, buildRedis() as never, buildSnapshots() as never);
   });
 
-  it('emits dispatch.ride_offer_response with driverId from socket data', () => {
-    const seen = vi.fn();
+  it('emits only driverId (from the socket), offerId and the boolean; returns the listener result as the ack', async () => {
+    const seen = vi.fn().mockResolvedValue({ ok: true, replay: false });
     events.on(RIDE_OFFER_RESPONSE_EVENT, seen);
     const client = makeSocket();
 
-    gateway.handleRideOfferResponse(
-      { offerId: 'offer-1', sharedRideId: 'pool-1', accept: true },
+    const ack = await gateway.handleRideOfferResponse(
+      { offerId: OFFER, sharedRideId: 'pool-1', accept: true },
       client,
     );
 
-    expect(seen).toHaveBeenCalledWith({
-      driverId: DRIVER_ID,
-      offerId: 'offer-1',
-      sharedRideId: 'pool-1',
-      accept: true,
-    });
+    // The client-sent trip id is dropped: dispatch derives the trip from the offer.
+    expect(seen).toHaveBeenCalledWith({ driverId: DRIVER_ID, offerId: OFFER, accept: true });
+    expect(ack).toEqual({ ok: true, replay: false });
   });
 
-  it('ignores responses from non-driver sockets', () => {
+  it('acks `unavailable` when no listener answers', async () => {
+    const ack = await gateway.handleRideOfferResponse({ offerId: OFFER, accept: false }, makeSocket());
+    expect(ack).toEqual({ ok: false, reason: 'unavailable' });
+  });
+
+  it('forbids non-driver sockets', async () => {
     const seen = vi.fn();
     events.on(RIDE_OFFER_RESPONSE_EVENT, seen);
-    const client = makeSocket({ role: 'client' });
-
-    gateway.handleRideOfferResponse({ offerId: 'offer-2', accept: true }, client);
-
+    const ack = await gateway.handleRideOfferResponse(
+      { offerId: OFFER, accept: true },
+      makeSocket({ role: 'client' }),
+    );
+    expect(ack).toEqual({ ok: false, reason: 'forbidden' });
     expect(seen).not.toHaveBeenCalled();
   });
 
-  it('ignores malformed payloads', () => {
+  it.each([
+    ['non-string offerId', { offerId: 123, accept: true }],
+    ['non-UUID offerId', { offerId: 'offer-1', accept: true }],
+    ["string 'false'", { offerId: OFFER, accept: 'false' }],
+    ['numeric 1', { offerId: OFFER, accept: 1 }],
+    ['missing accept', { offerId: OFFER }],
+    ['null payload', null],
+    ['string payload', 'accept'],
+  ])('rejects a malformed payload (%s) without emitting', async (_n, payload) => {
     const seen = vi.fn();
     events.on(RIDE_OFFER_RESPONSE_EVENT, seen);
-    const client = makeSocket();
-
-    gateway.handleRideOfferResponse(
-      { offerId: 123 } as unknown as { offerId: string; accept: boolean },
-      client,
-    );
-
+    const ack = await gateway.handleRideOfferResponse(payload, makeSocket());
+    expect(ack).toEqual({ ok: false, reason: 'invalid_payload' });
     expect(seen).not.toHaveBeenCalled();
   });
 });
@@ -186,7 +212,7 @@ describe('RealtimeGateway — stop confirm handlers', () => {
 
   beforeEach(() => {
     events = new EventEmitter2();
-    gateway = new RealtimeGateway(buildJwt(), buildBus(), events, buildRedis() as never);
+    gateway = new RealtimeGateway(buildJwt(), buildBus(), events, buildRedis() as never, buildSnapshots() as never);
   });
 
   it('emits STOP_CONFIRM_REQUEST_EVENT with type=pickup on stop:pickup_confirmed', () => {
@@ -252,7 +278,7 @@ describe('RealtimeGateway — handleConnection reconnect state replay', () => {
   beforeEach(() => {
     redis = buildRedis();
     jwt = buildJwt();
-    gateway = new RealtimeGateway(jwt, buildBus(), buildEvents(), redis as never);
+    gateway = new RealtimeGateway(jwt, buildBus(), buildEvents(), redis as never, buildSnapshots() as never);
   });
 
   it('emits driver_state when driver:state:<id> exists in Redis', async () => {
@@ -296,7 +322,7 @@ describe('RealtimeGateway — handleConnection reconnect state replay', () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(client.emit).not.toHaveBeenCalled();
+    expect(client.emit).not.toHaveBeenCalledWith('driver_state', expect.anything());
   });
 });
 
@@ -312,7 +338,7 @@ describe('RealtimeGateway — driver_location fan-out', () => {
     redis = buildRedis();
     redis.hget.mockResolvedValue(RIDE_ID); // driver is on an active ride
     bus = buildBus();
-    gateway = new RealtimeGateway(buildJwt(), bus, buildEvents(), redis as never);
+    gateway = new RealtimeGateway(buildJwt(), bus, buildEvents(), redis as never, buildSnapshots() as never);
   });
 
   afterEach(() => {
@@ -371,7 +397,7 @@ describe('RealtimeGateway — implicit start_en_route on first location', () => 
     events = new EventEmitter2();
     redis = buildRedis();
     redis.hget.mockResolvedValue(RIDE_ID);
-    gateway = new RealtimeGateway(buildJwt(), buildBus(), events, redis as never);
+    gateway = new RealtimeGateway(buildJwt(), buildBus(), events, redis as never, buildSnapshots() as never);
   });
 
   it('emits DRIVER_FIRST_LOCATION_EVENT once for the ride', async () => {
@@ -395,29 +421,189 @@ describe('RealtimeGateway — implicit start_en_route on first location', () => 
   });
 });
 
-describe('RealtimeGateway — ride:subscribe handler', () => {
-  let gateway: RealtimeGateway;
-  let events: EventEmitter2;
+const POOL_UUID = '6f1c1a8e-8f3b-4d7a-9a52-0d5d4c1e2b3a';
+const RIDE_UUID = '0b8e4f6a-1c2d-4e3f-8a9b-7c6d5e4f3a2b';
+const USER_UUID = '9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d';
 
-  beforeEach(() => {
-    events = new EventEmitter2();
-    gateway = new RealtimeGateway(buildJwt(), buildBus(), events, buildRedis() as never);
+describe('RealtimeGateway — ride:subscribe (authorized join + snapshot)', () => {
+  it('rejects a malformed id and an unauthenticated socket', async () => {
+    const gateway = gw();
+    expect(await gateway.handleRideSubscribe({ rideId: 'ride-1' }, makeSocket())).toEqual({
+      ok: false,
+      reason: 'invalid_payload',
+    });
+    expect(await gateway.handleRideSubscribe(null, makeSocket())).toEqual({
+      ok: false,
+      reason: 'invalid_payload',
+    });
+    const anon = makeSocket();
+    (anon.data as Record<string, unknown>).userId = undefined;
+    expect(await gateway.handleRideSubscribe({ rideId: RIDE_UUID }, anon)).toEqual({
+      ok: false,
+      reason: 'forbidden',
+    });
   });
 
-  it('emits RIDE_SUBSCRIBE_REQUEST_EVENT with userId from socket data', () => {
-    const seen = vi.fn();
-    events.on(RIDE_SUBSCRIBE_REQUEST_EVENT, seen);
-    gateway.handleRideSubscribe(
-      { rideId: RIDE_ID },
-      makeSocket({ userId: 'client-1', role: 'client' }),
+  it('a non-party never joins the room (possession of the id is not enough)', async () => {
+    const snapshots = buildSnapshots();
+    const socket = makeSocket({ userId: USER_UUID, role: 'client' });
+    expect(await gw(snapshots).handleRideSubscribe({ rideId: RIDE_UUID }, socket)).toEqual({
+      ok: false,
+      reason: 'not_found',
+    });
+    expect(snapshots.isRideParty).toHaveBeenCalledWith(RIDE_UUID, USER_UUID);
+    expect(socket.join).not.toHaveBeenCalled();
+    expect(socket.emit).not.toHaveBeenCalled();
+  });
+
+  it('a party joins FIRST, then gets the Postgres snapshot (event + ack)', async () => {
+    const order: string[] = [];
+    const snapshot = { rideId: RIDE_UUID, version: 3, status: 'accepted' };
+    const snapshots = buildSnapshots({
+      isRideParty: vi.fn().mockResolvedValue(true),
+      rideSnapshot: vi.fn().mockImplementation(async () => {
+        order.push('snapshot');
+        return snapshot;
+      }),
+    });
+    const socket = makeSocket({ userId: USER_UUID, role: 'client' });
+    (socket.join as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+      order.push('join');
+    });
+
+    expect(await gw(snapshots).handleRideSubscribe({ rideId: RIDE_UUID }, socket)).toEqual({
+      ok: true,
+      snapshot,
+    });
+    expect(order).toEqual(['join', 'snapshot']);
+    expect(socket.join).toHaveBeenCalledWith(`ride:${RIDE_UUID}`);
+    expect(socket.emit).toHaveBeenCalledWith('ride:snapshot', snapshot);
+  });
+
+  it('answers `unavailable` (no throw) when Postgres fails', async () => {
+    const snapshots = buildSnapshots({
+      isRideParty: vi.fn().mockRejectedValue(new Error('pg down')),
+    });
+    expect(
+      await gw(snapshots).handleRideSubscribe(
+        { rideId: RIDE_UUID },
+        makeSocket({ userId: USER_UUID }),
+      ),
+    ).toEqual({ ok: false, reason: 'unavailable' });
+  });
+});
+
+describe('RealtimeGateway — pool:subscribe (authorized join + snapshot)', () => {
+  it('a non-member is refused and joins nothing', async () => {
+    const snapshots = buildSnapshots();
+    const socket = makeSocket({ userId: USER_UUID, role: 'client' });
+    expect(await gw(snapshots).handlePoolSubscribe({ sharedRideId: POOL_UUID }, socket)).toEqual({
+      ok: false,
+      reason: 'not_found',
+    });
+    expect(snapshots.isPoolMember).toHaveBeenCalledWith(POOL_UUID, USER_UUID);
+    expect(socket.join).not.toHaveBeenCalled();
+  });
+
+  it('rejects a non-UUID pool id before any lookup', async () => {
+    const snapshots = buildSnapshots();
+    expect(
+      await gw(snapshots).handlePoolSubscribe(
+        { sharedRideId: 'pool-1' },
+        makeSocket({ userId: USER_UUID }),
+      ),
+    ).toEqual({ ok: false, reason: 'invalid_payload' });
+    expect(snapshots.isPoolMember).not.toHaveBeenCalled();
+  });
+
+  it('a member joins pool + ride rooms, then receives the versioned snapshot', async () => {
+    const snapshot = { sharedRideId: POOL_UUID, version: 7, poolStatus: 'closed_full' };
+    const snapshots = buildSnapshots({
+      isPoolMember: vi.fn().mockResolvedValue(true),
+      poolSnapshot: vi.fn().mockResolvedValue(snapshot),
+    });
+    const socket = makeSocket({ userId: USER_UUID, role: 'client' });
+
+    expect(await gw(snapshots).handlePoolSubscribe({ sharedRideId: POOL_UUID }, socket)).toEqual({
+      ok: true,
+      snapshot,
+    });
+    expect(socket.join).toHaveBeenCalledWith([`pool:${POOL_UUID}`, `ride:${POOL_UUID}`]);
+    expect(snapshots.poolSnapshot).toHaveBeenCalledWith(POOL_UUID, USER_UUID);
+    expect(socket.emit).toHaveBeenCalledWith('pool:snapshot', snapshot);
+  });
+
+  it('leaves the rooms again when the snapshot vanished between check and read', async () => {
+    const snapshots = buildSnapshots({ isPoolMember: vi.fn().mockResolvedValue(true) });
+    const socket = makeSocket({ userId: USER_UUID, role: 'client' });
+    expect(await gw(snapshots).handlePoolSubscribe({ sharedRideId: POOL_UUID }, socket)).toEqual({
+      ok: false,
+      reason: 'not_found',
+    });
+    expect(socket.leave).toHaveBeenCalledWith(`pool:${POOL_UUID}`);
+    expect(socket.leave).toHaveBeenCalledWith(`ride:${POOL_UUID}`);
+  });
+});
+
+describe('RealtimeGateway — driver assignment snapshot', () => {
+  it('driver connect emits driver:assignment from Postgres', async () => {
+    const assignment = { tripKind: 'shared', tripId: POOL_UUID };
+    const snapshots = buildSnapshots({
+      driverAssignment: vi.fn().mockResolvedValue({ driverId: DRIVER_ID, assignment }),
+    });
+    const jwt = buildJwt();
+    (jwt.verify as ReturnType<typeof vi.fn>).mockReturnValue({
+      sub: DRIVER_ID,
+      role: 'driver',
+      typ: 'access',
+    });
+    const client = makeSocket();
+    (client.handshake as unknown as Record<string, unknown>).auth = { token: 'tok' };
+
+    gw(snapshots, jwt).handleConnection(client);
+    await vi.waitFor(() =>
+      expect(client.emit).toHaveBeenCalledWith('driver:assignment', {
+        driverId: DRIVER_ID,
+        assignment,
+      }),
     );
-    expect(seen).toHaveBeenCalledWith({ userId: 'client-1', rideId: RIDE_ID });
   });
 
-  it('ignores a malformed payload', () => {
-    const seen = vi.fn();
-    events.on(RIDE_SUBSCRIBE_REQUEST_EVENT, seen);
-    gateway.handleRideSubscribe({} as { rideId?: string }, makeSocket());
-    expect(seen).not.toHaveBeenCalled();
+  it('a client (non-driver) connect does not read assignments', async () => {
+    const snapshots = buildSnapshots();
+    const jwt = buildJwt();
+    (jwt.verify as ReturnType<typeof vi.fn>).mockReturnValue({
+      sub: USER_UUID,
+      role: 'client',
+      typ: 'access',
+    });
+    const client = makeSocket({ userId: USER_UUID, role: 'client' });
+    (client.handshake as unknown as Record<string, unknown>).auth = { token: 'tok' };
+    gw(snapshots, jwt).handleConnection(client);
+    await Promise.resolve();
+    expect(snapshots.driverAssignment).not.toHaveBeenCalled();
+  });
+
+  it('driver:sync acks + emits the snapshot; non-drivers are forbidden', async () => {
+    const snap = { driverId: DRIVER_ID, assignment: null };
+    const snapshots = buildSnapshots({ driverAssignment: vi.fn().mockResolvedValue(snap) });
+    const gateway = gw(snapshots);
+    const socket = makeSocket();
+    expect(await gateway.handleDriverSync(socket)).toEqual(snap);
+    expect(socket.emit).toHaveBeenCalledWith('driver:assignment', snap);
+    expect(await gateway.handleDriverSync(makeSocket({ role: 'client' }))).toEqual({
+      ok: false,
+      reason: 'forbidden',
+    });
+  });
+
+  it('driver:sync acks `unavailable` when Postgres fails', async () => {
+    const snapshots = buildSnapshots({
+      driverAssignment: vi.fn().mockRejectedValue(new Error('x')),
+    });
+    expect(await gw(snapshots).handleDriverSync(makeSocket())).toEqual({
+      ok: false,
+      reason: 'unavailable',
+    });
   });
 });

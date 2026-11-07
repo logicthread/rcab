@@ -36,6 +36,8 @@ function ride(overrides: Partial<SharedRideRow> = {}): SharedRideRow {
     members: [],
     claimedByDriverId: DRIVER_ID,
     claimedAt: new Date(),
+    dispatchGeneration: 1,
+    stateVersion: 0,
     ...overrides,
   };
 }
@@ -75,6 +77,7 @@ function soloRideRow(overrides: Partial<RideRow> = {}): RideRow {
     cancelledAt: null,
     cancelledBy: null,
     cancelReason: null,
+    dispatchGeneration: 1,
     ...overrides,
   };
 }
@@ -98,7 +101,7 @@ function makeController(
   const matching = { findOrCreatePool: vi.fn() };
   const pricing = {
     quoteSolo: opts.quoteSolo ?? vi.fn(),
-    quoteSeat: vi.fn(),
+    quoteSeatInItinerary: vi.fn(),
     seatMultiplierFor: vi.fn(),
     quoteSeatFromMetrics: vi.fn(),
   };
@@ -127,7 +130,7 @@ function makeController(
     complete: vi.fn().mockResolvedValue(undefined),
     release: vi.fn().mockResolvedValue(undefined),
   };
-  const events = { emit: vi.fn() };
+  const relay = { kick: vi.fn() };
   const scheduled = {
     scheduleWake: opts.scheduleWake ?? vi.fn().mockResolvedValue({ jobId: 'j', delayMs: 0 }),
     cancelWake: vi.fn().mockResolvedValue(true),
@@ -142,7 +145,7 @@ function makeController(
     ridesRepo as never,
     stateMachine as never,
     bus as never,
-    events as never,
+    relay as never,
     scheduled as never,
     idempotency as never,
   );
@@ -157,7 +160,7 @@ function makeController(
     stateMachine,
     bus,
     idempotency,
-    events,
+    relay,
     matching,
     scheduled,
   };
@@ -318,7 +321,7 @@ describe('RidesController.create — normal (solo) path', () => {
 
   it('creates a requested ride with the fare locked from the quote token', async () => {
     const ridesCreate = vi.fn().mockResolvedValue({ row: row(), created: true });
-    const { ctrl, events, bus } = makeController({
+    const { ctrl, relay, bus } = makeController({
       verify: vi.fn().mockReturnValue(claims),
       ridesCreate,
     });
@@ -340,8 +343,9 @@ describe('RidesController.create — normal (solo) path', () => {
     );
     // The booking client joins the ride room so it receives ride_state_changed.
     expect(bus.joinRide).toHaveBeenCalledWith('c-1', 'ride-9');
-    // A freshly-created ride triggers dispatch.
-    expect(events.emit).toHaveBeenCalledWith('ride.requested', { rideId: 'ride-9' });
+    // Dispatch is an outbox row committed with the ride; the controller only
+    // nudges the relay (it no longer emits an in-memory event, F08).
+    expect(relay.kick).toHaveBeenCalledTimes(1);
   });
 
   it('replays the caller\'s own ride from the durable record without inserting again', async () => {
@@ -350,13 +354,13 @@ describe('RidesController.create — normal (solo) path', () => {
       row: row(),
       requestFingerprint: requestFingerprint(IdempotencyOperation.Solo, dto),
     });
-    const { ctrl, events } = makeController({ ridesFindByScope, ridesCreate });
+    const { ctrl, relay } = makeController({ ridesFindByScope, ridesCreate });
     const res = await ctrl.create(clientReq as never, dto, 'idem-1');
     expect((res as { rideId: string }).rideId).toBe('ride-9');
     expect(ridesFindByScope).toHaveBeenCalledWith('c-1', 'ride.create.solo', 'idem-1');
     expect(ridesCreate).not.toHaveBeenCalled();
     // A replay must not re-dispatch.
-    expect(events.emit).not.toHaveBeenCalled();
+    expect(relay.kick).not.toHaveBeenCalled();
   });
 
   it('returns the same ride for a concurrent duplicate that lost the insert race (DB backstop)', async () => {
@@ -365,7 +369,7 @@ describe('RidesController.create — normal (solo) path', () => {
       created: false,
       requestFingerprint: requestFingerprint(IdempotencyOperation.Solo, dto),
     });
-    const { ctrl, events } = makeController({
+    const { ctrl, relay } = makeController({
       verify: vi.fn().mockReturnValue(claims),
       ridesCreate,
     });
@@ -373,7 +377,7 @@ describe('RidesController.create — normal (solo) path', () => {
     expect((res as { rideId: string }).rideId).toBe('ride-9');
     expect(ridesCreate).toHaveBeenCalledTimes(1);
     // Duplicate key (already existed) → no re-dispatch.
-    expect(events.emit).not.toHaveBeenCalled();
+    expect(relay.kick).not.toHaveBeenCalled();
   });
 
   it('400 when the Idempotency-Key header is missing', async () => {
@@ -429,17 +433,72 @@ describe('RidesController.create — normal (solo) path', () => {
   });
 
   it('routes type=shared to the matching service (no regression)', async () => {
-    const { ctrl, matching, repo } = makeController({ ride: ride({ poolState: 'open' }) });
+    const { ctrl, matching } = makeController({ ride: ride({ poolState: 'open' }) });
     matching.findOrCreatePool.mockResolvedValue({
       sharedRideId: 'pool-1',
       mode: 'opened',
       poolStatus: 'open',
+      seatCount: 1,
+      quote: {
+        perSeatPrice: { amount: 5_000, currency: 'INR' },
+        seatMultiplier: 1,
+        detourFactor: 1,
+        policy: 'fixed_at_join',
+      },
     });
-    repo.findById.mockResolvedValue(null); // priceMatchedSeat → null path
     const sharedDto = { ...(dto as object), type: RideType.Shared } as never;
     const res = await ctrl.create(clientReq as never, sharedDto, undefined);
     expect(matching.findOrCreatePool).toHaveBeenCalled();
     expect((res as { sharedRideId: string }).sharedRideId).toBe('pool-1');
+  });
+
+  it('shared: the seat is priced by the itinerary quoter inside the seat txn and the agreed fare is returned', async () => {
+    const { ctrl, matching, pricing } = makeController();
+    const quote = {
+      perSeatPrice: { amount: 7_500, currency: 'INR' },
+      seatMultiplier: 0.75,
+      detourFactor: 1,
+      policy: 'fixed_at_join',
+    };
+    pricing.quoteSeatInItinerary.mockResolvedValue(quote);
+    const ctx = { poolId: 'pool-2', passengerId: 'c-1', seatCount: 2, stops: [] };
+    matching.findOrCreatePool.mockImplementation(
+      async (_req: unknown, opts: { quote: (c: unknown) => Promise<unknown> }) => ({
+        sharedRideId: 'pool-2',
+        mode: 'slotted',
+        poolStatus: 'closed_full',
+        seatCount: 2,
+        quote: await opts.quote(ctx),
+      }),
+    );
+    const sharedDto = { ...(dto as object), type: RideType.Shared } as never;
+    const res = await ctrl.create(clientReq as never, sharedDto, undefined);
+    expect(pricing.quoteSeatInItinerary).toHaveBeenCalledWith(ctx);
+    expect(res).toMatchObject({
+      sharedRideId: 'pool-2',
+      mode: 'slotted',
+      poolStatus: 'closed_full',
+      perSeatPrice: quote.perSeatPrice,
+      farePolicy: 'fixed_at_join',
+      seatMultiplier: 0.75,
+      detourFactor: 1,
+    });
+  });
+
+  it('shared: a pricing failure fails the booking; it is never a seat with an absent price', async () => {
+    const { ctrl, matching, pricing } = makeController();
+    pricing.quoteSeatInItinerary.mockRejectedValue(new Error('osrm down'));
+    matching.findOrCreatePool.mockImplementation(
+      async (_req: unknown, opts: { quote: (c: unknown) => Promise<unknown> }) => ({
+        sharedRideId: 'pool-3',
+        mode: 'opened',
+        poolStatus: 'open',
+        seatCount: 1,
+        quote: await opts.quote({ poolId: 'pool-3', seatCount: 1 }),
+      }),
+    );
+    const sharedDto = { ...(dto as object), type: RideType.Shared } as never;
+    await expect(ctrl.create(clientReq as never, sharedDto, undefined)).rejects.toThrow('osrm down');
   });
 });
 
@@ -474,7 +533,7 @@ describe('RidesController.create — scheduled path (RCAB-E6.S2)', () => {
     const ridesCreate = vi
       .fn()
       .mockResolvedValue({ row: soloRideRow({ type: 'scheduled' }), created: true });
-    const { ctrl, events, scheduled, bus } = makeController({
+    const { ctrl, relay, scheduled, bus } = makeController({
       verify: vi.fn().mockReturnValue(claims),
       ridesCreate,
     });
@@ -485,10 +544,12 @@ describe('RidesController.create — scheduled path (RCAB-E6.S2)', () => {
     expect(ridesCreate).toHaveBeenCalledWith(
       expect.objectContaining({ type: 'scheduled', scheduledFor: new Date(when) }),
     );
-    expect(scheduled.scheduleWake).toHaveBeenCalledWith('ride-9', new Date(when));
+    // The wake is an outbox row written inside ridesRepo.create (same txn as the
+    // ride); the controller publishes nothing itself.
+    expect(scheduled.scheduleWake).not.toHaveBeenCalled();
+    expect(relay.kick).toHaveBeenCalledTimes(1);
     expect(bus.joinRide).toHaveBeenCalledWith('c-1', 'ride-9');
-    // Scheduled rides must NOT dispatch now.
-    expect(events.emit).not.toHaveBeenCalled();
+
   });
 
   it('a replay does not re-schedule the wake', async () => {

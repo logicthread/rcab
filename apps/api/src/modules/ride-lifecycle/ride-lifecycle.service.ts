@@ -1,10 +1,15 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
+import { sql } from 'drizzle-orm';
 import { OnEvent } from '@nestjs/event-emitter';
 import type Redis from 'ioredis';
 import { REDIS } from '../../infra/redis/redis.module';
-import { SharedRideRepository } from '../matching/shared-ride.repository';
+import { DRIZZLE_DB, type DbExecutor, type DrizzleDb } from '../../infra/db/drizzle.module';
 import { RideStopRepository, type RideStopRow } from '../matching/ride-stop.repository';
+import { PoolProjectionService } from '../matching/pool-projection.service';
+import { DriverAssignmentRepository } from '../dispatch/assignment.repository';
+import { clearCurrentRide } from '../dispatch/driver-assignment.projection';
 import { RealtimeBus } from '../realtime/realtime.bus';
+import { RealtimeSnapshotService } from '../realtime/realtime-snapshot.service';
 import {
   STOP_CONFIRM_REQUEST_EVENT,
   type StopConfirmRequestEvent,
@@ -24,21 +29,44 @@ export interface StopConfirmInput {
 }
 
 export type StopConfirmResult =
-  | { ok: true; stop: RideStopRow; pendingAfter: number; rideCompleted: boolean }
+  | {
+      ok: true;
+      stop: RideStopRow;
+      pendingAfter: number;
+      rideCompleted: boolean;
+      /** The stop was already confirmed: this is the authoritative current state (T32). */
+      duplicate: boolean;
+    }
   | {
       ok: false;
-      reason: 'not_found' | 'not_owner' | 'wrong_type' | 'out_of_order' | 'already_confirmed';
+      reason: 'not_found' | 'not_owner' | 'wrong_type' | 'out_of_order';
     };
+
+type ConfirmOutcome = {
+  result: StopConfirmResult;
+  completedAt: Date | null;
+  /**
+   * `shared_rides.state_version` after this confirmation (bumped once per
+   * confirmed stop, in the same transaction); the committed current version for
+   * a duplicate. Absent when the request was rejected.
+   */
+  version?: number;
+  /** The pool row's state moved (closed_started / completed): re-project it. */
+  poolStateChanged?: boolean;
+};
 
 @Injectable()
 export class RideLifecycleService {
   private readonly log = new Logger(RideLifecycleService.name);
 
   constructor(
-    private readonly shared: SharedRideRepository,
     private readonly stops: RideStopRepository,
+    private readonly assignments: DriverAssignmentRepository,
     private readonly bus: RealtimeBus,
     @Inject(REDIS) private readonly redis: Redis,
+    @Inject(DRIZZLE_DB) private readonly db: DrizzleDb,
+    private readonly poolProjection: PoolProjectionService,
+    @Optional() private readonly snapshots?: RealtimeSnapshotService,
   ) {}
 
   @OnEvent(STOP_CONFIRM_REQUEST_EVENT, { async: true })
@@ -54,68 +82,152 @@ export class RideLifecycleService {
     }
   }
 
+  /**
+   * Confirm one stop of a claimed pool. One transaction holding the pool row
+   * lock (contract §1.3): ownership is checked against the committed claim,
+   * the stop is stamped, the first pickup moves the pool to `closed_started`,
+   * and the final stop completes the pool AND releases the driver's assignment
+   * guard in the same commit (F06). A repeated confirmation returns the
+   * authoritative current state instead of an error (T32). Realtime echoes and
+   * the projection clear happen after commit.
+   */
   async confirmStop(input: StopConfirmInput): Promise<StopConfirmResult> {
-    const ride = await this.shared.findById(input.rideId);
-    if (!ride) return { ok: false, reason: 'not_found' };
-    if (ride.claimedByDriverId !== input.driverId) {
-      this.log.warn(
-        { rideId: input.rideId, driverId: input.driverId, claimed: ride.claimedByDriverId },
-        'confirmStop: driver is not the claimed driver',
+    const outcome = await this.db.transaction(async (tx): Promise<ConfirmOutcome> => {
+      const pool = await this.assignments.lockSharedTrip(tx, input.rideId);
+      if (!pool) return { result: { ok: false, reason: 'not_found' }, completedAt: null };
+      if (pool.claimedByDriverId !== input.driverId) {
+        return { result: { ok: false, reason: 'not_owner' }, completedAt: null };
+      }
+
+      const stops = await this.stops.findByRideId(input.rideId, tx);
+      const target = stops.find((s) => s.sequenceIndex === input.sequenceIndex);
+      if (!target) return { result: { ok: false, reason: 'not_found' }, completedAt: null };
+      if (target.type !== input.type) {
+        return { result: { ok: false, reason: 'wrong_type' }, completedAt: null };
+      }
+      const pending = stops.filter((s) => s.confirmedAt === null).length;
+      if (target.confirmedAt !== null) {
+        return {
+          result: {
+            ok: true,
+            stop: target,
+            pendingAfter: pending,
+            rideCompleted: pool.poolState === 'completed',
+            duplicate: true,
+          },
+          completedAt: null,
+          version: pool.stateVersion,
+        };
+      }
+
+      const firstPending = stops.find((s) => s.confirmedAt === null);
+      if (!firstPending || firstPending.sequenceIndex !== input.sequenceIndex) {
+        return { result: { ok: false, reason: 'out_of_order' }, completedAt: null };
+      }
+
+      const updated = await this.stops.confirm(input.rideId, input.sequenceIndex, tx);
+      if (!updated) throw new Error('confirmStop: stop changed under the pool lock');
+
+      let poolStateChanged = false;
+      if (input.type === 'pickup' && stops.every((s) => s.confirmedAt === null)) {
+        await this.stops.markRideStarted(input.rideId, tx);
+        poolStateChanged = true;
+      }
+
+      const pendingAfter = pending - 1;
+      let completedAt: Date | null = null;
+      if (pendingAfter === 0) {
+        completedAt = await this.stops.markRideCompleted(input.rideId, tx);
+        if (!completedAt) throw new Error('confirmStop: claimed pool could not be completed');
+        poolStateChanged = true;
+        await this.assignments.release(tx, {
+          driverId: input.driverId,
+          trip: { kind: 'shared', sharedRideId: input.rideId },
+        });
+      }
+      // Every confirmed stop is a versioned change of the pool (the state_version
+      // trigger bumps on any UPDATE), even when the pool state does not move, so
+      // clients can order the driver echo against pool:update / snapshots.
+      const version = await this.touchPool(tx, input.rideId);
+      return {
+        result: {
+          ok: true,
+          stop: updated,
+          pendingAfter,
+          rideCompleted: pendingAfter === 0,
+          duplicate: false,
+        },
+        completedAt,
+        version,
+        poolStateChanged,
+      };
+    });
+
+    const { result } = outcome;
+    if (!result.ok) return result;
+
+    // ── after commit ──
+    if (outcome.poolStateChanged) {
+      // The `pool:<id>` hash is a projection of the committed row (F09).
+      try {
+        await this.poolProjection.project(input.rideId);
+      } catch (err) {
+        this.log.warn({ err, poolId: input.rideId }, 'pool projection failed; rebuild will repair');
+      }
+    }
+    if (outcome.completedAt) {
+      try {
+        await clearCurrentRide(this.redis, input.driverId, input.rideId);
+      } catch (err) {
+        this.log.warn({ err, driverId: input.driverId }, 'failed to clear current_ride_id');
+      }
+      this.safely(() =>
+        this.bus.toRide(input.rideId, RIDE_COMPLETED_EVENT, {
+          rideId: input.rideId,
+          completedAt: (outcome.completedAt as Date).toISOString(),
+        }),
       );
-      return { ok: false, reason: 'not_owner' };
     }
 
-    const stops = await this.stops.findByRideId(input.rideId);
-    const target = stops.find((s) => s.sequenceIndex === input.sequenceIndex);
-    if (!target) return { ok: false, reason: 'not_found' };
-    if (target.type !== input.type) return { ok: false, reason: 'wrong_type' };
-    if (target.confirmedAt !== null) return { ok: false, reason: 'already_confirmed' };
-
-    const firstPending = stops.find((s) => s.confirmedAt === null);
-    if (!firstPending || firstPending.sequenceIndex !== input.sequenceIndex) {
-      return { ok: false, reason: 'out_of_order' };
-    }
-
-    const confirmedAt = new Date();
-    const updated = await this.stops.confirm(input.rideId, input.sequenceIndex, confirmedAt);
-    if (!updated) return { ok: false, reason: 'already_confirmed' };
-
-    const wasFirstConfirm = stops.every((s) => s.confirmedAt === null);
-    if (wasFirstConfirm && input.type === 'pickup') {
-      await this.stops.markRideStarted(input.rideId);
-    }
-
-    const pendingAfter = await this.stops.countPending(input.rideId);
-    let rideCompleted = false;
-    if (pendingAfter === 0) {
-      await this.stops.markRideCompleted(input.rideId, confirmedAt);
-      await this.clearDriverCurrentRide(input.driverId);
-      rideCompleted = true;
-      this.bus.toRide(input.rideId, RIDE_COMPLETED_EVENT, {
-        rideId: input.rideId,
-        completedAt: confirmedAt.toISOString(),
-      });
+    if (!result.duplicate && this.snapshots) {
+      // Versioned pool:update from the committed row (closed_started /
+      // completed included); best effort, a miss is repaired by the snapshot.
+      await this.snapshots.publishPoolUpdate(input.rideId);
     }
 
     const echoEvent = input.type === 'pickup' ? STOP_PICKUP_EVENT : STOP_DROP_EVENT;
-    const echoPayload = {
-      rideId: input.rideId,
-      sequenceIndex: input.sequenceIndex,
-      passengerId: updated.passengerId,
-      type: updated.type,
-      confirmedAt: confirmedAt.toISOString(),
-      rideCompleted,
-    };
-    this.bus.toDriver(input.driverId, echoEvent, echoPayload);
+    this.safely(() =>
+      this.bus.toDriver(input.driverId, echoEvent, {
+        rideId: input.rideId,
+        sequenceIndex: input.sequenceIndex,
+        passengerId: result.stop.passengerId,
+        type: result.stop.type,
+        confirmedAt: (result.stop.confirmedAt ?? new Date()).toISOString(),
+        rideCompleted: result.rideCompleted,
+        ...(outcome.version !== undefined ? { version: outcome.version } : {}),
+      }),
+    );
 
-    return { ok: true, stop: updated, pendingAfter, rideCompleted };
+    return result;
   }
 
-  private async clearDriverCurrentRide(driverId: string): Promise<void> {
+  /** Bump `state_version` (trigger) inside the confirmation transaction; returns it. */
+  private async touchPool(tx: DbExecutor, poolId: string): Promise<number> {
+    const res = await tx.execute<{ state_version: number | string }>(sql`
+      UPDATE shared_rides SET updated_at = now()
+       WHERE ride_id = ${poolId}
+   RETURNING state_version
+    `);
+    const row = res.rows[0];
+    if (!row) throw new Error('confirmStop: pool vanished under the pool lock');
+    return Number(row.state_version);
+  }
+
+  private safely(deliver: () => void): void {
     try {
-      await this.redis.hdel(`driver:state:${driverId}`, 'current_ride_id');
+      deliver();
     } catch (err) {
-      this.log.warn({ err, driverId }, 'failed to clear driver:state.current_ride_id');
+      this.log.warn({ err }, 'post-commit delivery failed');
     }
   }
 }

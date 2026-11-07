@@ -43,7 +43,7 @@ docker-compose**. No Kubernetes, no managed cloud services. Deliberate.
 | `api` | built (`apps/api`) | **3000** | NestJS HTTP `/v1/*` + Socket.IO WS |
 | `web` | built (`apps/web`) | **3002** | Next.js client (container listens on 3000, mapped to 3002) |
 | `postgres` | `postgis/postgis:16` | **55432** | durable state (container 5432; host 5432 is usually a local install); creds `rcab` / `rcab` / db `rcab` |
-| `redis` | `redis:7-alpine` | **6379** | geo presence, claim locks, BullMQ, Socket.IO adapter |
+| `redis` | `redis:7-alpine` | **6379** | geo presence, BullMQ, Socket.IO adapter |
 | `osrm` | `osrm/osrm-backend` | **5000** | routing (`/route/v1/driving/...`); dev graph = **NE-India (Guwahati)** |
 | `osrm-prep` / `osrm-extract` | alpine / osrm | — | one-shot graph build on first up |
 | `grafana` | `grafana/grafana:11` | **3001** | dashboards (profile `obs`) |
@@ -97,6 +97,8 @@ Dispatch has **no HTTP surface** — it's event/queue-driven (see §7).
 
 ## 4. Realtime — Socket.IO (WS on the API port)
 
+Stage D (R09): clients call `pool:subscribe` / `ride:subscribe` (authorized against Postgres) and get a Postgres snapshot (`pool:snapshot`, `ride:snapshot`; drivers also `driver:assignment` / `driver:sync`). Incremental events are versioned (pool = `shared_rides.state_version`, ride = status rank) so clients ignore stale ones. Offer results are `ride_offer_outcome` events.
+
 Gateway: `apps/api/src/modules/realtime/realtime.gateway.ts`. Rooms: `user:<id>`,
 `driver:<id>`, `ride:<id>`, `pool:<id>`. Multi-node fan-out uses the Redis adapter
 (`socketio:*`); single-node it's a no-op.
@@ -126,8 +128,8 @@ Gateway: `apps/api/src/modules/realtime/realtime.gateway.ts`. Rooms: `user:<id>`
 
 ## 5. Data model — Postgres (Drizzle, `apps/api/src/db/schema.ts`)
 
-**10 tables** (incl. `idempotency_record`, shared-create claims). FKs shown with →. (No `pools`/`dispatch_offers`/`ride_events`/`jwt_revocations`
-tables exist — dispatch/offers/pools live in **Redis**. Refresh-token revocation is the
+**10 tables** (incl. `idempotency_record`, shared-create claims). FKs shown with →. (Stage C added `dispatch_offer`, `driver_active_assignment`, `outbox`, `pool_member` and `migration_conflict` (migrations 0014-0017) — offers, assignment and pool membership are authoritative in Postgres, not Redis. No `ride_events`/`jwt_revocations`
+tables exist. Refresh-token revocation is the
 `auth_refresh_token.revoked_at` column, **not** a Redis set.)
 
 | Table | Purpose | Key columns / FKs |
@@ -161,16 +163,14 @@ Integration tests apply the same files via `@rcab/test-fixtures` `runMigrations(
 | Key | Type | Owner | Purpose |
 |---|---|---|---|
 | `active_drivers` | GEO ZSET | drivers/realtime | online driver positions (dispatch candidate source) |
-| `driver:state:<id>` | HASH | drivers/realtime | availability, `current_ride_id`, `last_seen` |
-| `claim:ride:<id>` | STRING (SET NX) | dispatch | atomic first-accept-wins solo claim lock |
-| `offer:list:<rideId>`, `offer:type:<offerId>`, `ride:<id>:offered` | SET/STRING | dispatch | outstanding offer tracking |
-| `pool:<rideId>` (HASH), `pool:<rideId>:seats` (counter) | | matching | shared pool state + atomic seat allocation (Lua) |
+| `driver:state:<id>` | HASH | drivers/realtime | availability, `current_ride_id` (projection of `driver_active_assignment`), `last_seen` |
+| `pool:<rideId>` | HASH | matching | **projection** of the Postgres pool (`shared_rides` + `pool_member`), reconciled at boot and periodically |
 | `bull:dispatch:*`, `bull:matching:*`, `bull:scheduled-dispatch:*` | BullMQ | dispatch/matching/scheduled | wave-timeout, hard-fail, pool-expire, and scheduled-wake delayed jobs |
 | `socketio:*` | pub/sub | realtime | Socket.IO Redis adapter (multi-node) |
 
-Idempotency is no longer in Redis: it is durable in Postgres (migration 0013).
+Idempotency is no longer in Redis: it is durable in Postgres (migration 0013). Offers, claims and seat counters are not in Redis either (Stage C): `dispatch_offer`, `driver_active_assignment`, `outbox` and `pool_member` in Postgres are authoritative; the `claim:ride:*`, `offer:*`, `pool:*:seats|offered|stops` keys and the `pool_claim`/`pool_slot` Lua scripts were removed.
 
-Inspect with `/redis-inspect` (geo/queues/JWT) and `/pool-inspect` (shared pools).
+Inspect with `/redis-inspect` (geo/queues/projections) and `/pool-inspect` (shared pools; Postgres first).
 
 ---
 
@@ -188,11 +188,17 @@ matching · rating · health · scheduled`
 requested → dispatching → accepted → en_route → arrived → in_progress → completed
      └──────────────► no_driver            (any pre-complete) └► cancelled / no_show
 ```
-- **Dispatch** (`dispatch` module, Redis + BullMQ): on `ride.requested` → `dispatchSolo`
-  → geo top-K on `active_drivers` (wave-1 K1/R1) → fan out `ride_offer` → first
-  `ride_offer_response{accept}` wins via `claim:ride:<id>` SET NX + a conditional
-  `UPDATE … WHERE status='requested'` → losers get `ride_offer_revoked`. No accept →
-  wave-2 (K2/R2) → hard-fail → `no_driver` + notify passenger.
+- **Dispatch** (`dispatch` module, Postgres outbox + BullMQ timers): the booking commit
+  writes an `outbox` (`ride.dispatch.requested`) in the same transaction;
+  `OutboxRelay` → `DispatchStartService` → `dispatchSolo` → geo top-K on `active_drivers`
+  (wave-1 K1/R1) → persist `dispatch_offer` rows and fan out `ride_offer`. A
+  `ride_offer_response{accept}` is validated in **one Postgres transaction** against the
+  stored offer (owner, expiry, generation, trip state, eligibility); the
+  `driver_active_assignment` guard allows one active trip per driver (solo or shared).
+  The driver gets a `ride_offer_response` ack, everyone gets `ride_offer_outcome`
+  (assigned/lost/expired/revoked/rejected). No accept → wave-2 (K2/R2) → hard-fail →
+  `no_driver` + notify passenger. `DispatchReconciler` re-arms anything committed but
+  never started; the in-memory `ride.requested` event no longer exists.
 - **Lifecycle** (`ride-lifecycle` / `RideStateMachine`): driver drives the forward
   transitions via `POST /v1/rides/:id/state` (SELECT … FOR UPDATE guarded). Cancel /
   no-show via `POST /v1/rides/:id/cancel` (role-aware; no fee in Phase-0).
@@ -200,16 +206,21 @@ requested → dispatching → accepted → en_route → arrived → in_progress 
 ### Shared ride (E5)
 `matching` scores a new request against open pools (route-similarity on cached OSRM
 polylines) → slot into an open pool or open a new one → pool lifecycle
-`open → grow → close → dispatch` (seat allocation is an atomic Lua script) → shared
-dispatch offers carry the multi-stop sequence → per-seat pricing.
+`open → grow → close → dispatch` (a join is one Postgres transaction over `pool_member`,
+seat count and itinerary; Redis `pool:<id>` is a projection) → shared dispatch offers
+carry the multi-stop sequence. Seat fare is quoted inside the join transaction and stored
+in `pool_member.agreed_fare_cents`, fixed at join (`SHARED_FARE_POLICY='fixed_at_join'`,
+stand-in until RCAB-E8.S9).
 
 ### Scheduled ride (E6)
 `POST /v1/rides` with `type=scheduled` + `scheduled_for` (15 min–24 h) persists the ride
-`requested` and enqueues a BullMQ **delayed** job on `scheduled-dispatch` (fires 10 min
-before pickup) **instead of** dispatching now. On wake, the processor emits the same
-`ride.requested` event a normal booking fires → reuses the exact solo dispatch path
-(`dispatchSolo` guards `status='requested'`, so a cancelled ride is safely skipped).
-Cancel before wake drops the delayed job.
+`requested` plus a `ride.wake.schedule` outbox intent that arms a BullMQ **delayed** job
+on `scheduled-dispatch` (fires 10 min before pickup) **instead of** dispatching now. On
+wake the same outbox-driven solo dispatch path runs (`dispatchSolo` guards
+`status='requested'`, so a cancelled ride is safely skipped), but with a **4-minute**
+accept window (`SCHEDULED_DISPATCH_WINDOW_MS=240000`). An unanswered scheduled ride is
+re-armed with a new generation (no cap) and the passenger is told once
+(`ride_dispatch_retry`). Cancel before wake drops the delayed job.
 
 ---
 

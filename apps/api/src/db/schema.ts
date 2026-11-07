@@ -13,6 +13,9 @@ import {
   index,
   primaryKey,
   unique,
+  uniqueIndex,
+  bigint,
+  bigserial,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 
@@ -120,6 +123,12 @@ export const sharedRide = pgTable(
     claimedByDriverId: uuid('claimed_by_driver_id'),
     claimedAt: timestamp('claimed_at', { withTimezone: true }),
     completedAt: timestamp('completed_at', { withTimezone: true }),
+    // F05/F06 (0014): every offer + dispatch job targets one generation; work
+    // for an older generation is stale. 0 = not yet dispatched (open pool).
+    dispatchGeneration: integer('dispatch_generation').notNull().default(0),
+    // F09 (0016): bumped by trigger on every UPDATE; Redis pool projections
+    // carry it and never overwrite a newer version.
+    stateVersion: bigint('state_version', { mode: 'number' }).notNull().default(0),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -128,6 +137,13 @@ export const sharedRide = pgTable(
     check(
       'shared_rides_state_check',
       sql`${t.poolState} IN ('open','closed_full','closed_started','closed_timeout','aborted','completed')`,
+    ),
+    check('shared_rides_dispatch_generation_check', sql`${t.dispatchGeneration} >= 0`),
+    check('shared_rides_max_seats_check', sql`${t.maxSeats} >= 1`),
+    // seat_count is DERIVED from pool_member by trigger (0016) — never write it.
+    check(
+      'shared_rides_seat_capacity_check',
+      sql`${t.seatCount} >= 0 AND ${t.seatCount} <= ${t.maxSeats}`,
     ),
   ],
 );
@@ -207,6 +223,8 @@ export const rides = pgTable(
     cancelledAt: timestamp('cancelled_at', { withTimezone: true }),
     cancelledBy: text('cancelled_by'),
     cancelReason: text('cancel_reason'),
+    // F05/F06 (0014): 0 = not yet dispatched (un-woken scheduled ride).
+    dispatchGeneration: integer('dispatch_generation').notNull().default(0),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -231,6 +249,7 @@ export const rides = pgTable(
       'rides_idempotency_operation_check',
       sql`${t.idempotencyOperation} IN ('ride.create.solo','ride.create.scheduled')`,
     ),
+    check('rides_dispatch_generation_check', sql`${t.dispatchGeneration} >= 0`),
   ],
 );
 
@@ -279,5 +298,220 @@ export const ratings = pgTable(
     check('ratings_stars_check', sql`${t.stars} BETWEEN 1 AND 5`),
     check('ratings_no_self_check', sql`${t.raterId} <> ${t.subjectId}`),
     index('ratings_subject_idx').on(t.subjectId, t.createdAt),
+  ],
+);
+
+// ── Stage C: offers, assignment guard, outbox, pool membership (0014–0016) ──
+
+// Rows a migration could not apply mechanically (driver with two active trips,
+// orphan pool member, seat_count mismatch, …). Operator-resolved; never a
+// silent repair. 0014 / 0016.
+export const migrationConflict = pgTable(
+  'migration_conflict',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    migration: text('migration').notNull(),
+    kind: text('kind').notNull(),
+    subject: jsonb('subject').notNull(),
+    detail: jsonb('detail').notNull().default({}),
+    detectedAt: timestamp('detected_at', { withTimezone: true }).notNull().defaultNow(),
+    resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+    resolution: text('resolution'),
+  },
+  (t) => [
+    unique('migration_conflict_once_uq').on(t.migration, t.kind, t.subject),
+    index('migration_conflict_open_idx')
+      .on(t.migration, t.kind)
+      .where(sql`${t.resolvedAt} IS NULL`),
+  ],
+);
+
+export type DispatchOfferState = 'offered' | 'accepted' | 'declined' | 'expired' | 'revoked';
+
+// Authoritative dispatch offer (F05 / R06, 0014). The accept path derives the
+// trip from this row and validates driver, state, generation and expires_at
+// (DB clock) inside the assignment transaction. Redis offer keys are at most a
+// projection.
+export const dispatchOffer = pgTable(
+  'dispatch_offer',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tripKind: text('trip_kind').notNull().$type<'solo' | 'shared'>(),
+    rideId: uuid('ride_id').references(() => rides.id, { onDelete: 'cascade' }),
+    sharedRideId: uuid('shared_ride_id').references(() => sharedRide.rideId, {
+      onDelete: 'cascade',
+    }),
+    driverId: uuid('driver_id')
+      .notNull()
+      .references(() => driver.userId, { onDelete: 'cascade' }),
+    dispatchGeneration: integer('dispatch_generation').notNull(),
+    waveNumber: smallint('wave_number').notNull().default(1),
+    state: text('state').notNull().default('offered').$type<DispatchOfferState>(),
+    offeredAt: timestamp('offered_at', { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    // When the offer left 'offered' (accepted / declined / expired / revoked).
+    resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+  },
+  (t) => [
+    check('dispatch_offer_trip_kind_check', sql`${t.tripKind} IN ('solo', 'shared')`),
+    check('dispatch_offer_one_trip_check', sql`num_nonnulls(${t.rideId}, ${t.sharedRideId}) = 1`),
+    check(
+      'dispatch_offer_trip_matches_kind_check',
+      sql`(${t.tripKind} = 'solo') = (${t.rideId} IS NOT NULL)`,
+    ),
+    check(
+      'dispatch_offer_state_check',
+      sql`${t.state} IN ('offered', 'accepted', 'declined', 'expired', 'revoked')`,
+    ),
+    check('dispatch_offer_generation_check', sql`${t.dispatchGeneration} >= 1`),
+    check('dispatch_offer_wave_check', sql`${t.waveNumber} >= 1`),
+    check('dispatch_offer_expiry_check', sql`${t.expiresAt} > ${t.offeredAt}`),
+    check(
+      'dispatch_offer_resolved_check',
+      sql`(${t.state} = 'offered') = (${t.resolvedAt} IS NULL)`,
+    ),
+    unique('dispatch_offer_solo_driver_uq').on(t.rideId, t.dispatchGeneration, t.driverId),
+    unique('dispatch_offer_shared_driver_uq').on(t.sharedRideId, t.dispatchGeneration, t.driverId),
+    uniqueIndex('dispatch_offer_one_live_per_driver_uq')
+      .on(t.driverId)
+      .where(sql`${t.state} = 'offered'`),
+    uniqueIndex('dispatch_offer_solo_one_accept_uq')
+      .on(t.rideId, t.dispatchGeneration)
+      .where(sql`${t.state} = 'accepted' AND ${t.rideId} IS NOT NULL`),
+    uniqueIndex('dispatch_offer_shared_one_accept_uq')
+      .on(t.sharedRideId, t.dispatchGeneration)
+      .where(sql`${t.state} = 'accepted' AND ${t.sharedRideId} IS NOT NULL`),
+    index('dispatch_offer_live_expiry_idx')
+      .on(t.expiresAt)
+      .where(sql`${t.state} = 'offered'`),
+  ],
+);
+
+// The ONE driver-exclusivity guard across solo + shared trips (F06 / R06,
+// 0014). PK driver_id = at most one active trip per driver; UNIQUE trip ids =
+// at most one driver per trip. Inserted in the claim transaction, deleted in
+// the transaction that moves the trip to a terminal state.
+export const driverActiveAssignment = pgTable(
+  'driver_active_assignment',
+  {
+    driverId: uuid('driver_id')
+      .primaryKey()
+      .references(() => driver.userId, { onDelete: 'cascade' }),
+    soloRideId: uuid('solo_ride_id')
+      .unique()
+      .references(() => rides.id, { onDelete: 'cascade' }),
+    sharedRideId: uuid('shared_ride_id')
+      .unique()
+      .references(() => sharedRide.rideId, { onDelete: 'cascade' }),
+    offerId: uuid('offer_id')
+      .unique()
+      .references(() => dispatchOffer.id, { onDelete: 'set null' }),
+    dispatchGeneration: integer('dispatch_generation').notNull(),
+    assignedAt: timestamp('assigned_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    check(
+      'driver_active_assignment_one_trip_check',
+      sql`num_nonnulls(${t.soloRideId}, ${t.sharedRideId}) = 1`,
+    ),
+    check('driver_active_assignment_generation_check', sql`${t.dispatchGeneration} >= 1`),
+  ],
+);
+
+// Transactional outbox (F08 / R07, 0015). Written in the same transaction as
+// the business mutation; an in-process relay leases due rows, publishes a
+// deterministic BullMQ job and acks with the lease token. `processed_at` means
+// published, not business-complete.
+export const outbox = pgTable(
+  'outbox',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    topic: text('topic').notNull(),
+    aggregateType: text('aggregate_type').notNull().$type<'ride' | 'shared_ride'>(),
+    aggregateId: uuid('aggregate_id').notNull(),
+    aggregateGeneration: integer('aggregate_generation').notNull().default(0),
+    payload: jsonb('payload').notNull().$type<Record<string, unknown>>().default({}),
+    payloadVersion: smallint('payload_version').notNull().default(1),
+    dedupeKey: text('dedupe_key').notNull(),
+    availableAt: timestamp('available_at', { withTimezone: true }).notNull().defaultNow(),
+    attempts: integer('attempts').notNull().default(0),
+    maxAttempts: integer('max_attempts').notNull().default(10),
+    lastError: text('last_error'),
+    leaseToken: uuid('lease_token'),
+    leasedUntil: timestamp('leased_until', { withTimezone: true }),
+    processedAt: timestamp('processed_at', { withTimezone: true }),
+    failedAt: timestamp('failed_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    unique('outbox_dedupe_key_uq').on(t.dedupeKey),
+    check('outbox_topic_format_check', sql`${t.topic} ~ '^[a-z]+(\\.[a-z_]+)+$'`),
+    check('outbox_aggregate_type_check', sql`${t.aggregateType} IN ('ride', 'shared_ride')`),
+    check('outbox_generation_check', sql`${t.aggregateGeneration} >= 0`),
+    check('outbox_attempts_check', sql`${t.attempts} >= 0 AND ${t.maxAttempts} >= 1`),
+    check('outbox_payload_object_check', sql`jsonb_typeof(${t.payload}) = 'object'`),
+    check(
+      'outbox_terminal_check',
+      sql`NOT (${t.processedAt} IS NOT NULL AND ${t.failedAt} IS NOT NULL)`,
+    ),
+    check('outbox_lease_pair_check', sql`(${t.leaseToken} IS NULL) = (${t.leasedUntil} IS NULL)`),
+    index('outbox_due_idx')
+      .on(t.availableAt)
+      .where(sql`${t.processedAt} IS NULL AND ${t.failedAt} IS NULL`),
+    index('outbox_aggregate_idx').on(t.aggregateType, t.aggregateId, t.topic),
+  ],
+);
+
+// Authoritative pool membership (F09 / R08, 0016). One seat per member in
+// Phase-0. Triggers: insert only into an 'open' pool (constraint name
+// pool_member_pool_open), seat_count += seats on insert / -= on delete (the
+// shared_rides capacity CHECK rejects oversubscription), active=false when the
+// pool reaches 'aborted' / 'completed'. Lock order: shared_rides → pool_member.
+export const poolMember = pgTable(
+  'pool_member',
+  {
+    poolId: uuid('pool_id')
+      .notNull()
+      .references(() => sharedRide.rideId, { onDelete: 'cascade' }),
+    passengerId: uuid('passenger_id')
+      .notNull()
+      .references(() => appUser.id, { onDelete: 'cascade' }),
+    seats: smallint('seats').notNull().default(1),
+    originLat: doublePrecision('origin_lat').notNull(),
+    originLng: doublePrecision('origin_lng').notNull(),
+    destLat: doublePrecision('dest_lat').notNull(),
+    destLng: doublePrecision('dest_lng').notNull(),
+    // LEGACY (pre-0017): optional per-seat price shown at join. No longer
+    // written; backfilled into agreed_fare_cents.
+    quotedFareCents: integer('quoted_fare_cents'),
+    // Phase-0 stand-in policy SHARED_FARE_POLICY = 'fixed_at_join' (F15/R10):
+    // the per-seat fare in integer paise this passenger agreed to, quoted inside
+    // the join transaction and never readjusted. NOT NULL for new rows (trigger
+    // pool_member_agreed_fare_guard, 0017); NULL only on legacy rows.
+    agreedFareCents: integer('agreed_fare_cents'),
+    // Durable link from a shared-create idempotency claim to its seat.
+    idempotencyKey: text('idempotency_key'),
+    active: boolean('active').notNull().default(true),
+    joinedAt: timestamp('joined_at', { withTimezone: true }).notNull().defaultNow(),
+    leftAt: timestamp('left_at', { withTimezone: true }),
+  },
+  (t) => [
+    primaryKey({ columns: [t.poolId, t.passengerId] }),
+    check('pool_member_one_seat_check', sql`${t.seats} = 1`),
+    check(
+      'pool_member_fare_check',
+      sql`${t.quotedFareCents} IS NULL OR ${t.quotedFareCents} >= 0`,
+    ),
+    check(
+      'pool_member_agreed_fare_check',
+      sql`${t.agreedFareCents} IS NULL OR ${t.agreedFareCents} >= 0`,
+    ),
+    check('pool_member_left_check', sql`${t.active} = (${t.leftAt} IS NULL)`),
+    unique('pool_member_idempotency_uq').on(t.passengerId, t.idempotencyKey),
+    uniqueIndex('pool_member_one_active_pool_uq')
+      .on(t.passengerId)
+      .where(sql`${t.active}`),
+    index('pool_member_passenger_idx').on(t.passengerId, t.joinedAt.desc()),
   ],
 );

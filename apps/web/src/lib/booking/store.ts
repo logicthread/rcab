@@ -2,6 +2,7 @@
 
 import { create } from 'zustand';
 import {
+  type Money,
   type Place,
   type PointField,
   type PresetTrip,
@@ -43,6 +44,8 @@ export interface BookingState {
   sharedRideId: string | null;
   seatCount: number;
   poolStatus: PoolStatus | null;
+  // Fare this passenger agreed to at join (fixed; never readjusted by later joins).
+  agreedFare: Money | null;
   requestError: string | null;
 
   // Solo (normal) live-tracking — RCAB-E4.S7.
@@ -63,8 +66,18 @@ export interface BookingState {
   setQuote: (quote: QuoteResponse) => void;
   setQuoteError: (message: string) => void;
   startRequest: () => void;
-  setOpened: (sharedRideId: string, seatCount: number, poolStatus: PoolStatus) => void;
-  setSlotted: (sharedRideId: string, seatCount: number, poolStatus: PoolStatus) => void;
+  setOpened: (
+    sharedRideId: string,
+    seatCount: number,
+    poolStatus: PoolStatus,
+    agreedFare?: Money,
+  ) => void;
+  setSlotted: (
+    sharedRideId: string,
+    seatCount: number,
+    poolStatus: PoolStatus,
+    agreedFare?: Money,
+  ) => void;
   applyPoolUpdate: (sharedRideId: string, seatCount: number, poolStatus: PoolStatus) => void;
   setRequestError: (message: string) => void;
   setSoloRequested: (rideId: string, status: string) => void;
@@ -86,6 +99,7 @@ const INITIAL_STATE = {
   sharedRideId: null as string | null,
   seatCount: 0,
   poolStatus: null as PoolStatus | null,
+  agreedFare: null as Money | null,
   requestError: null as string | null,
   rideId: null as string | null,
   rideStatus: null as RideStatus | null,
@@ -181,12 +195,12 @@ export const useBookingStore = create<BookingState>((set, get) => ({
     set({ stage: 'requesting', requestError: null });
   },
 
-  setOpened(sharedRideId, seatCount, poolStatus) {
-    set({ stage: 'opened', sharedRideId, seatCount, poolStatus });
+  setOpened(sharedRideId, seatCount, poolStatus, agreedFare) {
+    set({ stage: 'opened', sharedRideId, seatCount, poolStatus, agreedFare: agreedFare ?? null });
   },
 
-  setSlotted(sharedRideId, seatCount, poolStatus) {
-    set({ stage: 'slotted', sharedRideId, seatCount, poolStatus });
+  setSlotted(sharedRideId, seatCount, poolStatus, agreedFare) {
+    set({ stage: 'slotted', sharedRideId, seatCount, poolStatus, agreedFare: agreedFare ?? null });
   },
 
   applyPoolUpdate(sharedRideId, seatCount, poolStatus) {

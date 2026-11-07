@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import * as schema from '../../src/db/schema';
 import { RidesRepository } from '../../src/modules/rides/rides.repository';
+import { guardsFor, seedDriver } from './support/dispatch-fixtures';
 
 const skip = process.env.RCAB_INT_SKIPPED === '1';
 
@@ -14,7 +15,9 @@ describe.skipIf(skip)('RidesRepository.transition — solo lifecycle (real Postg
   let pool: Pool;
   let repo: RidesRepository;
   let passengerId: string;
-  const driverId = randomUUID();
+  // A fresh driver per accepted ride: the assignment guard allows one active
+  // trip per driver (F06), and several of these rides are never completed.
+  let driverId: string;
 
   beforeAll(async () => {
     pool = new Pool({ connectionString: process.env.TEST_POSTGRES_URI });
@@ -47,7 +50,8 @@ describe.skipIf(skip)('RidesRepository.transition — solo lifecycle (real Postg
       fareCents: 18500,
       idempotencyKey: `idem-${randomUUID()}`,
     });
-    const bound = await repo.claimSolo(row.id, driverId, new Date());
+    driverId = await seedDriver(pool);
+    const bound = await repo.claimSolo(row.id, driverId);
     expect(bound?.status).toBe('accepted');
     return row.id;
   }
@@ -79,6 +83,26 @@ describe.skipIf(skip)('RidesRepository.transition — solo lifecycle (real Postg
       expect(r4.row.enRouteAt).toBeInstanceOf(Date);
       expect(r4.row.acceptedAt).toBeInstanceOf(Date);
     }
+    // Completion releases the driver's assignment guard in the same commit.
+    expect(await guardsFor(pool, { driverId })).toEqual([]);
+  });
+
+  it('an accepted ride holds exactly one guard; the driver cannot be bound twice', async () => {
+    const id = await newAcceptedRide();
+    expect(await guardsFor(pool, { driverId })).toEqual([
+      { driver_id: driverId, solo_ride_id: id, shared_ride_id: null },
+    ]);
+    const { row: second } = await repo.create({
+      passengerId,
+      originLat: 26.1445,
+      originLng: 91.7362,
+      destLat: 26.1758,
+      destLng: 91.7898,
+      fareCents: 18500,
+      idempotencyKey: `idem-${randomUUID()}`,
+    });
+    expect(await repo.claimSolo(second.id, driverId)).toBeNull();
+    expect((await repo.findById(second.id))?.status).toBe('requested');
   });
 
   it('rejects an out-of-order transition (fromStatus mismatch) without writing', async () => {

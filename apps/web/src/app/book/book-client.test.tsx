@@ -11,13 +11,23 @@ vi.mock('../../lib/geo/nominatim', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../lib/geo/nominatim')>()),
   reverseGeocode: vi.fn(),
 }));
+const wsConn = vi.hoisted(() => ({
+  poolHandler: null as null | ((p: unknown) => void),
+  subscribePool: vi.fn(),
+  subscribeRide: vi.fn(),
+}));
 vi.mock('../../lib/booking/ws', () => ({
   connectBookingSocket: vi.fn(() => ({
     socket: {},
-    onPoolUpdate: () => () => undefined,
+    onPoolUpdate: (h: (p: unknown) => void) => {
+      wsConn.poolHandler = h;
+      return () => undefined;
+    },
+    onPoolSnapshot: () => () => undefined,
     onDriverLocation: () => () => undefined,
     onRideStateChanged: () => () => undefined,
-    subscribeRide: () => undefined,
+    subscribePool: wsConn.subscribePool,
+    subscribeRide: wsConn.subscribeRide,
     close: () => undefined,
   })),
 }));
@@ -301,6 +311,7 @@ describe('BookPage idempotency key per booking intent (F18a)', () => {
         passengerId: 'u1',
         mode: 'opened',
         poolStatus: 'open',
+        perSeatPrice: { amount: 7_000, currency: 'INR' },
       });
     render(<BookClient />);
     pickPreset(0);
@@ -314,6 +325,37 @@ describe('BookPage idempotency key per booking intent (F18a)', () => {
     const k1 = createSharedRide.mock.calls[0][2];
     expect(k1).toBeTruthy();
     expect(createSharedRide.mock.calls[1][2]).toBe(k1);
+    // The fare agreed at join is shown, fixed.
+    expect((await screen.findByTestId('agreed-fare')).textContent).toContain('₹70.00');
+  });
+});
+
+describe('BookPage pool realtime wiring (F10)', () => {
+  it('subscribes the pool explicitly after create and applies the versioned state it receives', async () => {
+    fetchQuote.mockResolvedValue(quote('q1'));
+    createSharedRide.mockResolvedValueOnce({
+      sharedRideId: 'sr-7',
+      passengerId: 'u1',
+      mode: 'opened',
+      poolStatus: 'open',
+      perSeatPrice: { amount: 7_000, currency: 'INR' },
+    });
+    render(<BookClient />);
+    pickPreset(0);
+    await waitFor(() => expect(screen.getByTestId('submit-shared')).toBeEnabled());
+    fireEvent.click(screen.getByTestId('submit-shared'));
+
+    await waitFor(() => expect(wsConn.subscribePool).toHaveBeenCalledWith('sr-7'));
+    act(() => {
+      wsConn.poolHandler?.({
+        sharedRideId: 'sr-7',
+        seatCount: 2,
+        poolStatus: 'closed_full',
+        version: 4,
+      });
+    });
+    expect(useBookingStore.getState().seatCount).toBe(2);
+    expect(useBookingStore.getState().poolStatus).toBe('closed_full');
   });
 });
 
@@ -361,6 +403,7 @@ describe('BookPage idempotency error recovery', () => {
         passengerId: 'u1',
         mode: 'opened',
         poolStatus: 'open',
+        perSeatPrice: { amount: 7_000, currency: 'INR' },
       });
     render(<BookClient />);
     pickPreset(0);

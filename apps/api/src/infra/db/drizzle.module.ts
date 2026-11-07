@@ -8,6 +8,16 @@ const DATABASE_URL =
 
 export type DrizzleDb = ReturnType<typeof drizzle<typeof schema>>;
 
+/** The handle a `db.transaction(async (tx) => …)` callback receives. */
+export type DrizzleTx = Parameters<Parameters<DrizzleDb['transaction']>[0]>[0];
+
+/**
+ * Anything a repository method can run SQL on: the pool-backed db or an open
+ * transaction. Stage C repository methods that take part in a cross-slice
+ * transaction accept this as their first argument (see stage-c contract).
+ */
+export type DbExecutor = DrizzleDb | DrizzleTx;
+
 export const PG_POOL = 'PG_POOL';
 export const DRIZZLE_DB = 'DRIZZLE_DB';
 

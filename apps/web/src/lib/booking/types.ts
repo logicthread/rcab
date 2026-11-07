@@ -29,22 +29,60 @@ export interface QuoteResponse {
   };
 }
 
-export type PoolStatus = 'open' | 'closed_full' | 'closed_timeout';
+export type PoolStatus =
+  | 'open'
+  | 'closed_full'
+  | 'closed_timeout'
+  | 'closed_started'
+  | 'completed'
+  | 'aborted';
 
 export interface CreateRideResponse {
   sharedRideId: string;
   passengerId: string;
   mode: 'opened' | 'slotted';
   poolStatus: PoolStatus;
-  perSeatPrice?: Money;
+  /**
+   * Per-seat fare this passenger agreed to, fixed at join (Phase-0 stand-in
+   * policy `fixed_at_join`; RCAB-E8.S9 revisits it). Always present on success.
+   */
+  perSeatPrice: Money;
+  farePolicy?: 'fixed_at_join';
   seatMultiplier?: number;
   detourFactor?: number;
 }
 
+/**
+ * Versioned pool event (R09). `version` is the pool's `state_version`; the
+ * socket wrapper drops any event not newer than what it already applied.
+ * Also produced from a `pool:snapshot`.
+ */
 export interface PoolUpdateEvent {
   sharedRideId: string;
   seatCount: number;
   poolStatus: PoolStatus;
+  version?: number;
+  maxSeats?: number;
+  terminal?: boolean;
+  driverId?: string | null;
+}
+
+/** Authoritative pool state for this member (server `pool:snapshot`). */
+export interface PoolSnapshotEvent extends PoolUpdateEvent {
+  version: number;
+  completedAt: string | null;
+  me: {
+    active: boolean;
+    quotedFareCents: number | null;
+    pickup: { lat: number; lng: number };
+    dropoff: { lat: number; lng: number };
+  };
+  itinerary: Array<{
+    sequenceIndex: number;
+    type: 'pickup' | 'dropoff';
+    mine: boolean;
+    confirmed: boolean;
+  }>;
 }
 
 /** Response of POST /v1/rides with type=normal (solo). */
@@ -75,11 +113,22 @@ export interface DriverLocationEvent {
   heading: number;
 }
 
-/** Ride lifecycle transition echoed to the ride room. */
+/** Ride lifecycle transition echoed to the ride room (also produced from a `ride:snapshot`). */
 export interface RideStateChangedEvent {
   rideId: string;
   state: string;
   by: string;
+  /** Status rank; absent on legacy emits (the wrapper derives it from `state`). */
+  version?: number;
+}
+
+/** Authoritative solo ride state (server `ride:snapshot`). */
+export interface RideSnapshotEvent {
+  rideId: string;
+  version: number;
+  status: string;
+  terminal: boolean;
+  driverId: string | null;
 }
 
 /** Subset of GET /v1/rides/:id used to rehydrate the tracking view on reload. */

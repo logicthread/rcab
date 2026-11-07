@@ -1,5 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:driver_app/core/realtime/driver_assignment.dart';
+import 'package:driver_app/core/realtime/offer_outcome.dart';
+import 'package:driver_app/features/offer/offer_models.dart';
 import 'package:driver_app/features/shared_ride/shared_ride_models.dart';
 import 'package:driver_app/features/shared_ride/shared_ride_provider.dart';
 
@@ -31,7 +34,108 @@ SharedRideOffer _twoPassengerOffer() {
   );
 }
 
+class _FakeOfferSender implements OfferResponseSender {
+  final List<({String offerId, bool accept})> calls = [];
+  @override
+  void sendOfferResponse({required String offerId, required bool accept}) {
+    calls.add((offerId: offerId, accept: accept));
+  }
+}
+
+SharedRideOffer _offerWithId() => SharedRideOffer(
+      sharedRideId: 'ride-1',
+      passengerCount: 2,
+      offerId: 'o-1',
+      ttlMs: 3000,
+      stops: _twoPassengerOffer().stops,
+    );
+
+/// Offer + committed server outcome: the only way into the stop phase.
+void _assign(SharedRideNotifier n) {
+  n.applyOffer(_twoPassengerOffer());
+  n.applyOutcome(const OfferOutcome(
+    offerId: 'unused',
+    kind: OfferOutcomeKind.assigned,
+    tripKind: 'shared',
+    tripId: 'ride-1',
+  ));
+}
+
 void main() {
+  group('SharedRideNotifier phases (R09 / F10)', () {
+    test('an offer is not an assignment: no stop commands until assigned', () {
+      final sender = _FakeSender();
+      final offers = _FakeOfferSender();
+      final n = SharedRideNotifier(sender, offerSender: offers);
+      n.applyOffer(_offerWithId());
+      expect(n.state.phase, SharedRidePhase.offered);
+      expect(n.state.secondsLeft, 3);
+      expect(n.confirmCurrentStop(), isFalse);
+
+      expect(n.accept(), isTrue);
+      expect(offers.calls.single, (offerId: 'o-1', accept: true));
+      expect(n.state.phase, SharedRidePhase.accepting);
+      expect(n.accept(), isFalse); // no double accept
+      expect(n.confirmCurrentStop(), isFalse);
+      expect(sender.calls, isEmpty);
+
+      expect(
+        n.applyOutcome(const OfferOutcome(
+          offerId: 'o-1', kind: OfferOutcomeKind.assigned, tripKind: 'shared', tripId: 'ride-1',
+        )),
+        isTrue,
+      );
+      expect(n.state.phase, SharedRidePhase.assigned);
+      expect(n.confirmCurrentStop(), isTrue);
+    });
+
+    test('a solo assigned outcome never assigns the shared offer', () {
+      final n = SharedRideNotifier(_FakeSender(), offerSender: _FakeOfferSender());
+      n.applyOffer(_offerWithId());
+      n.accept();
+      expect(
+        n.applyOutcome(const OfferOutcome(
+          offerId: 'o-1', kind: OfferOutcomeKind.assigned, tripKind: 'solo', tripId: 'r-9',
+        )),
+        isFalse,
+      );
+      expect(n.state.phase, SharedRidePhase.accepting);
+    });
+
+    test('tick counts down while ringing and expires at zero; accepting freezes it', () {
+      final n = SharedRideNotifier(_FakeSender(), offerSender: _FakeOfferSender());
+      n.applyOffer(_offerWithId());
+      n.tick();
+      expect(n.state.secondsLeft, 2);
+      n.accept();
+      n.tick();
+      expect(n.state.secondsLeft, 2);
+      n.ackTimedOut();
+      expect(n.state.phase, SharedRidePhase.offered);
+      n.tick();
+      n.tick();
+      expect(n.state.phase, SharedRidePhase.expired);
+    });
+
+    test('a new offer never replaces a committed, unfinished trip', () {
+      final n = SharedRideNotifier(_FakeSender());
+      _assign(n);
+      n.applyOffer(SharedRideOffer(
+        sharedRideId: 'ride-2', passengerCount: 1, offerId: 'o-2',
+        stops: _twoPassengerOffer().stops,
+      ));
+      expect(n.state.sharedRideId, 'ride-1');
+      expect(n.state.phase, SharedRidePhase.assigned);
+    });
+
+    test('accept without an offer sender is refused (no silent claim)', () {
+      final n = SharedRideNotifier(_FakeSender());
+      n.applyOffer(_offerWithId());
+      expect(n.accept(), isFalse);
+      expect(n.state.phase, SharedRidePhase.offered);
+    });
+  });
+
   group('SharedRideNotifier.applyOffer', () {
     test('seeds 4 pending stops with currentStopIndex = 0', () {
       final n = SharedRideNotifier(_FakeSender());
@@ -63,7 +167,7 @@ void main() {
     test('sends pickup event for first stop', () {
       final sender = _FakeSender();
       final n = SharedRideNotifier(sender);
-      n.applyOffer(_twoPassengerOffer());
+      _assign(n);
       expect(n.confirmCurrentStop(), isTrue);
       expect(sender.calls.single.idx, 0);
       expect(sender.calls.single.type, 'pickup');
@@ -71,7 +175,7 @@ void main() {
 
     test('returns false when current stop is already confirmed', () {
       final n = SharedRideNotifier(_FakeSender());
-      n.applyOffer(_twoPassengerOffer());
+      _assign(n);
       n.applyServerEcho(
         rideId: 'ride-1',
         sequenceIndex: 0,
@@ -86,7 +190,7 @@ void main() {
 
     test('returns false when the ride is completed', () {
       final n = SharedRideNotifier(_FakeSender());
-      n.applyOffer(_twoPassengerOffer());
+      _assign(n);
       for (var i = 0; i < 4; i += 1) {
         n.applyServerEcho(
           rideId: 'ride-1',
@@ -103,7 +207,7 @@ void main() {
   group('SharedRideNotifier.applyServerEcho', () {
     test('advances currentStopIndex to the next pending stop', () {
       final n = SharedRideNotifier(_FakeSender());
-      n.applyOffer(_twoPassengerOffer());
+      _assign(n);
       n.applyServerEcho(
         rideId: 'ride-1',
         sequenceIndex: 0,
@@ -118,7 +222,7 @@ void main() {
 
     test('ignores echoes for a different sharedRideId', () {
       final n = SharedRideNotifier(_FakeSender());
-      n.applyOffer(_twoPassengerOffer());
+      _assign(n);
       n.applyServerEcho(
         rideId: 'OTHER',
         sequenceIndex: 0,
@@ -131,7 +235,7 @@ void main() {
 
     test('marks completed=true when last drop echo carries rideCompleted', () {
       final n = SharedRideNotifier(_FakeSender());
-      n.applyOffer(_twoPassengerOffer());
+      _assign(n);
       for (var i = 0; i < 3; i += 1) {
         n.applyServerEcho(
           rideId: 'ride-1',
@@ -153,7 +257,7 @@ void main() {
 
     test('ignores duplicate echoes for already-confirmed stops', () {
       final n = SharedRideNotifier(_FakeSender());
-      n.applyOffer(_twoPassengerOffer());
+      _assign(n);
       n.applyServerEcho(
         rideId: 'ride-1',
         sequenceIndex: 0,
@@ -218,6 +322,106 @@ void main() {
       );
       expect(n.state.completed, isTrue);
       expect(n.state.currentStopIndex, 2);
+    });
+  });
+
+  group('snapshot / echo version ordering (SHARED CONTRACT)', () {
+    DriverAssignment snap(int version, List<bool> confirmed) => DriverAssignment.fromJson({
+          'tripKind': 'shared',
+          'tripId': 'ride-1',
+          'offerId': 'o-1',
+          'generation': 1,
+          'version': version,
+          'stops': [
+            for (var i = 0; i < confirmed.length; i++)
+              {
+                'sequenceIndex': i,
+                'passengerId': i.isEven ? 'pa' : 'pb',
+                'type': i < 2 ? 'pickup' : 'dropoff',
+                'lat': 0.0,
+                'lng': 0.0,
+                'confirmed': confirmed[i],
+                'confirmedAt': confirmed[i] ? '2026-11-06T10:00:00.000Z' : null,
+              },
+          ],
+        })!;
+
+    test('a stale snapshot (lower version) cannot rewind confirmed stops', () {
+      final n = SharedRideNotifier(_FakeSender());
+      n.applyAssignment(snap(5, [true, false, false, false]));
+      n.applyServerEcho(
+        rideId: 'ride-1',
+        sequenceIndex: 1,
+        confirmedAt: DateTime.utc(2026, 11, 6, 10, 1),
+        rideCompleted: false,
+        version: 6,
+      );
+      expect(n.state.currentStopIndex, 2);
+
+      final change = n.applyAssignment(snap(5, [true, false, false, false]));
+      expect(change, AssignmentChange.none);
+      expect(n.state.currentStopIndex, 2);
+
+      // A newer snapshot still applies.
+      n.applyAssignment(snap(7, [true, true, true, false]));
+      expect(n.state.currentStopIndex, 3);
+    });
+
+    test('a lower-version snapshot is ignored even when no echo raised the bar', () {
+      final n = SharedRideNotifier(_FakeSender());
+      n.applyAssignment(snap(9, [true, true, false, false]));
+      n.applyAssignment(snap(4, [false, false, false, false]));
+      expect(n.state.currentStopIndex, 2);
+    });
+
+    test('a stale echo (lower version) is dropped', () {
+      final n = SharedRideNotifier(_FakeSender());
+      n.applyAssignment(snap(8, [true, false, false, false]));
+      n.applyServerEcho(
+        rideId: 'ride-1',
+        sequenceIndex: 1,
+        confirmedAt: DateTime.utc(2026, 11, 6),
+        rideCompleted: false,
+        version: 3,
+      );
+      expect(n.state.currentStopIndex, 1);
+    });
+
+    test('a locally completed trip is never reopened by a same/lower-version snapshot', () {
+      final n = SharedRideNotifier(_FakeSender());
+      n.applyAssignment(snap(5, [true, true, true, false]));
+      n.applyServerEcho(
+        rideId: 'ride-1',
+        sequenceIndex: 3,
+        confirmedAt: DateTime.utc(2026, 11, 6),
+        rideCompleted: true,
+        version: 6,
+      );
+      expect(n.state.completed, isTrue);
+
+      expect(n.applyAssignment(snap(6, [true, true, true, false])), AssignmentChange.none);
+      expect(n.applyAssignment(snap(5, [true, true, true, false])), AssignmentChange.none);
+      expect(n.state.completed, isTrue);
+
+      // Still holds after the driver leaves the trip screen.
+      n.reset();
+      expect(n.applyAssignment(snap(5, [true, true, true, false])), AssignmentChange.none);
+      expect(n.state.isEmpty, isTrue);
+    });
+  });
+
+  group('unknown outcome (server unavailable)', () {
+    test('does not change the accepting phase', () {
+      final n = SharedRideNotifier(_FakeSender(), offerSender: _FakeOfferSender());
+      n.applyOffer(_offerWithId());
+      n.accept();
+      final changed = n.applyOutcome(const OfferOutcome(
+        offerId: 'o-1',
+        kind: OfferOutcomeKind.unknown,
+        reason: 'unavailable',
+      ));
+      expect(changed, isFalse);
+      expect(n.state.phase, SharedRidePhase.accepting);
     });
   });
 

@@ -1,12 +1,15 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   RideLifecycleService,
   STOP_PICKUP_EVENT,
   STOP_DROP_EVENT,
   RIDE_COMPLETED_EVENT,
 } from './ride-lifecycle.service';
+import { STOP_CONFIRM_REQUEST_EVENT } from '../realtime/realtime.gateway';
 import type { RideStopRow } from '../matching/ride-stop.repository';
-import type { SharedRideRow } from '../matching/shared-ride.repository';
+import type { SharedTripLockRow } from '../dispatch/assignment.repository';
+
+const T0 = new Date('2026-11-06T10:00:00.000Z');
 
 function stop(overrides: Partial<RideStopRow> = {}): RideStopRow {
   return {
@@ -21,224 +24,242 @@ function stop(overrides: Partial<RideStopRow> = {}): RideStopRow {
   };
 }
 
-function shared(overrides: Partial<SharedRideRow> = {}): SharedRideRow {
+function lock(overrides: Partial<SharedTripLockRow> = {}): SharedTripLockRow {
   return {
     rideId: 'r-1',
-    seatCount: 2,
-    maxSeats: 3,
     poolState: 'closed_full',
-    poolClosedAt: new Date(),
-    detourBudgetM: 800,
-    originLat: 0,
-    originLng: 0,
-    destLat: 0,
-    destLng: 0,
-    members: [],
+    seatCount: 1,
+    maxSeats: 3,
     claimedByDriverId: 'd-1',
-    claimedAt: new Date(),
+    dispatchGeneration: 1,
+    stateVersion: 0,
     ...overrides,
   };
 }
 
 interface MakeOpts {
-  ride?: SharedRideRow | null;
-  stopsByRide?: RideStopRow[];
-  pendingAfter?: number[];
+  pool?: SharedTripLockRow | null;
+  stops?: RideStopRow[];
   confirmResult?: RideStopRow | null;
+  completedAt?: Date | null;
 }
 
 function make(opts: MakeOpts = {}) {
-  const sharedRepo = {
-    findById: vi.fn().mockResolvedValue(opts.ride === undefined ? shared() : opts.ride),
+  let version = opts.pool?.stateVersion ?? 0;
+  const tx = {
+    tx: true,
+    // touchPool: the state_version trigger bumps once per UPDATE.
+    execute: vi.fn().mockImplementation(async () => ({ rows: [{ state_version: String(++version) }] })),
   };
-  let pendingCalls = 0;
+  const db = { transaction: vi.fn(async (fn: (t: unknown) => unknown) => fn(tx)) };
+  const stops = opts.stops ?? [];
   const stopsRepo = {
-    seed: vi.fn(),
-    findByRideId: vi.fn().mockResolvedValue(opts.stopsByRide ?? []),
-    confirm: vi
-      .fn()
-      .mockImplementation(
-        async (_rideId: string, idx: number, at: Date): Promise<RideStopRow | null> => {
-          if (opts.confirmResult !== undefined) return opts.confirmResult;
-          const existing = (opts.stopsByRide ?? []).find((s) => s.sequenceIndex === idx);
-          return existing ? { ...existing, confirmedAt: at } : null;
-        },
-      ),
-    countPending: vi.fn().mockImplementation(async () => {
-      const seq = opts.pendingAfter ?? [];
-      const next = seq[pendingCalls] ?? 0;
-      pendingCalls += 1;
-      return next;
+    findByRideId: vi.fn().mockResolvedValue(stops),
+    confirm: vi.fn().mockImplementation(async (_r: string, idx: number) => {
+      if (opts.confirmResult !== undefined) return opts.confirmResult;
+      const existing = stops.find((s) => s.sequenceIndex === idx);
+      return existing ? { ...existing, confirmedAt: T0 } : null;
     }),
-    markRideCompleted: vi.fn().mockResolvedValue(undefined),
+    markRideCompleted: vi
+      .fn()
+      .mockResolvedValue(opts.completedAt === undefined ? T0 : opts.completedAt),
     markRideStarted: vi.fn().mockResolvedValue(undefined),
   };
-  const bus = {
-    toUser: vi.fn(),
-    toDriver: vi.fn(),
-    toRide: vi.fn(),
-    toPool: vi.fn(),
-    joinPool: vi.fn(),
-    broadcast: vi.fn(),
+  const assignments = {
+    lockSharedTrip: vi.fn().mockResolvedValue(opts.pool === undefined ? lock() : opts.pool),
+    release: vi.fn().mockResolvedValue(true),
   };
-  const redis = { hdel: vi.fn().mockResolvedValue(1) };
-
+  const bus = { toDriver: vi.fn(), toRide: vi.fn() };
+  const redis = { eval: vi.fn().mockResolvedValue(1) };
+  const poolProjection = { project: vi.fn().mockResolvedValue(null) };
+  const snapshots = { publishPoolUpdate: vi.fn().mockResolvedValue(undefined) };
   const svc = new RideLifecycleService(
-    sharedRepo as never,
     stopsRepo as never,
+    assignments as never,
     bus as never,
     redis as never,
+    db as never,
+    poolProjection as never,
+    snapshots as never,
   );
-  return { svc, sharedRepo, stopsRepo, bus, redis };
+  return { svc, tx, db, stopsRepo, assignments, bus, redis, poolProjection, snapshots };
 }
 
+const input = (sequenceIndex: number, type: 'pickup' | 'dropoff' = 'pickup') => ({
+  rideId: 'r-1',
+  driverId: 'd-1',
+  sequenceIndex,
+  type,
+});
+
 describe('RideLifecycleService.confirmStop', () => {
-  beforeEach(() => vi.clearAllMocks());
-
-  it('rejects when ride not found', async () => {
-    const { svc } = make({ ride: null });
-    const result = await svc.confirmStop({
-      rideId: 'r-1',
-      driverId: 'd-1',
-      sequenceIndex: 0,
-      type: 'pickup',
-    });
-    expect(result).toEqual({ ok: false, reason: 'not_found' });
+  it('rejects when the pool is not found', async () => {
+    const { svc } = make({ pool: null });
+    expect(await svc.confirmStop(input(0))).toEqual({ ok: false, reason: 'not_found' });
   });
 
-  it('rejects when caller is not the claimed driver', async () => {
-    const { svc, bus } = make({ ride: shared({ claimedByDriverId: 'd-other' }) });
-    const result = await svc.confirmStop({
-      rideId: 'r-1',
-      driverId: 'd-1',
-      sequenceIndex: 0,
-      type: 'pickup',
-    });
-    expect(result).toEqual({ ok: false, reason: 'not_owner' });
-    expect(bus.toDriver).not.toHaveBeenCalled();
+  it('rejects when the caller does not hold the committed claim', async () => {
+    const { svc, stopsRepo } = make({ pool: lock({ claimedByDriverId: 'someone-else' }) });
+    expect(await svc.confirmStop(input(0))).toEqual({ ok: false, reason: 'not_owner' });
+    expect(stopsRepo.confirm).not.toHaveBeenCalled();
   });
 
-  it('rejects when sequenceIndex is not the next pending stop', async () => {
-    const stops = [
-      stop({ sequenceIndex: 0, type: 'pickup' }),
-      stop({ sequenceIndex: 1, type: 'dropoff' }),
-    ];
-    const { svc } = make({ stopsByRide: stops });
-    const result = await svc.confirmStop({
-      rideId: 'r-1',
-      driverId: 'd-1',
-      sequenceIndex: 1,
-      type: 'dropoff',
-    });
-    expect(result).toEqual({ ok: false, reason: 'out_of_order' });
+  it('rejects an unknown stop, a type mismatch and an out-of-order stop', async () => {
+    const stops = [stop({ sequenceIndex: 0 }), stop({ sequenceIndex: 1, type: 'dropoff' })];
+    const { svc, stopsRepo } = make({ stops });
+    expect(await svc.confirmStop(input(7))).toEqual({ ok: false, reason: 'not_found' });
+    expect(await svc.confirmStop(input(0, 'dropoff'))).toEqual({ ok: false, reason: 'wrong_type' });
+    expect(await svc.confirmStop(input(1, 'dropoff'))).toEqual({ ok: false, reason: 'out_of_order' });
+    expect(stopsRepo.confirm).not.toHaveBeenCalled();
   });
 
-  it('rejects when type mismatches the stop record', async () => {
-    const stops = [stop({ sequenceIndex: 0, type: 'pickup' })];
-    const { svc } = make({ stopsByRide: stops });
-    const result = await svc.confirmStop({
-      rideId: 'r-1',
-      driverId: 'd-1',
-      sequenceIndex: 0,
-      type: 'dropoff',
-    });
-    expect(result).toEqual({ ok: false, reason: 'wrong_type' });
-  });
+  it('first pickup: stamps it in the pool-locked transaction, marks started, echoes', async () => {
+    const stops = [stop({ sequenceIndex: 0 }), stop({ sequenceIndex: 1, type: 'dropoff' })];
+    const { svc, tx, stopsRepo, assignments, bus, redis, poolProjection } = make({ stops });
+    const result = await svc.confirmStop(input(0));
+    expect(poolProjection.project).toHaveBeenCalledWith('r-1');
 
-  it('rejects already-confirmed stop', async () => {
-    const stops = [stop({ sequenceIndex: 0, type: 'pickup', confirmedAt: new Date() })];
-    const { svc } = make({ stopsByRide: stops });
-    const result = await svc.confirmStop({
-      rideId: 'r-1',
-      driverId: 'd-1',
-      sequenceIndex: 0,
-      type: 'pickup',
-    });
-    expect(result).toEqual({ ok: false, reason: 'already_confirmed' });
-  });
-
-  it('confirms first pickup → marks ride started, emits echo, does not complete', async () => {
-    const stops = [
-      stop({ sequenceIndex: 0, type: 'pickup' }),
-      stop({ sequenceIndex: 1, type: 'pickup' }),
-      stop({ sequenceIndex: 2, type: 'dropoff' }),
-      stop({ sequenceIndex: 3, type: 'dropoff' }),
-    ];
-    const { svc, stopsRepo, bus } = make({ stopsByRide: stops, pendingAfter: [3] });
-
-    const result = await svc.confirmStop({
-      rideId: 'r-1',
-      driverId: 'd-1',
-      sequenceIndex: 0,
-      type: 'pickup',
-    });
-
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(result.rideCompleted).toBe(false);
-    expect(result.pendingAfter).toBe(3);
-    expect(stopsRepo.markRideStarted).toHaveBeenCalledWith('r-1');
+    expect(result).toMatchObject({ ok: true, pendingAfter: 1, rideCompleted: false, duplicate: false });
+    expect(assignments.lockSharedTrip).toHaveBeenCalledWith(tx, 'r-1');
+    expect(stopsRepo.confirm).toHaveBeenCalledWith('r-1', 0, tx);
+    expect(stopsRepo.markRideStarted).toHaveBeenCalledWith('r-1', tx);
     expect(stopsRepo.markRideCompleted).not.toHaveBeenCalled();
+    expect(assignments.release).not.toHaveBeenCalled();
+    expect(redis.eval).not.toHaveBeenCalled();
+    expect(bus.toDriver).toHaveBeenCalledWith('d-1', STOP_PICKUP_EVENT, {
+      rideId: 'r-1',
+      sequenceIndex: 0,
+      passengerId: 'p-1',
+      type: 'pickup',
+      confirmedAt: T0.toISOString(),
+      rideCompleted: false,
+      version: 1,
+    });
+  });
+
+  it('bumps state_version in the transaction for a mid-trip stop and publishes a versioned pool:update', async () => {
+    const stops = [
+      stop({ sequenceIndex: 0, confirmedAt: T0 }),
+      stop({ sequenceIndex: 1, passengerId: 'p-2' }),
+      stop({ sequenceIndex: 2, type: 'dropoff' }),
+      stop({ sequenceIndex: 3, passengerId: 'p-2', type: 'dropoff' }),
+    ];
+    const { svc, tx, bus, stopsRepo, snapshots } = make({ stops, pool: lock({ stateVersion: 4 }) });
+    await svc.confirmStop(input(1));
+    // No pool-state change (not first pickup, not final), yet the version moved.
+    expect(stopsRepo.markRideStarted).not.toHaveBeenCalled();
+    expect(stopsRepo.markRideCompleted).not.toHaveBeenCalled();
+    expect(tx.execute).toHaveBeenCalledTimes(1);
     expect(bus.toDriver).toHaveBeenCalledWith(
       'd-1',
       STOP_PICKUP_EVENT,
-      expect.objectContaining({
-        rideId: 'r-1',
-        sequenceIndex: 0,
-        type: 'pickup',
-        rideCompleted: false,
-      }),
+      expect.objectContaining({ version: 5 }),
     );
+    expect(snapshots.publishPoolUpdate).toHaveBeenCalledWith('r-1');
   });
 
-  it('confirms last drop → marks ride completed, clears driver:state, emits ride:completed', async () => {
+  it('a duplicate confirmation echoes the current committed version and does not re-broadcast', async () => {
+    const stops = [stop({ sequenceIndex: 0, confirmedAt: T0 })];
+    const { svc, tx, bus, snapshots } = make({ stops, pool: lock({ stateVersion: 9 }) });
+    await svc.confirmStop(input(0));
+    expect(tx.execute).not.toHaveBeenCalled();
+    expect(bus.toDriver).toHaveBeenCalledWith(
+      'd-1',
+      STOP_PICKUP_EVENT,
+      expect.objectContaining({ version: 9 }),
+    );
+    expect(snapshots.publishPoolUpdate).not.toHaveBeenCalled();
+  });
+
+  it('final drop: completes the pool and releases the guard in the same transaction', async () => {
     const stops = [
-      stop({ sequenceIndex: 0, type: 'pickup', confirmedAt: new Date() }),
+      stop({ sequenceIndex: 0, confirmedAt: T0 }),
       stop({ sequenceIndex: 1, type: 'dropoff' }),
     ];
-    const { svc, stopsRepo, bus, redis } = make({ stopsByRide: stops, pendingAfter: [0] });
+    const { svc, tx, stopsRepo, assignments, bus, redis, poolProjection } = make({ stops });
+    const result = await svc.confirmStop(input(1, 'dropoff'));
+    expect(poolProjection.project).toHaveBeenCalledWith('r-1');
 
-    const result = await svc.confirmStop({
-      rideId: 'r-1',
+    expect(result).toMatchObject({ ok: true, pendingAfter: 0, rideCompleted: true });
+    expect(stopsRepo.markRideStarted).not.toHaveBeenCalled();
+    expect(stopsRepo.markRideCompleted).toHaveBeenCalledWith('r-1', tx);
+    expect(assignments.release).toHaveBeenCalledWith(tx, {
       driverId: 'd-1',
-      sequenceIndex: 1,
-      type: 'dropoff',
+      trip: { kind: 'shared', sharedRideId: 'r-1' },
     });
-
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(result.rideCompleted).toBe(true);
-    expect(stopsRepo.markRideCompleted).toHaveBeenCalledWith('r-1', expect.any(Date));
-    expect(redis.hdel).toHaveBeenCalledWith('driver:state:d-1', 'current_ride_id');
-    expect(bus.toRide).toHaveBeenCalledWith(
+    // Projection clear is compare-and-delete on this pool only.
+    expect(redis.eval).toHaveBeenCalledWith(
+      expect.any(String),
+      1,
+      'driver:state:d-1',
+      'current_ride_id',
       'r-1',
-      RIDE_COMPLETED_EVENT,
-      expect.objectContaining({
-        rideId: 'r-1',
-      }),
     );
+    expect(bus.toRide).toHaveBeenCalledWith('r-1', RIDE_COMPLETED_EVENT, {
+      rideId: 'r-1',
+      completedAt: T0.toISOString(),
+    });
     expect(bus.toDriver).toHaveBeenCalledWith(
       'd-1',
       STOP_DROP_EVENT,
-      expect.objectContaining({
-        rideCompleted: true,
-      }),
+      expect.objectContaining({ rideCompleted: true }),
     );
   });
 
-  it('does NOT call markRideStarted when there was already a confirmed stop', async () => {
+  it('a duplicate confirmation returns the authoritative state, not an error (T32)', async () => {
     const stops = [
-      stop({ sequenceIndex: 0, type: 'pickup', confirmedAt: new Date() }),
-      stop({ sequenceIndex: 1, type: 'pickup' }),
-      stop({ sequenceIndex: 2, type: 'dropoff' }),
+      stop({ sequenceIndex: 0, confirmedAt: T0 }),
+      stop({ sequenceIndex: 1, type: 'dropoff', confirmedAt: T0 }),
     ];
-    const { svc, stopsRepo } = make({ stopsByRide: stops, pendingAfter: [1] });
-    await svc.confirmStop({
-      rideId: 'r-1',
-      driverId: 'd-1',
-      sequenceIndex: 1,
-      type: 'pickup',
+    const { svc, stopsRepo, assignments, bus, poolProjection } = make({
+      stops,
+      pool: lock({ poolState: 'completed' }),
     });
-    expect(stopsRepo.markRideStarted).not.toHaveBeenCalled();
+    const result = await svc.confirmStop(input(1, 'dropoff'));
+    expect(poolProjection.project).not.toHaveBeenCalled();
+
+    expect(result).toMatchObject({ ok: true, duplicate: true, pendingAfter: 0, rideCompleted: true });
+    expect(stopsRepo.confirm).not.toHaveBeenCalled();
+    expect(assignments.release).not.toHaveBeenCalled();
+    expect(bus.toDriver).toHaveBeenCalledWith(
+      'd-1',
+      STOP_DROP_EVENT,
+      expect.objectContaining({ rideCompleted: true, confirmedAt: T0.toISOString() }),
+    );
+  });
+
+  it('a stop that changed under the lock, or a pool that cannot complete, aborts the transaction', async () => {
+    const stops = [stop({ sequenceIndex: 0 })];
+    await expect(make({ stops, confirmResult: null }).svc.confirmStop(input(0))).rejects.toThrow(
+      /changed under the pool lock/,
+    );
+    const last = [stop({ sequenceIndex: 0, type: 'dropoff' })];
+    await expect(
+      make({ stops: last, completedAt: null }).svc.confirmStop(input(0, 'dropoff')),
+    ).rejects.toThrow(/could not be completed/);
+  });
+
+  it('post-commit failures (projection, socket) never fail the confirmation', async () => {
+    const stops = [stop({ sequenceIndex: 0, type: 'dropoff' })];
+    const m = make({ stops });
+    m.redis.eval.mockRejectedValue(new Error('redis down'));
+    m.poolProjection.project.mockRejectedValue(new Error('redis down'));
+    m.bus.toRide.mockImplementation(() => {
+      throw new Error('socket down');
+    });
+    m.bus.toDriver.mockImplementation(() => {
+      throw new Error('socket down');
+    });
+    expect(await m.svc.confirmStop(input(0, 'dropoff'))).toMatchObject({ ok: true, rideCompleted: true });
+  });
+});
+
+describe('RideLifecycleService.onStopConfirmRequest', () => {
+  it('delegates the WS request and swallows a rejection into a log line', async () => {
+    const { svc } = make({ pool: null });
+    const spy = vi.spyOn(svc, 'confirmStop');
+    await svc.onStopConfirmRequest({ ...input(0), driverId: 'd-1' });
+    expect(spy).toHaveBeenCalledWith(input(0));
+    expect(STOP_CONFIRM_REQUEST_EVENT).toBeTypeOf('string');
   });
 });

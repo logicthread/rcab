@@ -64,8 +64,19 @@ class OfferNotifier extends StateNotifier<OfferState> {
   bool applyRevoked({required String offerId, String? reason}) {
     final offer = state.offer;
     if (offer == null || offer.offerId != offerId) return false;
-    if (state.phase == OfferPhase.revoked) return false;
+    // A loss never undoes a committed win, and is applied once.
+    if (state.phase == OfferPhase.revoked || state.phase == OfferPhase.accepted) return false;
     state = state.copyWith(phase: OfferPhase.revoked, revokeReason: reason);
+    return true;
+  }
+
+  /// The server could not decide (lock retry exhausted): the offer is still
+  /// live, so the driver may tap Accept again.
+  bool applyRetry({required String offerId}) {
+    final offer = state.offer;
+    if (offer == null || offer.offerId != offerId) return false;
+    if (state.phase != OfferPhase.claiming) return false;
+    state = state.copyWith(phase: OfferPhase.ringing);
     return true;
   }
 

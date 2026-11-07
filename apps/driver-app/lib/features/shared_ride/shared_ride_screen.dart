@@ -35,7 +35,7 @@ class _SharedRideScreenState extends ConsumerState<SharedRideScreen> {
       }
     });
 
-    if (state.sharedRideId != widget.rideId) {
+    if (state.sharedRideId != widget.rideId || state.phase == SharedRidePhase.none) {
       return const Scaffold(
         body: Center(
           child: Text(
@@ -45,6 +45,11 @@ class _SharedRideScreenState extends ConsumerState<SharedRideScreen> {
         ),
       );
     }
+
+    // An offer is not an assignment (F10): show the proposed itinerary with
+    // Accept / Decline; the stop controls only exist once the server commits.
+    if (state.isOffer) return _SharedOfferView(state: state);
+    if (state.isTerminalOutcome) return _OutcomeView(state: state);
 
     final current = state.currentStop;
     final canConfirm = !state.completed && current?.status == StopStatus.pending;
@@ -110,6 +115,112 @@ class _SharedRideScreenState extends ConsumerState<SharedRideScreen> {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _SharedOfferView extends ConsumerWidget {
+  const _SharedOfferView({required this.state});
+
+  final SharedRideState state;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final notifier = ref.read(sharedRideProvider.notifier);
+    final theme = Theme.of(context);
+    final accepting = state.phase == SharedRidePhase.accepting;
+    return Scaffold(
+      key: const Key('shared_offer_screen'),
+      appBar: AppBar(title: const Text('Shared ride offer')),
+      body: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '${state.passengerCount} passengers · ${state.stops.length} stops',
+                  style: theme.textTheme.titleMedium,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  '${state.secondsLeft}s',
+                  key: const Key('shared_offer_countdown'),
+                  style: theme.textTheme.displaySmall,
+                ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: ListView.separated(
+              key: const Key('shared_offer_itinerary'),
+              itemCount: state.stops.length,
+              separatorBuilder: (_, __) => const Divider(height: 1),
+              itemBuilder: (_, i) => StopListTile(stopState: state.stops[i], isCurrent: false),
+            ),
+          ),
+          SafeArea(
+            top: false,
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: accepting
+                  ? const Center(
+                      key: Key('shared_offer_claiming'),
+                      child: Padding(
+                        padding: EdgeInsets.all(16),
+                        child: CircularProgressIndicator(),
+                      ),
+                    )
+                  : Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            key: const Key('shared_offer_decline_button'),
+                            onPressed: notifier.decline,
+                            child: const Padding(
+                              padding: EdgeInsets.symmetric(vertical: 14),
+                              child: Text('Decline'),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: FilledButton(
+                            key: const Key('shared_offer_accept_button'),
+                            onPressed: () => notifier.accept(),
+                            child: const Padding(
+                              padding: EdgeInsets.symmetric(vertical: 14),
+                              child: Text('Accept'),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _OutcomeView extends StatelessWidget {
+  const _OutcomeView({required this.state});
+
+  final SharedRideState state;
+
+  @override
+  Widget build(BuildContext context) {
+    final message = switch (state.phase) {
+      SharedRidePhase.lost => 'Another driver took this ride',
+      SharedRidePhase.expired => 'This offer expired',
+      SharedRidePhase.revoked => 'This ride is no longer available',
+      _ => 'Could not accept this ride',
+    };
+    return Scaffold(
+      body: Center(child: Text(message, key: const Key('shared_offer_outcome'))),
     );
   }
 }

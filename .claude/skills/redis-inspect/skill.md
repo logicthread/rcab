@@ -1,6 +1,6 @@
 ---
 name: redis-inspect
-description: Inspect Redis state across every namespace this project uses — driver presence/geo, dispatch offers and claims, shared-ride pools, OSRM polyline cache, idempotency (now Postgres-backed), BullMQ queues. No args.
+description: Inspect Redis state across every namespace this project uses — driver presence/geo, driver presence, shared-ride pool projections, OSRM polyline cache, idempotency (now Postgres-backed), BullMQ queues. No args.
 ---
 
 # redis-inspect
@@ -19,10 +19,9 @@ RC() { docker compose --env-file .env.dev -f infra/docker/docker-compose.dev.yml
 
 | Namespace | Keys | Written by |
 |---|---|---|
-| Driver presence | `active_drivers` (GEO zset), `driver:state:<driverId>` (hash: `availability`, `last_seen`, `session_id`, `current_ride_id`) | `drivers.service`, `realtime.gateway` |
-| Dispatch offers | `offer:<offerId>` → driverId, `offer:meta:<offerId>` → rideId, `offer:type:<offerId>` → `solo|pool`, `offer:list:<rideId>` (set) | `dispatch.service` |
-| Ride claim locks | `claim:ride:<rideId>` (SET NX winner lock) | `dispatch.service` |
-| Shared-ride pools | `pool:<rideId>` (hash: `seat_count`, …), `pool:<rideId>:seats` | `pool-lifecycle.service` |
+| Driver presence | `active_drivers` (GEO zset), `driver:state:<driverId>` (hash: `availability`, `last_seen`, `session_id`, `current_ride_id` — a projection of `driver_active_assignment`) | `drivers.service`, `realtime.gateway` |
+| Shared-ride pool projection | `pool:<rideId>` (hash: `state`, `seat_count`, `max_seats`, `version`) — a **projection** reconciled from Postgres at boot and periodically | `pool-lifecycle.service` |
+| ~~Dispatch offers / claims~~ | **Removed in Stage C** (`claim:ride:*`, `offer:*`, `offer:meta/type/list:*`, `ride:*:offered`, `pool:*:offered/stops/seats`). Offers and assignment live in Postgres: `dispatch_offer`, `driver_active_assignment`, `outbox` | — |
 | OSRM polyline cache | `osrm:poly:<geohash7>:<geohash7>` | `route-similarity.service` |
 | Idempotency | *(none in Redis)* — durable in Postgres: `rides.idempotency_operation`/`request_fingerprint` and `idempotency_record` (migration 0013). The old `idem:rides:*` keys were removed (RCAB-E8.S7) | `rides.controller` |
 | BullMQ | `bull:dispatch:*`, `bull:matching:*`, `bull:scheduled-dispatch:*` | dispatch / matching / scheduled modules |
@@ -46,17 +45,19 @@ RC() { docker compose --env-file .env.dev -f infra/docker/docker-compose.dev.yml
    reaped them: the api drops any driver whose `last_seen` is older than **60 s**, checked
    every 15 s. Seeded fixtures need `./scripts/seed-dev.sh --keepalive`.
 
-3. **In-flight dispatch.**
+3. **In-flight dispatch** — truth is Postgres, not Redis. Offers, the one-trip-per-driver guard and undelivered outbox intents:
    ```bash
-   RC --scan --pattern 'offer:*'
-   RC --scan --pattern 'claim:ride:*'
-   RC TTL offer:<offerId>        # offers carry a 12 s TTL
+   PSQL() { docker compose --env-file .env.dev -f infra/docker/docker-compose.dev.yml exec -T postgres psql -U rcab -d rcab "$@"; }
+   PSQL -c "SELECT id, trip_kind, ride_id, shared_ride_id, driver_id, state, expires_at FROM dispatch_offer ORDER BY offered_at DESC LIMIT 10;"
+   PSQL -c "SELECT * FROM driver_active_assignment;"
+   PSQL -c "SELECT topic, count(*) FROM outbox WHERE processed_at IS NULL AND failed_at IS NULL GROUP BY 1;"
    ```
+   Only the BullMQ wave-2 / hard-fail timers (step 5) remain in Redis. If `driver:state:<id>.current_ride_id` disagrees with `driver_active_assignment`, the next reconcile pass fixes Redis, not Postgres.
 
 4. **Shared-ride pools** (detail in `/pool-inspect`).
    ```bash
    RC --scan --pattern 'pool:*'
-   RC HGETALL pool:<rideId>
+   RC HGETALL pool:<rideId>   # projection; compare with shared_rides / pool_member in Postgres
    ```
 
 5. **BullMQ queue depths** — for each of `dispatch`, `matching`, `scheduled-dispatch`:
@@ -77,7 +78,7 @@ RC() { docker compose --env-file .env.dev -f infra/docker/docker-compose.dev.yml
    ```
 
 7. **Report a table** of namespace → count → sample, and call out anything unexpected
-   (claims with no matching ride, offers with no TTL, a failed BullMQ set that isn't empty).
+   (a `current_ride_id` with no `driver_active_assignment` row, unpublished outbox rows, a failed BullMQ set that isn't empty).
 
 ## Anti-patterns
 

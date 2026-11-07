@@ -17,10 +17,7 @@ const srcDir = join(root, 'src');
 const distDir = join(root, 'dist');
 
 /** Assets that the compiled code reads at runtime. Keep in sync with readFileSync callers. */
-export const REQUIRED_ASSETS = [
-  'modules/dispatch/lua/pool_claim.lua',
-  'modules/matching/lua/pool_slot.lua',
-];
+export const REQUIRED_ASSETS = [];
 
 const ASSET_EXTENSIONS = new Set(['.lua']);
 

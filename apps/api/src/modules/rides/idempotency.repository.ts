@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { and, eq, sql } from 'drizzle-orm';
-import { DRIZZLE_DB, type DrizzleDb } from '../../infra/db/drizzle.module';
+import { DRIZZLE_DB, type DbExecutor, type DrizzleDb } from '../../infra/db/drizzle.module';
 import { idempotencyRecord } from '../../db/schema';
 import { PENDING_RECLAIM_AFTER_MS, type IdempotencyOperation } from './idempotency';
 
@@ -99,7 +99,21 @@ export class IdempotencyRepository {
   }
 
   async complete(scope: IdempotencyScope, resourceId: string, response: unknown): Promise<void> {
-    await this.db
+    await this.completeIn(this.db, scope, resourceId, response);
+  }
+
+  /**
+   * `complete` on a caller-supplied executor, so the replayable result commits
+   * in the SAME transaction as the side effect it describes (shared create:
+   * the pool seat, R08) — a seat can then never exist with its claim pending.
+   */
+  async completeIn(
+    db: DbExecutor,
+    scope: IdempotencyScope,
+    resourceId: string,
+    response: unknown,
+  ): Promise<void> {
+    await db
       .update(idempotencyRecord)
       .set({ state: 'completed', resourceId, response, completedAt: new Date() })
       .where(this.scopeWhere(scope));

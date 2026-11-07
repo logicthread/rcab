@@ -60,12 +60,17 @@ class SharedRideOffer {
     required this.stops,
     required this.passengerCount,
     this.offerId,
+    this.ttlMs = 12000,
   });
 
   final String sharedRideId;
   final List<SharedRideStop> stops;
   final int passengerCount;
   final String? offerId;
+
+  /// Offer lifetime; the server's `expiresAt` (DB clock) is authoritative,
+  /// the local countdown is advisory.
+  final int ttlMs;
 
   /// Parse a `ride_offer` WS event into a [SharedRideOffer], or return null
   /// when the payload represents a solo ride (no `stops` array).
@@ -84,6 +89,7 @@ class SharedRideOffer {
       passengerCount:
           (json['passengerCount'] as int?) ?? _distinctPassengers(stops),
       offerId: json['offerId'] as String?,
+      ttlMs: (json['ttlMs'] as num?)?.toInt() ?? 12000,
     );
   }
 
@@ -96,20 +102,67 @@ class SharedRideOffer {
   }
 }
 
+/// Where the driver stands with a shared trip (R09). An incoming offer is NOT
+/// an assignment: stop commands are enabled only in [assigned], which is
+/// entered solely on a committed server outcome (ack / `ride_offer_outcome`)
+/// or an authoritative `driver:assignment` snapshot.
+enum SharedRidePhase {
+  none,
+
+  /// Ringing: proposed itinerary shown, Accept / Decline enabled.
+  offered,
+
+  /// Accept sent; waiting for the server's verdict.
+  accepting,
+
+  /// Committed assignment: the stop screen is live.
+  assigned,
+
+  /// Terminal offer outcomes — the controller returns the driver home.
+  lost,
+  expired,
+  revoked,
+  rejected,
+}
+
 class SharedRideState {
   const SharedRideState({
     this.sharedRideId,
     this.stops = const <StopState>[],
     this.currentStopIndex = 0,
     this.completed = false,
+    this.phase = SharedRidePhase.none,
+    this.offerId,
+    this.passengerCount = 0,
+    this.secondsLeft = 0,
+    this.generation,
+    this.outcomeReason,
   });
 
   final String? sharedRideId;
   final List<StopState> stops;
   final int currentStopIndex;
   final bool completed;
+  final SharedRidePhase phase;
+  final String? offerId;
+  final int passengerCount;
+  final int secondsLeft;
+
+  /// Dispatch generation of the committed assignment.
+  final int? generation;
+
+  /// Server reason for a terminal outcome (`trip_taken`, `driver_busy`, …).
+  final String? outcomeReason;
 
   bool get isEmpty => sharedRideId == null;
+  bool get isOffer =>
+      phase == SharedRidePhase.offered || phase == SharedRidePhase.accepting;
+  bool get isAssigned => phase == SharedRidePhase.assigned;
+  bool get isTerminalOutcome =>
+      phase == SharedRidePhase.lost ||
+      phase == SharedRidePhase.expired ||
+      phase == SharedRidePhase.revoked ||
+      phase == SharedRidePhase.rejected;
 
   StopState? get currentStop {
     if (currentStopIndex < 0 || currentStopIndex >= stops.length) return null;
@@ -121,12 +174,24 @@ class SharedRideState {
     List<StopState>? stops,
     int? currentStopIndex,
     bool? completed,
+    SharedRidePhase? phase,
+    String? offerId,
+    int? passengerCount,
+    int? secondsLeft,
+    int? generation,
+    String? outcomeReason,
   }) {
     return SharedRideState(
       sharedRideId: sharedRideId ?? this.sharedRideId,
       stops: stops ?? this.stops,
       currentStopIndex: currentStopIndex ?? this.currentStopIndex,
       completed: completed ?? this.completed,
+      phase: phase ?? this.phase,
+      offerId: offerId ?? this.offerId,
+      passengerCount: passengerCount ?? this.passengerCount,
+      secondsLeft: secondsLeft ?? this.secondsLeft,
+      generation: generation ?? this.generation,
+      outcomeReason: outcomeReason ?? this.outcomeReason,
     );
   }
 

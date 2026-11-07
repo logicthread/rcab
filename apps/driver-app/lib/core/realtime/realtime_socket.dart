@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:socket_io_client/socket_io_client.dart' as io;
 
 import '../auth/token_store.dart';
+import 'offer_outcome.dart';
 import '../../features/offer/offer_models.dart';
 import '../../features/shared_ride/shared_ride_provider.dart';
 
@@ -16,6 +17,19 @@ abstract class IRealtimeSocket implements StopConfirmSender, OfferResponseSender
   Stream<Map<String, dynamic>> get stopDropConfirmed;
   Stream<Map<String, dynamic>> get rideCompleted;
   Stream<Map<String, dynamic>> get driverState;
+
+  /// Explicit per-offer outcomes (R09): server `ride_offer_outcome` events AND
+  /// the normalised `ride_offer_response` ack, in one JSON shape
+  /// (see [OfferOutcome]).
+  Stream<Map<String, dynamic>> get rideOfferOutcome;
+
+  /// `driver:assignment` snapshots (`{driverId, assignment|null}`), sent by the
+  /// server on every (re)connect and in answer to [requestAssignmentSnapshot].
+  Stream<Map<String, dynamic>> get driverAssignment;
+
+  /// Ask the server for the committed assignment (`driver:sync`). Used after
+  /// listeners attach (cold start) and when an accept ack went missing.
+  void requestAssignmentSnapshot();
 
   Future<void> connect();
   void disconnect();
@@ -41,6 +55,8 @@ class RealtimeSocket implements IRealtimeSocket {
   final _stopDropCtrl = StreamController<Map<String, dynamic>>.broadcast();
   final _rideCompletedCtrl = StreamController<Map<String, dynamic>>.broadcast();
   final _driverStateCtrl = StreamController<Map<String, dynamic>>.broadcast();
+  final _offerOutcomeCtrl = StreamController<Map<String, dynamic>>.broadcast();
+  final _driverAssignmentCtrl = StreamController<Map<String, dynamic>>.broadcast();
 
   @override
   Stream<Map<String, dynamic>> get rideOffer => _rideOfferCtrl.stream;
@@ -56,12 +72,25 @@ class RealtimeSocket implements IRealtimeSocket {
   Stream<Map<String, dynamic>> get rideCompleted => _rideCompletedCtrl.stream;
   @override
   Stream<Map<String, dynamic>> get driverState => _driverStateCtrl.stream;
-
   @override
-  Future<void> connect() async {
-    if (_socket != null) return;
+  Stream<Map<String, dynamic>> get rideOfferOutcome => _offerOutcomeCtrl.stream;
+  @override
+  Stream<Map<String, dynamic>> get driverAssignment => _driverAssignmentCtrl.stream;
+
+  Future<void>? _connecting;
+
+  /// Idempotent: concurrent callers (the offer and shared-ride controllers
+  /// start together) share one in-flight connect, so exactly one socket
+  /// exists and no event is delivered twice.
+  @override
+  Future<void> connect() {
+    if (_socket != null) return Future.value();
+    return _connecting ??= _connect().whenComplete(() => _connecting = null);
+  }
+
+  Future<void> _connect() async {
     final jwt = await tokenStore.getJwt();
-    if (jwt == null) return;
+    if (jwt == null || _socket != null) return;
 
     _socket = io.io(
       apiBaseUrl,
@@ -99,6 +128,15 @@ class RealtimeSocket implements IRealtimeSocket {
         final map = _asMap(raw);
         if (map != null) _driverStateCtrl.add(map);
       })
+      ..on('ride_offer_outcome', (raw) {
+        final map = _asMap(raw);
+        if (map != null) _add(_offerOutcomeCtrl, map);
+      })
+      // Sent by the server on every (re)connect: the committed assignment.
+      ..on('driver:assignment', (raw) {
+        final map = _asMap(raw);
+        if (map != null) _add(_driverAssignmentCtrl, map);
+      })
       ..connect();
   }
 
@@ -109,9 +147,31 @@ class RealtimeSocket implements IRealtimeSocket {
     _socket = null;
   }
 
+  /// Sends the response with an ack. The ack (the server's authoritative
+  /// accept / decline result) is normalised into [rideOfferOutcome], so a
+  /// refused accept surfaces immediately even if no event follows.
   @override
   void sendOfferResponse({required String offerId, required bool accept}) {
-    _socket?.emit('ride_offer_response', {'offerId': offerId, 'accept': accept});
+    _socket?.emitWithAck(
+      'ride_offer_response',
+      {'offerId': offerId, 'accept': accept},
+      ack: (dynamic data) {
+        final json = OfferOutcome.jsonFromAck(offerId: offerId, accept: accept, ack: _asMap(data));
+        if (json != null) _add(_offerOutcomeCtrl, json);
+      },
+    );
+  }
+
+  @override
+  void requestAssignmentSnapshot() {
+    _socket?.emitWithAck('driver:sync', null, ack: (dynamic data) {
+      final map = _asMap(data);
+      if (map != null && map.containsKey('assignment')) _add(_driverAssignmentCtrl, map);
+    });
+  }
+
+  void _add(StreamController<Map<String, dynamic>> ctrl, Map<String, dynamic> event) {
+    if (!ctrl.isClosed) ctrl.add(event);
   }
 
   @override
@@ -141,6 +201,8 @@ class RealtimeSocket implements IRealtimeSocket {
       _stopDropCtrl.close(),
       _rideCompletedCtrl.close(),
       _driverStateCtrl.close(),
+      _offerOutcomeCtrl.close(),
+      _driverAssignmentCtrl.close(),
     ]);
   }
 

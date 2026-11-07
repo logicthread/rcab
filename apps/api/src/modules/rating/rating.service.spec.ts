@@ -29,6 +29,7 @@ function completedRide(overrides: Partial<RideRow> = {}): RideRow {
     cancelledAt: null,
     cancelledBy: null,
     cancelReason: null,
+    dispatchGeneration: 1,
     ...overrides,
   };
 }

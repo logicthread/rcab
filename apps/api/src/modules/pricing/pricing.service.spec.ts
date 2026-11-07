@@ -314,30 +314,169 @@ describe('PricingService — OSRM-backed methods', () => {
     await expect(svc.quoteSolo(ROUTE)).rejects.toBeInstanceOf(OsrmUnavailableException);
   });
 
-  it('quoteSeat() composes direct + pool OSRM calls and applies clamp', async () => {
-    const http = {
-      get: vi.fn().mockImplementation((url: string) => {
-        // crude: pool route is the second one in the controller flow,
-        // so disambiguate by which lat appears in the URL.
-        const isPool = url.includes('22.6');
-        return of(defaultOsrmResponse(isPool ? 13_000 : 10_000, 1800));
+  it('passes a bounded timeout to every OSRM call (fare is priced inside the seat transaction)', async () => {
+    const http = buildHttp(() => defaultOsrmResponse(1_000, 100));
+    const svc = makeService(http, buildRedis(), buildConfig({ PRICING_OSRM_TIMEOUT_MS: '1500' }));
+    await svc.quoteSolo(ROUTE);
+    const get = (http as unknown as { get: ReturnType<typeof vi.fn> }).get;
+    expect(get).toHaveBeenCalledWith(expect.any(String), { timeout: 1500 });
+  });
+});
+
+describe('PricingService — quoteSeatInItinerary (fixed_at_join stand-in, actual itinerary)', () => {
+  // A (opener) and B (joiner) with interleaved stops: A↑ B↑ A↓ B↓.
+  const A = 'p-a';
+  const B = 'p-b';
+  const stops4 = [
+    { type: 'pickup', lat: 22.57, lng: 88.36, passengerId: A, sequenceIndex: 0 },
+    { type: 'pickup', lat: 22.571, lng: 88.361, passengerId: B, sequenceIndex: 1 },
+    { type: 'dropoff', lat: 22.58, lng: 88.37, passengerId: A, sequenceIndex: 2 },
+    { type: 'dropoff', lat: 22.581, lng: 88.371, passengerId: B, sequenceIndex: 3 },
+  ] as const;
+  const directB = { originLat: 22.571, originLng: 88.361, destLat: 22.581, destLng: 88.371 };
+
+  /** Direct (2-waypoint) route = 10 km; multi-stop route returns the given legs. */
+  function itineraryHttp(legs: number[] | 'bad') {
+    return buildHttp((url) => {
+      const waypoints = url.split('/driving/')[1].split('?')[0].split(';').length;
+      if (waypoints === 2) return defaultOsrmResponse(10_000, 1800);
+      if (legs === 'bad') return { data: { code: 'Ok', routes: [{ distance: 1, duration: 1 }] } };
+      return {
+        data: {
+          code: 'Ok',
+          routes: [
+            {
+              distance: legs.reduce((a, b) => a + b, 0),
+              duration: 1,
+              legs: legs.map((distance) => ({ distance, duration: 1 })),
+            },
+          ],
+        },
+      };
+    });
+  }
+
+  it("prices the joiner's detour from the routed legs between THEIR pickup and dropoff stops", async () => {
+    // legs: A↑→B↑ 1000, B↑→A↓ 8000, A↓→B↓ 3000. B rides 11 000 m vs direct 10 000 m.
+    const svc = makeService(itineraryHttp([1_000, 8_000, 3_000]), buildRedis(), buildConfig());
+    const q = await svc.quoteSeatInItinerary({
+      poolId: 'pool',
+      passengerId: B,
+      seatCount: 2,
+      directRoute: directB,
+      stops: [...stops4],
+    });
+    expect(q.detourFactor).toBeCloseTo(1.1, 5);
+    expect(q.seatMultiplier).toBe(0.7);
+    expect(q.perSeatPrice.amount).toBe(Math.round(25_000 * 0.7 * 1.1));
+    expect(q.policy).toBe('fixed_at_join');
+  });
+
+  it('a different passenger in the same itinerary rides a different stretch', async () => {
+    // A rides legs 0..1 + 1..2 = 1000 + 8000 = 9000 m (< direct → no discount below 1.0).
+    const svc = makeService(itineraryHttp([1_000, 8_000, 3_000]), buildRedis(), buildConfig());
+    const q = await svc.quoteSeatInItinerary({
+      poolId: 'pool',
+      passengerId: A,
+      seatCount: 2,
+      directRoute: { originLat: 22.57, originLng: 88.36, destLat: 22.58, destLng: 88.37 },
+      stops: [...stops4],
+    });
+    expect(q.detourFactor).toBe(1.0);
+    expect(q.perSeatPrice.amount).toBe(Math.round(25_000 * 0.7));
+  });
+
+  it('caps the detour so a seat never costs more than solo', async () => {
+    const svc = makeService(itineraryHttp([1_000, 40_000, 3_000]), buildRedis(), buildConfig());
+    const q = await svc.quoteSeatInItinerary({
+      poolId: 'pool',
+      passengerId: B,
+      seatCount: 2,
+      directRoute: directB,
+      stops: [...stops4],
+    });
+    expect(q.detourFactor).toBeCloseTo(1 / 0.7, 5);
+    expect(q.perSeatPrice.amount).toBeLessThanOrEqual(25_000);
+  });
+
+  it('the fare tracks the seat count AFTER the join (2 → 0.7, 3 → 0.55)', async () => {
+    const svc = makeService(itineraryHttp([1_000, 10_000, 3_000]), buildRedis(), buildConfig());
+    const ctx = { poolId: 'pool', passengerId: B, directRoute: directB, stops: [...stops4] };
+    const two = await svc.quoteSeatInItinerary({ ...ctx, seatCount: 2 });
+    const three = await svc.quoteSeatInItinerary({ ...ctx, seatCount: 3 });
+    expect(two.seatMultiplier).toBe(0.7);
+    expect(three.seatMultiplier).toBe(0.55);
+    expect(three.perSeatPrice.amount).toBeLessThan(two.perSeatPrice.amount);
+  });
+
+  it('a lone opener is the direct route: solo price, no itinerary call', async () => {
+    const http = itineraryHttp([]);
+    const svc = makeService(http, buildRedis(), buildConfig());
+    const q = await svc.quoteSeatInItinerary({
+      poolId: 'pool',
+      passengerId: A,
+      seatCount: 1,
+      directRoute: directB,
+      stops: [stops4[0], stops4[2]].map((st, i) => ({ ...st, sequenceIndex: i })),
+    });
+    expect(q.seatMultiplier).toBe(1.0);
+    expect(q.detourFactor).toBe(1.0);
+    expect(q.perSeatPrice).toEqual({ amount: 25_000, currency: 'INR' });
+    const get = (http as unknown as { get: ReturnType<typeof vi.fn> }).get;
+    expect(get).toHaveBeenCalledTimes(1);
+  });
+
+  it('a malformed itinerary response fails with OsrmUnavailableException (no partial price)', async () => {
+    const svc = makeService(itineraryHttp('bad'), buildRedis(), buildConfig());
+    await expect(
+      svc.quoteSeatInItinerary({
+        poolId: 'pool',
+        passengerId: B,
+        seatCount: 2,
+        directRoute: directB,
+        stops: [...stops4],
       }),
+    ).rejects.toBeInstanceOf(OsrmUnavailableException);
+  });
+
+  it('a transport error on the itinerary call fails with OsrmUnavailableException', async () => {
+    let n = 0;
+    const http = {
+      get: vi.fn().mockImplementation(() =>
+        ++n === 1 ? of(defaultOsrmResponse(10_000, 1800)) : throwError(() => new Error('timeout')),
+      ),
     };
     const svc = makeService(http, buildRedis(), buildConfig());
-    const seat = await svc.quoteSeat(
-      {
-        rideId: 'r',
+    await expect(
+      svc.quoteSeatInItinerary({
+        poolId: 'pool',
+        passengerId: B,
         seatCount: 2,
-        maxSeats: 3,
-        originLat: 22.6,
-        originLng: 88.4,
-        destLat: 22.61,
-        destLng: 88.41,
-      },
-      { route: ROUTE },
-    );
-    expect(seat.seatMultiplier).toBe(0.7);
-    expect(seat.detourFactor).toBeCloseTo(1.3, 5);
-    expect(seat.perSeatPrice.amount).toBe(Math.round(25_000 * 0.7 * 1.3));
+        directRoute: directB,
+        stops: [...stops4],
+      }),
+    ).rejects.toBeInstanceOf(OsrmUnavailableException);
+  });
+
+  it('rejects an itinerary that lacks the passenger or puts their dropoff first', async () => {
+    const svc = makeService(itineraryHttp([1, 1, 1]), buildRedis(), buildConfig());
+    await expect(
+      svc.quoteSeatInItinerary({
+        poolId: 'pool',
+        passengerId: 'stranger',
+        seatCount: 2,
+        directRoute: directB,
+        stops: [...stops4],
+      }),
+    ).rejects.toThrow(/pickup before a dropoff/);
+    await expect(
+      svc.quoteSeatInItinerary({
+        poolId: 'pool',
+        passengerId: B,
+        seatCount: 2,
+        directRoute: directB,
+        stops: [stops4[3], stops4[1]].map((st, i) => ({ ...st, sequenceIndex: i })),
+      }),
+    ).rejects.toThrow(/pickup before a dropoff/);
   });
 });
