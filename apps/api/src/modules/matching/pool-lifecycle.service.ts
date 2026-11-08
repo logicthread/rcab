@@ -49,8 +49,10 @@ export interface OpenPoolParams {
 
 /**
  * What a committed seat looks like to the caller (and to its idempotency
- * record). `quote` is the fare the passenger agreed to, priced and persisted in
- * the same transaction as the seat (SHARED_FARE_POLICY = fixed_at_join).
+ * record). `quote` is the fare the passenger agreed to: priced BEFORE the seat
+ * transaction (optimistically, no lock held) and persisted in the same
+ * transaction as the seat, only if the pool is unchanged since it was priced
+ * (SHARED_FARE_POLICY = fixed_at_join).
  */
 export interface SeatOutcome {
   sharedRideId: string;
@@ -117,11 +119,19 @@ function pgErrorCode(err: unknown): string | null {
  * the itinerary to `ride_stops` and records the `pool.dispatch.requested`
  * outbox intent. Redis (`pool:<id>`), socket rooms and `pool:update` emits are
  * post-commit, best-effort, and rebuilt from Postgres when they fail.
+ *
+ * Seat pricing is OPTIMISTIC and never runs under that lock (RCAB-E8.S13): the
+ * fare is quoted (OSRM / Redis) from an unlocked snapshot of the pool, and the
+ * transaction only commits it if `state_version` is unchanged after
+ * `FOR UPDATE`; otherwise the attempt is discarded and re-priced (bounded by
+ * `matching.joinPriceRetries`). The lock is therefore held for a handful of
+ * local statements, never for a network call.
  */
 @Injectable()
 export class PoolLifecycleService {
   private readonly log = new Logger(PoolLifecycleService.name);
   private readonly poolTimeoutMs: number;
+  private readonly joinPriceRetries: number;
 
   constructor(
     @Inject(DRIZZLE_DB) private readonly db: DrizzleDb,
@@ -134,6 +144,7 @@ export class PoolLifecycleService {
     @Inject(POLICY) policy: Policy,
   ) {
     this.poolTimeoutMs = policy.matching.poolTimeoutMs;
+    this.joinPriceRetries = policy.matching.joinPriceRetries;
   }
 
   /**
@@ -145,7 +156,10 @@ export class PoolLifecycleService {
    */
   async openPool(
     p: OpenPoolParams & {
-      /** Prices the opener's seat INSIDE the transaction; a throw rolls the pool back. */
+      /**
+       * Prices the opener's seat BEFORE the transaction (nothing about a brand
+       * new pool needs a lock); a throw creates nothing.
+       */
       quoteFare: SeatFareQuoter;
       idempotency?: SeatIdempotency;
       /** Pre-generated id (lets the caller quote against it); random otherwise. */
@@ -153,10 +167,37 @@ export class PoolLifecycleService {
     },
   ): Promise<SharedRideRow & { quote: SeatQuote }> {
     const poolId = p.poolId ?? randomUUID();
+    // Priced OUTSIDE the transaction: a brand-new pool has no concurrent state
+    // to go stale, so there is nothing to validate and no reason for a routing
+    // call to sit inside a transaction. A routing failure creates nothing.
+    const quote = await p.quoteFare({
+      poolId,
+      passengerId: p.passengerId,
+      seatCount: 1,
+      directRoute: {
+        originLat: p.originLat,
+        originLng: p.originLng,
+        destLat: p.destLat,
+        destLng: p.destLng,
+      },
+      stops: computeStops({
+        originLat: p.originLat,
+        originLng: p.originLng,
+        members: [
+          {
+            passenger_id: p.passengerId,
+            origin_lat: p.originLat,
+            origin_lng: p.originLng,
+            dest_lat: p.destLat,
+            dest_lng: p.destLng,
+            joined_at: new Date().toISOString(),
+          },
+        ],
+      }),
+    });
     const committed = await this.inTx<{
       seatCount: number;
       poolClosedAt: Date;
-      quote: SeatQuote;
     } | null>(
       async (tx) => {
         const { poolClosedAt } = await this.repo.insertOpenPool(tx, {
@@ -168,31 +209,6 @@ export class PoolLifecycleService {
           maxSeats: p.maxSeats,
           detourBudgetM: p.detourBudgetM,
           timeoutMs: this.poolTimeoutMs,
-        });
-        const quote = await p.quoteFare({
-          poolId,
-          passengerId: p.passengerId,
-          seatCount: 1,
-          directRoute: {
-            originLat: p.originLat,
-            originLng: p.originLng,
-            destLat: p.destLat,
-            destLng: p.destLng,
-          },
-          stops: computeStops({
-            originLat: p.originLat,
-            originLng: p.originLng,
-            members: [
-              {
-                passenger_id: p.passengerId,
-                origin_lat: p.originLat,
-                origin_lng: p.originLng,
-                dest_lat: p.destLat,
-                dest_lng: p.destLng,
-                joined_at: new Date().toISOString(),
-              },
-            ],
-          }),
         });
         const seat = await this.members.insertMember(tx, {
           poolId,
@@ -233,14 +249,13 @@ export class PoolLifecycleService {
             }),
           );
         }
-        return { seatCount: seat.seatCount, poolClosedAt, quote };
+        return { seatCount: seat.seatCount, poolClosedAt };
       },
       () => null,
     );
     if (committed === null) throw new PoolOpenRejectedError('conflict');
 
     const row = await this.afterCommit(poolId, { joinPassengerId: p.passengerId, kickRelay: true });
-    const quote = committed.quote;
     return {
       ...(row ?? {
         // Post-commit re-read failed: describe the committed pool from the txn.
@@ -274,100 +289,147 @@ export class PoolLifecycleService {
   }
 
   /**
-   * ONE txn: lock the pool → re-validate open + free capacity (candidate
-   * discovery was advisory) → price the seat from the locked state (Phase-0
-   * stand-in SHARED_FARE_POLICY = fixed_at_join: seat count after this join,
-   * itinerary incl. the joiner; earlier members are never repriced; a pricing
-   * failure throws and rolls everything back) → insert the member with its
-   * agreed fare (the DB re-checks everything)
-   * → close `closed_full` in the same txn when this seat filled it →
-   * idempotency complete. Typed failures leave the pool untouched.
+   * Optimistic seat pricing + ONE short txn.
+   *
+   *  1. Read an UNLOCKED snapshot (pool row + members). Doomed joins (missing /
+   *     closed / full) fail here without any routing call.
+   *  2. Price the seat from the snapshot — seat count after this join, the
+   *     itinerary including the joiner — via `quoteFare` (OSRM), with NO
+   *     transaction open and no lock held (SHARED_FARE_POLICY = fixed_at_join:
+   *     earlier members are never repriced; a pricing failure throws before
+   *     anything is written, so a seat is never committed without its fare).
+   *  3. txn: lock the pool (`FOR UPDATE`) → re-validate open + capacity → if
+   *     `state_version` moved since the snapshot the quote may describe a
+   *     different member set, so discard it and go back to 1 (≤
+   *     `matching.joinPriceRetries` retries) → else insert the member with the
+   *     precomputed agreed fare (the DB re-checks everything) → close
+   *     `closed_full` in the same txn when this seat filled it → idempotency
+   *     complete. Typed failures leave the pool untouched.
+   *
+   * Version equality under the lock means the member set (hence the itinerary
+   * and seat count) is exactly what was priced, so the stored fare is what the
+   * committed itinerary implies. When the retries are exhausted the result is
+   * the typed `conflict`: `MatchingService` treats it like any stale candidate
+   * (try the next pool, else open a new one) — the natural existing semantics
+   * for a pool that is too contended to price against.
    */
   async joinPool(p: {
     poolId: string;
     joiner: SharedRideMember;
     /**
-     * Prices the joiner's seat INSIDE the transaction, from the locked pool
-     * state (seat count after this join, itinerary including the joiner). A
-     * throw rolls the join back: a seat is never committed without its fare.
+     * Prices the joiner's seat from an unlocked pool snapshot (seat count after
+     * this join, itinerary including the joiner). Runs OUTSIDE any transaction
+     * and may be called more than once per join; a throw aborts the join before
+     * any write.
      */
     quoteFare: SeatFareQuoter;
     idempotency?: SeatIdempotency;
   }): Promise<JoinPoolResult> {
-    const result = await this.inTx<JoinPoolResult>(
-      async (tx) => {
-        const pool = await this.members.lockPool(tx, p.poolId);
-        if (!pool) return { joined: false, reason: 'not_found' };
-        if (pool.poolState !== 'open') return { joined: false, reason: 'pool_closed' };
-        if (pool.seatCount >= pool.maxSeats) return { joined: false, reason: 'pool_full' };
+    for (let attempt = 0; attempt <= this.joinPriceRetries; attempt++) {
+      const snap = await this.members.snapshotPool(this.db, p.poolId);
+      if (!snap) return { joined: false, reason: 'not_found' };
+      if (snap.pool.poolState !== 'open') return { joined: false, reason: 'pool_closed' };
+      if (snap.pool.seatCount >= snap.pool.maxSeats) return { joined: false, reason: 'pool_full' };
 
-        // Fixed-at-join fare (SHARED_FARE_POLICY): priced from the LOCKED state
-        // so a concurrent join cannot change the seat count under the quote.
-        // Earlier members' fares are never touched.
-        const existing = await this.members.listMembers(tx, p.poolId);
-        const quote = await p.quoteFare({
-          poolId: p.poolId,
-          passengerId: p.joiner.passenger_id,
-          seatCount: pool.seatCount + 1,
-          directRoute: {
-            originLat: p.joiner.origin_lat,
-            originLng: p.joiner.origin_lng,
-            destLat: p.joiner.dest_lat,
-            destLng: p.joiner.dest_lng,
-          },
-          stops: computeStops({
-            originLat: pool.originLat,
-            originLng: pool.originLng,
-            members: [
-              ...existing.filter((m) => m.passenger_id !== p.joiner.passenger_id),
-              p.joiner,
-            ],
-          }),
-        });
-        const seat = await this.members.insertMember(tx, {
-          poolId: p.poolId,
-          passengerId: p.joiner.passenger_id,
+      // No transaction is open here: a slow OSRM cannot hold any pool lock.
+      const quote = await p.quoteFare({
+        poolId: p.poolId,
+        passengerId: p.joiner.passenger_id,
+        seatCount: snap.pool.seatCount + 1,
+        directRoute: {
           originLat: p.joiner.origin_lat,
           originLng: p.joiner.origin_lng,
           destLat: p.joiner.dest_lat,
           destLng: p.joiner.dest_lng,
-          agreedFareCents: quote.perSeatPrice.amount,
-          idempotencyKey: p.idempotency?.scope.key ?? null,
-        });
-        if (!seat.ok) {
-          return { joined: false, reason: seat.reason, existingPoolId: seat.existingPoolId };
-        }
-
-        let closedFull = false;
-        if (seat.seatCount >= pool.maxSeats) {
-          closedFull = (await this.closeInTxn(tx, pool, 'closed_full')) !== null;
-        }
-        if (p.idempotency) {
-          await this.idempotency.completeIn(
-            tx,
-            p.idempotency.scope,
-            p.poolId,
-            p.idempotency.response({
-              sharedRideId: p.poolId,
-              mode: 'slotted',
-              poolStatus: closedFull ? 'closed_full' : 'open',
-              seatCount: seat.seatCount,
-              quote,
-            }),
-          );
-        }
-        return { joined: true, closedFull, seatCount: seat.seatCount, quote };
-      },
-      () => ({ joined: false, reason: 'conflict' }),
-    );
-
-    if (result.joined) {
-      await this.afterCommit(p.poolId, {
-        joinPassengerId: p.joiner.passenger_id,
-        kickRelay: result.closedFull,
+        },
+        stops: computeStops({
+          originLat: snap.pool.originLat,
+          originLng: snap.pool.originLng,
+          members: [
+            ...snap.members.filter((m) => m.passenger_id !== p.joiner.passenger_id),
+            p.joiner,
+          ],
+        }),
       });
+
+      const outcome = await this.inTx<{ stale: true } | { stale: false; result: JoinPoolResult }>(
+        async (tx) => {
+          const pool = await this.members.lockPool(tx, p.poolId);
+          if (!pool) return { stale: false, result: { joined: false, reason: 'not_found' } };
+          if (pool.poolState !== 'open') {
+            return { stale: false, result: { joined: false, reason: 'pool_closed' } };
+          }
+          if (pool.seatCount >= pool.maxSeats) {
+            return { stale: false, result: { joined: false, reason: 'pool_full' } };
+          }
+          // The quote is only valid for the exact state it was priced against.
+          if (pool.stateVersion !== snap.pool.stateVersion) return { stale: true };
+
+          const seat = await this.members.insertMember(tx, {
+            poolId: p.poolId,
+            passengerId: p.joiner.passenger_id,
+            originLat: p.joiner.origin_lat,
+            originLng: p.joiner.origin_lng,
+            destLat: p.joiner.dest_lat,
+            destLng: p.joiner.dest_lng,
+            agreedFareCents: quote.perSeatPrice.amount,
+            idempotencyKey: p.idempotency?.scope.key ?? null,
+          });
+          if (!seat.ok) {
+            return {
+              stale: false,
+              result: { joined: false, reason: seat.reason, existingPoolId: seat.existingPoolId },
+            };
+          }
+
+          let closedFull = false;
+          if (seat.seatCount >= pool.maxSeats) {
+            closedFull = (await this.closeInTxn(tx, pool, 'closed_full')) !== null;
+          }
+          if (p.idempotency) {
+            await this.idempotency.completeIn(
+              tx,
+              p.idempotency.scope,
+              p.poolId,
+              p.idempotency.response({
+                sharedRideId: p.poolId,
+                mode: 'slotted',
+                poolStatus: closedFull ? 'closed_full' : 'open',
+                seatCount: seat.seatCount,
+                quote,
+              }),
+            );
+          }
+          return {
+            stale: false,
+            result: { joined: true, closedFull, seatCount: seat.seatCount, quote },
+          };
+        },
+        () => ({ stale: false, result: { joined: false, reason: 'conflict' } }),
+      );
+
+      if (outcome.stale) {
+        this.log.debug(
+          { poolId: p.poolId, attempt },
+          'pool changed while pricing the seat; re-pricing',
+        );
+        continue;
+      }
+      const result = outcome.result;
+      if (result.joined) {
+        await this.afterCommit(p.poolId, {
+          joinPassengerId: p.joiner.passenger_id,
+          kickRelay: result.closedFull,
+        });
+      }
+      return result;
     }
-    return result;
+
+    this.log.warn(
+      { poolId: p.poolId, retries: this.joinPriceRetries },
+      'pool kept changing while pricing the seat; join gives up (conflict)',
+    );
+    return { joined: false, reason: 'conflict' };
   }
 
   /**

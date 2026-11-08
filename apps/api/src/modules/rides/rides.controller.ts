@@ -369,8 +369,9 @@ export class RidesController {
         destLng: dto.destLng,
       },
       {
-        // Priced inside the seat transaction from the locked pool state; a
-        // routing failure fails the booking (503), never a seat without a fare.
+        // Priced optimistically from an unlocked pool snapshot, OUTSIDE the seat
+        // transaction (re-validated under the lock); a routing failure fails the
+        // booking (503), never a seat without a fare.
         quote: (ctx) => this.pricing.quoteSeatInItinerary(ctx),
         idempotency: scope ? { scope, response: toResponse } : undefined,
       },

@@ -12,14 +12,14 @@ ride lifecycle, sessions, rate limits, realtime cadence, the outbox loop, and th
   (one deployment), then run `pnpm policy:doc`. "Code-fixed" knobs have no env var: change them in the schema.
 - **Clients:** `apps/web/src/config/policy.ts` and `apps/driver-app/lib/core/config/policy.dart`.
 
-57 server knobs (54 env-overridable) in 11 categories, 9 cross-field rules, 8 web and 9 driver-app knobs.
+58 server knobs (55 env-overridable) in 11 categories, 9 cross-field rules, 8 web and 9 driver-app knobs.
 
 ## Contents
 
 - Pricing & fares (10)
 - Dispatch (normal rides) (9)
 - Scheduled booking (7)
-- Shared-ride matching & pools (6)
+- Shared-ride matching & pools (7)
 - Ride lifecycle (3)
 - Driver presence (2)
 - Realtime (2)
@@ -88,6 +88,7 @@ Pool size, timeout, detour and similarity.
 | `matching.prefilterRadiusM` | `MATCHING_PREFILTER_RADIUS_M` | 1500 | number ≥ 1 | m | Spatial pre-filter: pool origin AND destination centroids within this distance. | algo-shared-ride-matching tunables: 1500 m cast-net (was an SQL literal). |
 | `matching.detourBudgetM` | `MATCHING_DETOUR_BUDGET_M` | 800 | number ≥ 0 | m | Max origin / destination detour for a rider to fit a pool. | algo-shared-ride-matching: 800 m, walking-acceptable on either end. |
 | `matching.similarityThreshold` | `MATCHING_SIMILARITY_THRESHOLD` | 0.7 | number 0 – 1 | score | Minimum route-similarity score to join a pool. | algo-shared-ride-matching: 0.7 separates same corridor from vaguely parallel. |
+| `matching.joinPriceRetries` | `MATCHING_JOIN_PRICE_RETRIES` | 3 | integer 0 – 10 | retries | Shared join: how many times the seat is re-priced (OSRM, outside any lock) after a concurrent change to the pool invalidated the quote, before the join gives up as a typed conflict and the booking falls through to the next candidate / a new pool. | stand-in pricing: optimistic, retry on concurrent change (RCAB-E8.S13). |
 | `matching.similaritySaturationM` | `ROUTE_SIMILARITY_SATURATION_M` | 1200 | number ≥ 1 | m | Mean route separation at which similarity reaches 0 (s = 1 − d̄/sat). | algo-route-similarity: 1200 m saturation distance. |
 
 ## Ride lifecycle

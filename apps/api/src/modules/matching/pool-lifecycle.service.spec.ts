@@ -77,9 +77,20 @@ function pgError(code: string): Error {
   return Object.assign(new Error(code), { code });
 }
 
+/** True while a (mock) db.transaction callback is running = a pool lock could be held. */
+const txState = { open: false };
+
 function makeService(opts: { config?: Record<string, unknown> } = {}) {
+  txState.open = false;
   const db = {
-    transaction: vi.fn(async (fn: (tx: unknown) => Promise<unknown>) => fn(TX)),
+    transaction: vi.fn(async (fn: (tx: unknown) => Promise<unknown>) => {
+      txState.open = true;
+      try {
+        return await fn(TX);
+      } finally {
+        txState.open = false;
+      }
+    }),
     execute: vi.fn().mockResolvedValue({ rows: [], rowCount: 1 }),
   };
   const repo = {
@@ -90,6 +101,7 @@ function makeService(opts: { config?: Record<string, unknown> } = {}) {
   };
   const members = {
     lockPool: vi.fn().mockResolvedValue(lockRow()),
+    snapshotPool: vi.fn().mockResolvedValue({ pool: lockRow(), members: [member()] }),
     insertMember: vi.fn().mockResolvedValue({ ok: true, seatCount: 1 }),
     listMembers: vi.fn().mockResolvedValue([member(), JOINER]),
     insertItinerary: vi.fn().mockResolvedValue(undefined),
@@ -178,24 +190,34 @@ describe('PoolLifecycleService.openPool', () => {
     expect(idempotency.completeIn).toHaveBeenCalledWith(TX, SCOPE, 'pool-new', { stored: 1 });
   });
 
-  it('prices the opener inside the txn (seat 1, two-stop itinerary) and a pricing failure rolls the pool back', async () => {
-    const { svc, repo, members, projection } = makeService();
+  it('prices the opener BEFORE the txn (seat 1, two-stop itinerary); a pricing failure creates nothing', async () => {
+    const { svc, db, repo, members, projection } = makeService();
+    let openDuringQuote: boolean | null = null;
+    quoteFare.mockImplementationOnce(async () => {
+      openDuringQuote = txState.open;
+      return QUOTE;
+    });
     await svc.openPool({ ...OPEN, poolId: 'pool-new' });
+    expect(openDuringQuote).toBe(false);
     expect(quoteFare).toHaveBeenCalledWith(
       expect.objectContaining({ poolId: 'pool-new', passengerId: 'p-opener', seatCount: 1 }),
     );
     const ctx = quoteFare.mock.calls[0][0] as { stops: Array<{ type: string }> };
     expect(ctx.stops.map((st) => st.type)).toEqual(['pickup', 'dropoff']);
-    expect(repo.insertOpenPool.mock.invocationCallOrder[0]).toBeLessThan(
-      quoteFare.mock.invocationCallOrder[0],
+    expect(quoteFare.mock.invocationCallOrder[0]).toBeLessThan(
+      repo.insertOpenPool.mock.invocationCallOrder[0],
     );
 
     members.insertMember.mockClear();
+    db.transaction.mockClear();
+    repo.insertOpenPool.mockClear();
     enqueueOutbox.mockClear();
     quoteFare.mockRejectedValueOnce(new Error('routing_unavailable'));
     await expect(svc.openPool({ ...OPEN, poolId: 'pool-fail' })).rejects.toThrow(
       'routing_unavailable',
     );
+    expect(db.transaction).not.toHaveBeenCalled(); // the pool was never even inserted
+    expect(repo.insertOpenPool).not.toHaveBeenCalled();
     expect(members.insertMember).not.toHaveBeenCalled();
     expect(enqueueOutbox).not.toHaveBeenCalled();
     expect(projection.write).toHaveBeenCalledTimes(1); // only the first, successful open
@@ -333,17 +355,22 @@ describe('PoolLifecycleService.joinPool', () => {
     expect(idempotency.completeIn).toHaveBeenCalledWith(TX, SCOPE, 'pool-1', 'stored');
   });
 
-  it('prices the seat INSIDE the txn from the locked pool state: seat count after join, itinerary incl. joiner', async () => {
+  it('prices the seat OUTSIDE any txn from the unlocked snapshot: seat count after join, itinerary incl. joiner', async () => {
     const { svc, members } = makeService();
-    members.listMembers.mockResolvedValueOnce([member(), member({ passenger_id: 'p-second' })]);
+    members.snapshotPool.mockResolvedValueOnce({
+      pool: lockRow({ seatCount: 2, maxSeats: 3 }),
+      members: [member(), member({ passenger_id: 'p-second' })],
+    });
     const order: string[] = [];
+    let openDuringQuote: boolean | null = null;
+    quoteFare.mockImplementationOnce(async () => {
+      order.push('quote');
+      openDuringQuote = txState.open;
+      return QUOTE;
+    });
     members.lockPool.mockImplementationOnce(async () => {
       order.push('lock');
       return lockRow({ seatCount: 2, maxSeats: 3 });
-    });
-    quoteFare.mockImplementationOnce(async () => {
-      order.push('quote');
-      return QUOTE;
     });
     members.insertMember.mockImplementationOnce(async () => {
       order.push('insert');
@@ -352,7 +379,8 @@ describe('PoolLifecycleService.joinPool', () => {
 
     await svc.joinPool({ poolId: 'pool-1', joiner: JOINER, quoteFare });
 
-    expect(order).toEqual(['lock', 'quote', 'insert']);
+    expect(order).toEqual(['quote', 'lock', 'insert']);
+    expect(openDuringQuote).toBe(false);
     const ctx = quoteFare.mock.calls[0][0] as {
       poolId: string;
       passengerId: string;
@@ -371,6 +399,62 @@ describe('PoolLifecycleService.joinPool', () => {
     expect(ctx.stops).toHaveLength(6);
     expect(ctx.stops.slice(0, 3).every((st) => st.type === 'pickup')).toBe(true);
     expect(ctx.stops.map((st) => st.passengerId)).toContain('p-joiner');
+  });
+
+  it('a pool that changed while pricing (state_version moved) discards the quote and re-prices from the new state', async () => {
+    const { svc, members, db } = makeService();
+    members.snapshotPool
+      .mockResolvedValueOnce({ pool: lockRow({ stateVersion: 1, seatCount: 1 }), members: [member()] })
+      .mockResolvedValueOnce({
+        pool: lockRow({ stateVersion: 2, seatCount: 2 }),
+        members: [member(), member({ passenger_id: 'p-rival' })],
+      });
+    members.lockPool
+      .mockResolvedValueOnce(lockRow({ stateVersion: 2, seatCount: 2 }))
+      .mockResolvedValueOnce(lockRow({ stateVersion: 2, seatCount: 2 }));
+    members.insertMember.mockResolvedValueOnce({ ok: true, seatCount: 3 });
+
+    const res = await svc.joinPool({ poolId: 'pool-1', joiner: JOINER, quoteFare });
+
+    expect(res).toMatchObject({ joined: true, seatCount: 3 });
+    expect(quoteFare).toHaveBeenCalledTimes(2);
+    expect((quoteFare.mock.calls[0][0] as { seatCount: number }).seatCount).toBe(2);
+    expect((quoteFare.mock.calls[1][0] as { seatCount: number }).seatCount).toBe(3);
+    expect(db.transaction).toHaveBeenCalledTimes(2);
+    expect(members.insertMember).toHaveBeenCalledTimes(1); // the stale attempt wrote nothing
+  });
+
+  it('gives up with a typed conflict after matching.joinPriceRetries re-prices (default 3 retries = 4 attempts)', async () => {
+    const { svc, members, idempotency, projection } = makeService();
+    members.snapshotPool.mockResolvedValue({ pool: lockRow({ stateVersion: 1 }), members: [member()] });
+    members.lockPool.mockResolvedValue(lockRow({ stateVersion: 99 })); // always moved
+
+    const res = await svc.joinPool({
+      poolId: 'pool-1',
+      joiner: JOINER,
+      quoteFare,
+      idempotency: { scope: SCOPE, response: () => 'x' },
+    });
+
+    expect(res).toEqual({ joined: false, reason: 'conflict' });
+    expect(quoteFare).toHaveBeenCalledTimes(4);
+    expect(members.insertMember).not.toHaveBeenCalled();
+    expect(idempotency.completeIn).not.toHaveBeenCalled();
+    expect(projection.write).not.toHaveBeenCalled();
+  });
+
+  it('the retry bound is the policy knob MATCHING_JOIN_PRICE_RETRIES (0 = price once, no re-price)', async () => {
+    const { svc, members } = makeService({ config: { MATCHING_JOIN_PRICE_RETRIES: '0' } });
+    members.lockPool.mockResolvedValue(lockRow({ stateVersion: 99 }));
+    const res = await svc.joinPool({ poolId: 'pool-1', joiner: JOINER, quoteFare });
+    expect(res).toEqual({ joined: false, reason: 'conflict' });
+    expect(quoteFare).toHaveBeenCalledTimes(1);
+
+    const { svc: svc5, members: m5 } = makeService({ config: { MATCHING_JOIN_PRICE_RETRIES: '5' } });
+    m5.lockPool.mockResolvedValue(lockRow({ stateVersion: 99 }));
+    quoteFare.mockClear();
+    await svc5.joinPool({ poolId: 'pool-1', joiner: JOINER, quoteFare });
+    expect(quoteFare).toHaveBeenCalledTimes(6);
   });
 
   it('earlier members are never repriced: a join writes exactly one member row', async () => {
@@ -406,7 +490,24 @@ describe('PoolLifecycleService.joinPool', () => {
     ['not_found', null],
     ['pool_closed', lockRow({ poolState: 'closed_timeout' })],
     ['pool_full', lockRow({ seatCount: 3 })],
-  ] as const)('fast-fails with %s under the lock without inserting', async (reason, lock) => {
+  ] as const)('a doomed join (%s) fails at the snapshot: no routing call, no txn', async (reason, pool) => {
+    const { svc, members, db, projection } = makeService();
+    members.snapshotPool.mockResolvedValueOnce(pool ? { pool, members: [member()] } : null);
+
+    const res = await svc.joinPool({ poolId: 'pool-1', joiner: JOINER, quoteFare });
+
+    expect(res).toEqual({ joined: false, reason });
+    expect(db.transaction).not.toHaveBeenCalled();
+    expect(quoteFare).not.toHaveBeenCalled(); // no routing call for a doomed join
+    expect(members.insertMember).not.toHaveBeenCalled();
+    expect(projection.write).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['not_found', null],
+    ['pool_closed', lockRow({ poolState: 'closed_timeout' })],
+    ['pool_full', lockRow({ seatCount: 3 })],
+  ] as const)('a pool that became %s while pricing fast-fails under the lock without inserting', async (reason, lock) => {
     const { svc, members, projection } = makeService();
     members.lockPool.mockResolvedValueOnce(lock);
 
@@ -414,7 +515,7 @@ describe('PoolLifecycleService.joinPool', () => {
 
     expect(res).toEqual({ joined: false, reason });
     expect(members.insertMember).not.toHaveBeenCalled();
-    expect(quoteFare).not.toHaveBeenCalled(); // no routing call for a doomed join
+    expect(quoteFare).toHaveBeenCalledTimes(1); // priced optimistically, then discarded
     expect(projection.write).not.toHaveBeenCalled();
   });
 

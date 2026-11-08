@@ -43,7 +43,9 @@ export type MatchResult =
 
 export interface FindOrCreateOptions {
   /**
-   * Prices the seat INSIDE the seat transaction from the locked pool state
+   * Prices the seat OPTIMISTICALLY, outside any transaction / pool lock, from an
+   * unlocked pool snapshot that the seat transaction then re-validates
+   * (`matching.joinPriceRetries`; RCAB-E8.S13) — may be called more than once.
    * (SHARED_FARE_POLICY = fixed_at_join). Persisted as `agreed_fare_cents`.
    * Must throw when the fare cannot be determined: the seat is then not
    * committed and the error propagates (no seat without a price).

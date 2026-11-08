@@ -99,7 +99,7 @@ describe.skipIf(skip)('Shared fare — fixed_at_join stand-in (F15 fare half, R1
     ]);
   });
 
-  it('prices from the LOCKED state: concurrent joiners are quoted distinct, serialized seat counts', async () => {
+  it('optimistic pricing: concurrent joiners both price seat 2, the loser is re-priced from the committed state to seat 3', async () => {
     const owner = stack({ max: 2 });
     const other = stack({ max: 2 });
     const opener = await passenger();
@@ -115,7 +115,7 @@ describe.skipIf(skip)('Shared fare — fixed_at_join stand-in (F15 fare half, R1
     const seen: number[] = [];
     const recording: SeatFareQuoter = async (ctx) => {
       seen.push(ctx.seatCount);
-      // Hold the pool lock a little so the other joiner really queues behind us.
+      // Slow routing: both joiners snapshot the pool (1 seat) before either commits.
       await new Promise((r) => setTimeout(r, 150));
       return seatCountQuoter(ctx);
     };
@@ -124,7 +124,13 @@ describe.skipIf(skip)('Shared fare — fixed_at_join stand-in (F15 fare half, R1
       other.lifecycle.joinPool({ poolId: opened.rideId, joiner: memberAt(p3, 2), quoteFare: recording }),
     ]);
     expect(results.every((r) => r.joined)).toBe(true);
-    expect([...seen].sort()).toEqual([2, 3]);
+    // Both priced seat 2 against the same snapshot; the one that lost the race
+    // found the pool changed under the lock and was re-priced as seat 3.
+    expect([...seen].sort()).toEqual([2, 2, 3]);
+    expect(results.map((r) => (r.joined ? r.seatCount : -1)).sort()).toEqual([2, 3]);
+    for (const r of results) {
+      if (r.joined) expect(r.quote.perSeatPrice.amount).toBe(BY_SEAT_COUNT[r.seatCount]);
+    }
     const rows = await fares(opened.rideId);
     expect(rows.map((r) => r.agreed_fare_cents).sort()).toEqual([10_000, 5_500, 7_000]);
   });
