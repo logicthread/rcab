@@ -1,3 +1,4 @@
+import { buildPolicy } from '../../config/policy/policy';
 import { describe, it, expect, vi } from 'vitest';
 
 const { rearm } = vi.hoisted(() => ({ rearm: vi.fn() }));
@@ -328,7 +329,7 @@ function makeService(config: Record<string, unknown> = {}) {
     queue as never,
     redis as never,
     db as never,
-    { get: vi.fn((k: string) => config[k]) } as never,
+    buildPolicy({ get: (k: string) => config[k] }),
     poolProjection as never,
     snapshots as never,
   );

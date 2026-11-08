@@ -1,3 +1,4 @@
+import { buildPolicy } from '../../src/config/policy/policy';
 import { Pool } from 'pg';
 import { Queue } from 'bullmq';
 import { drizzle } from 'drizzle-orm/node-postgres';
@@ -116,7 +117,7 @@ describe.skipIf(skip)('scheduled ride retry (Postgres + BullMQ)', () => {
       dispatchQ as never,
       scheduledQ as never,
       matchingQ as never,
-      config as never,
+      buildPolicy(config),
     );
   });
 

@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnApplicationBootstrap, OnModuleDestroy } from '@nestjs/common';
+import { Inject, Injectable, Logger, OnApplicationBootstrap, OnModuleDestroy, Optional } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import type { Queue } from 'bullmq';
 import { ScheduledDispatchService } from '../scheduled/scheduled.service';
@@ -13,10 +13,7 @@ import {
 } from './outbox.jobs';
 import { OutboxRepository, type LeasedOutboxRow } from './outbox.repository';
 import { OutboxTopic } from './outbox.types';
-
-const BATCH = 50;
-const LEASE_MS = 30_000;
-const POLL_MS = 1_000;
+import { POLICY, getPolicy, type Policy } from '../../config/policy/policy';
 
 /** Raised for a row the relay can never publish; the row is exhausted at once. */
 class PermanentPublishError extends Error {}
@@ -50,11 +47,14 @@ export class OutboxRelay implements OnApplicationBootstrap, OnModuleDestroy {
     private readonly scheduled: ScheduledDispatchService,
     @InjectQueue(DISPATCH_QUEUE_NAME) private readonly dispatchQueue: Queue,
     @InjectQueue(MATCHING_QUEUE_NAME) private readonly matchingQueue: Queue,
+    // Poll/batch/lease and job retry knobs (policy `outbox.*`). Optional so
+    // hand-built test harnesses get the process policy.
+    @Optional() @Inject(POLICY) private readonly policy: Policy = getPolicy(),
   ) {}
 
   onApplicationBootstrap(): void {
     if (process.env.RCAB_DISABLE_OUTBOX_RELAY === '1') return;
-    this.timer = setInterval(() => void this.tick(), POLL_MS);
+    this.timer = setInterval(() => void this.tick(), this.policy.outbox.relayPollMs);
     this.timer.unref();
     this.kick();
   }
@@ -99,7 +99,7 @@ export class OutboxRelay implements OnApplicationBootstrap, OnModuleDestroy {
     try {
       const { published, failed } = await this.drainOnce();
       // A full batch means more is probably due: keep draining without waiting.
-      if (this.rekick || published + failed >= BATCH) {
+      if (this.rekick || published + failed >= this.policy.outbox.relayBatchSize) {
         this.rekick = false;
         this.kick();
       }
@@ -109,7 +109,7 @@ export class OutboxRelay implements OnApplicationBootstrap, OnModuleDestroy {
   }
 
   private async drain(): Promise<{ published: number; failed: number }> {
-    const rows = await this.repo.lease(BATCH, LEASE_MS);
+    const rows = await this.repo.lease(this.policy.outbox.relayBatchSize, this.policy.outbox.relayLeaseMs);
     let published = 0;
     let failed = 0;
     for (const row of rows) {
@@ -175,8 +175,8 @@ export class OutboxRelay implements OnApplicationBootstrap, OnModuleDestroy {
           {
             jobId: poolExpireJobId(row.aggregateId),
             delay: Math.max(0, expireAt.getTime() - Date.now()),
-            attempts: 5,
-            backoff: { type: 'exponential', delay: 1_000 },
+            attempts: this.policy.outbox.jobAttempts,
+            backoff: { type: 'exponential', delay: this.policy.outbox.jobBackoffMs },
             removeOnComplete: { age: 3_600, count: 1_000 },
             removeOnFail: { age: 7 * 24 * 3_600 },
           },
@@ -192,8 +192,8 @@ export class OutboxRelay implements OnApplicationBootstrap, OnModuleDestroy {
   private async addDispatchStart(data: DispatchStartJobData): Promise<void> {
     await this.dispatchQueue.add(DISPATCH_START_JOB, data, {
       jobId: dispatchStartJobId(data.tripId, data.generation),
-      attempts: 5,
-      backoff: { type: 'exponential', delay: 1_000 },
+      attempts: this.policy.outbox.jobAttempts,
+      backoff: { type: 'exponential', delay: this.policy.outbox.jobBackoffMs },
       removeOnComplete: { age: 3_600, count: 1_000 },
       removeOnFail: { age: 7 * 24 * 3_600 },
     });

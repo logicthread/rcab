@@ -6,6 +6,7 @@ import { DRIZZLE_DB, type DrizzleDb } from '../../infra/db/drizzle.module';
 import { DriverAssignmentRepository } from './assignment.repository';
 import { DispatchOfferRepository, isUuid } from './offer.repository';
 import { tripId } from './dispatch.types';
+import { getPolicy } from '../../config/policy/policy';
 
 const FIELD = 'current_ride_id';
 const STATE_KEY_PREFIX = 'driver:state:';
@@ -94,7 +95,7 @@ export class DriverAssignmentProjection implements OnApplicationBootstrap {
     await this.reconcileSafely();
   }
 
-  @Interval(30_000)
+  @Interval(getPolicy().dispatch.assignmentReconcileMs)
   async onInterval(): Promise<void> {
     if (!this.autorun()) return;
     await this.reconcileSafely();

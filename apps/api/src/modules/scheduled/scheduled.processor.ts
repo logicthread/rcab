@@ -3,10 +3,11 @@ import { Processor, WorkerHost } from '@nestjs/bullmq';
 import type { Job } from 'bullmq';
 import { SCHEDULED_DISPATCH_QUEUE, SCHEDULED_WAKE_JOB, type ScheduledWakeJob } from './scheduled.service';
 import { DispatchStartService } from '../dispatch/dispatch-start.service';
-import { envNumber } from '../../common/utils/env';
+import { getPolicy } from '../../config/policy/policy';
 
-// Concurrency is env-tunable per the Phase-0 VPS budget; default modest.
-const CONCURRENCY = envNumber('SCHEDULED_DISPATCH_CONCURRENCY', 5, { integer: true, min: 1 });
+// Concurrency is a policy knob (scheduled.dispatchConcurrency, env
+// SCHEDULED_DISPATCH_CONCURRENCY) sized for the Phase-0 VPS budget.
+const CONCURRENCY = getPolicy().scheduled.dispatchConcurrency;
 
 /**
  * Worker for the scheduled-booking wake queue (RCAB-E6.S3, hardened by R07).

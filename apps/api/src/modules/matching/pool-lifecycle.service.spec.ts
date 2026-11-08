@@ -1,3 +1,4 @@
+import { buildPolicy } from '../../config/policy/policy';
 import { beforeEach, describe, it, expect, vi } from 'vitest';
 import {
   PoolLifecycleService,
@@ -106,7 +107,7 @@ function makeService(opts: { config?: Record<string, unknown> } = {}) {
     idempotency as never,
     relay as never,
     bus as never,
-    config as never,
+    buildPolicy(config),
   );
   return { svc, db, repo, members, projection, idempotency, relay, bus };
 }

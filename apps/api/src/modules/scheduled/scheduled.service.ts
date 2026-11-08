@@ -1,6 +1,5 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import { getNumber } from '../../common/utils/env';
+import { POLICY, type Policy } from '../../config/policy/policy';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { legacyWakeJobId, scheduledWakeJobId } from '../outbox/outbox.jobs';
@@ -12,13 +11,12 @@ export const SCHEDULED_DISPATCH_QUEUE = 'scheduled-dispatch';
 /** The single job kind on that queue: "wake this ride and dispatch it now". */
 export const SCHEDULED_WAKE_JOB = 'scheduled:wake';
 
-/** Wake this many ms BEFORE `scheduled_for` so dispatch has lead time to find a
- *  driver before pickup (RCAB-E6 / [[features-scheduled-booking]]).
- *  The accept/escalation window after the wake is 4 minutes
- *  (`SCHEDULED_DISPATCH_WINDOW_MS`, scheduled-window.ts; owner decision on
- *  contract flag F-1), and an unanswered window is retried, not expired
- *  (scheduled-retry.ts). */
-export const SCHEDULED_WAKE_LEAD_MS = 10 * 60 * 1000; // 10 minutes
+/** Wake `scheduled.wakeLeadMs` (policy, default 10 min, env
+ *  `SCHEDULED_WAKE_LEAD_MS`) BEFORE `scheduled_for` so dispatch has lead time to
+ *  find a driver before pickup (RCAB-E6 / [[features-scheduled-booking]]).
+ *  The accept/escalation window after the wake is `scheduled.dispatchWindowMs`
+ *  (4 min; owner decision on contract flag F-1), and an unanswered window is
+ *  retried, not expired (scheduled-retry.ts). */
 
 export interface ScheduledWakeJob {
   rideId: string;
@@ -44,15 +42,16 @@ export function wakeJobId(rideId: string, generation = 1): string {
 export class ScheduledDispatchService {
   private readonly log = new Logger(ScheduledDispatchService.name);
   private readonly leadMs: number;
+  private readonly attempts: number;
+  private readonly backoffMs: number;
 
   constructor(
     @InjectQueue(SCHEDULED_DISPATCH_QUEUE) private readonly queue: Queue<ScheduledWakeJob>,
-    @Inject(ConfigService) config: ConfigService,
+    @Inject(POLICY) policy: Policy,
   ) {
-    this.leadMs = getNumber(config, 'SCHEDULED_WAKE_LEAD_MS', SCHEDULED_WAKE_LEAD_MS, {
-      integer: true,
-      min: 0,
-    });
+    this.leadMs = policy.scheduled.wakeLeadMs;
+    this.attempts = policy.outbox.jobAttempts;
+    this.backoffMs = policy.outbox.jobBackoffMs;
   }
 
   /**
@@ -78,8 +77,8 @@ export class ScheduledDispatchService {
       {
         jobId,
         delay: delayMs,
-        attempts: 5,
-        backoff: { type: 'exponential', delay: 1_000 },
+        attempts: this.attempts,
+        backoff: { type: 'exponential', delay: this.backoffMs },
         removeOnComplete: { age: 3_600, count: 1_000 },
         removeOnFail: { age: 7 * 24 * 3_600 },
       },

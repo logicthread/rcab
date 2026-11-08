@@ -1,5 +1,6 @@
 import { outbox } from '../../db/schema';
 import type { DbExecutor } from '../../infra/db/drizzle.module';
+import { getPolicy } from '../../config/policy/policy';
 import { outboxDedupeKey, type OutboxMessage, type OutboxTopicName } from './outbox.types';
 
 /**
@@ -22,6 +23,8 @@ export async function enqueueOutbox<T extends OutboxTopicName>(
       aggregateGeneration: message.generation,
       payload: message.payload as unknown as Record<string, unknown>,
       dedupeKey: outboxDedupeKey(message.topic, message.aggregateId, message.generation),
+      // Policy `outbox.maxPublishAttempts` (same value as the column default, 10).
+      maxAttempts: getPolicy().outbox.maxPublishAttempts,
       ...(message.availableAt ? { availableAt: message.availableAt } : {}),
     })
     .onConflictDoNothing({ target: outbox.dedupeKey })

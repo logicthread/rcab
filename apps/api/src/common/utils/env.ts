@@ -24,7 +24,11 @@ export interface ConfigReader {
 }
 
 export class InvalidConfigError extends Error {
-  constructor(key: string, reason: string) {
+  constructor(
+    readonly key: string,
+    /** Why the value was rejected, without the value itself. */
+    readonly reason: string,
+  ) {
     // Deliberately omits the raw value: config can hold secrets.
     super(`Invalid configuration ${key}: ${reason}`);
     this.name = 'InvalidConfigError';

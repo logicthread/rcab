@@ -1,3 +1,4 @@
+import { buildPolicy } from '../../config/policy/policy';
 import { describe, it, expect, vi } from 'vitest';
 import {
   RideStateMachine,
@@ -46,7 +47,7 @@ function build(transitionResult: RideTransitionResult, cancelResult?: RideCancel
     repo as never,
     bus as never,
     events as never,
-    config as never,
+    buildPolicy(config),
     redis as never,
   );
   return { sm, repo, bus, events, config, redis };

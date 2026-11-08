@@ -1,3 +1,4 @@
+import { buildPolicy } from '../../config/policy/policy';
 import { describe, it, expect, vi } from 'vitest';
 import { DispatchReconciler } from './dispatch-reconciler.service';
 import { dispatchStartJobId, hardFailJobId } from './outbox.jobs';
@@ -24,7 +25,7 @@ function make(offerRow: { count: number; first: Date | null }, jobs: Record<stri
     dispatchQueue as never,
     {} as never,
     {} as never,
-    config as never,
+    buildPolicy(config),
   );
   const run = () =>
     (

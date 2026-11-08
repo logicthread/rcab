@@ -8,6 +8,7 @@ import { IdempotencyOperation } from './idempotency';
 import { enqueueOutbox } from '../outbox/outbox.writer';
 import { OutboxTopic } from '../outbox/outbox.types';
 import { toRow, type RideRow } from './ride-row';
+import { getPolicy } from '../../config/policy/policy';
 
 export type { RideRow } from './ride-row';
 
@@ -50,21 +51,9 @@ export type RideCancelResult =
 // client may bail any time before the trip starts; the driver may bail any time
 // before completion (and is only ever the bound driver, so requested/dispatching
 // — which have no driver_id — fall out via the ownership check). RCAB-E4.S8.
-const CLIENT_CANCELLABLE: ReadonlySet<string> = new Set([
-  'requested',
-  'dispatching',
-  'accepted',
-  'en_route',
-  'arrived',
-]);
-const DRIVER_CANCELLABLE: ReadonlySet<string> = new Set([
-  'requested',
-  'dispatching',
-  'accepted',
-  'en_route',
-  'arrived',
-  'in_progress',
-]);
+// Code-fixed policy knobs rides.clientCancellableFrom / rides.driverCancellableFrom.
+const CLIENT_CANCELLABLE: ReadonlySet<string> = new Set(getPolicy().rides.clientCancellableFrom);
+const DRIVER_CANCELLABLE: ReadonlySet<string> = new Set(getPolicy().rides.driverCancellableFrom);
 
 // Each forward target state stamps exactly one timestamp column. `accepted` is
 // stamped by claimSolo (0007); the rest land here on transition.

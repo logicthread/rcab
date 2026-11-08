@@ -1,14 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import {
-  SCHEDULED_DISPATCH_WINDOW_MS_DEFAULT,
-  scheduledWindowFromConfig,
-} from './scheduled-window';
+import { scheduledWindowFromPolicy } from './scheduled-window';
+import { buildPolicy } from '../../config/policy/policy';
 
 const cfg = (o: Record<string, unknown> = {}) => ({ get: (k: string) => o[k] });
+const scheduledWindowFromConfig = (c: ReturnType<typeof cfg>) => scheduledWindowFromPolicy(buildPolicy(c));
 
-describe('scheduledWindowFromConfig', () => {
+describe('scheduledWindowFromPolicy', () => {
   it('defaults to the four-minute window the feature note specifies, wave 2 at half', () => {
-    expect(SCHEDULED_DISPATCH_WINDOW_MS_DEFAULT).toBe(240_000);
     expect(scheduledWindowFromConfig(cfg())).toEqual({ hardFailMs: 240_000, waveOneMs: 120_000 });
   });
 

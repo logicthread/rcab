@@ -1,3 +1,4 @@
+import { buildPolicy } from '../../src/config/policy/policy';
 import { Pool } from 'pg';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { randomUUID } from 'node:crypto';
@@ -43,7 +44,7 @@ describe.skipIf(skip)('RidesRealtimeListener + cancellation (real Postgres)', ()
       repo,
       bus as never,
       events as never,
-      config as never,
+      buildPolicy(config),
       redis as never,
     );
     listener = new RidesRealtimeListener(stateMachine, repo, bus as never);

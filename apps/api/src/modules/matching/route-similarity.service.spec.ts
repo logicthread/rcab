@@ -1,3 +1,4 @@
+import { buildPolicy } from '../../config/policy/policy';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { of, throwError } from 'rxjs';
 import { AxiosError } from 'axios';
@@ -37,6 +38,7 @@ function makeService(
     redis as never,
     http as never,
     buildConfig(configOverrides) as never,
+    buildPolicy(configOverrides),
   );
 }
 

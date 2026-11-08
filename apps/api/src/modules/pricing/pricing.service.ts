@@ -1,7 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
-import { getNumber } from '../../common/utils/env';
+import { POLICY, type Policy } from '../../config/policy/policy';
 import { firstValueFrom } from 'rxjs';
 import type Redis from 'ioredis';
 import { REDIS } from '../../infra/redis/redis.module';
@@ -95,25 +95,23 @@ export class PricingService {
     private readonly http: HttpService,
     @Inject(REDIS) private readonly redis: Redis,
     @Inject(ConfigService) config: ConfigService,
+    @Inject(POLICY) policy: Policy,
   ) {
     this.osrmBase =
       config.get<string>('OSRM_BASE_URL') ?? config.get<string>('OSRM_URL') ?? 'http://osrm:5000';
 
-    this.osrmTimeoutMs = getNumber(config, 'PRICING_OSRM_TIMEOUT_MS', 3000, {
-      integer: true,
-      min: 1,
-    });
+    this.osrmTimeoutMs = policy.pricing.osrmTimeoutMs;
 
     this.fare = {
-      baseCents: getNumber(config, 'FARE_BASE_CENTS', 4000, { min: 0 }),
-      perKmCents: getNumber(config, 'FARE_PER_KM_CENTS', 1500, { min: 0 }),
-      perMinCents: getNumber(config, 'FARE_PER_MIN_CENTS', 200, { min: 0 }),
+      baseCents: policy.pricing.fareBaseCents,
+      perKmCents: policy.pricing.farePerKmCents,
+      perMinCents: policy.pricing.farePerMinCents,
     };
 
     this.shared = {
-      seatMultiplier2: getNumber(config, 'SEAT_MULTIPLIER_2', 0.7, { min: 0.01, max: 1 }),
-      seatMultiplier3: getNumber(config, 'SEAT_MULTIPLIER_3', 0.55, { min: 0.01, max: 1 }),
-      commissionRate: getNumber(config, 'PLATFORM_COMMISSION_RATE', 0.2, { min: 0, max: 1 }),
+      seatMultiplier2: policy.pricing.seatMultiplier2,
+      seatMultiplier3: policy.pricing.seatMultiplier3,
+      commissionRate: policy.pricing.platformCommissionRate,
     };
   }
 

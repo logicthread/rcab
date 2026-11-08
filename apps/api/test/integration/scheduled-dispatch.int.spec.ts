@@ -5,9 +5,11 @@ import {
   ScheduledDispatchService,
   SCHEDULED_DISPATCH_QUEUE,
   SCHEDULED_WAKE_JOB,
-  SCHEDULED_WAKE_LEAD_MS,
   wakeJobId,
 } from '../../src/modules/scheduled/scheduled.service';
+import { buildPolicy, defaultPolicy } from '../../src/config/policy/policy';
+
+const SCHEDULED_WAKE_LEAD_MS = defaultPolicy().scheduled.wakeLeadMs;
 
 const skip = process.env.RCAB_INT_SKIPPED === '1';
 
@@ -24,7 +26,7 @@ describe.skipIf(skip)('ScheduledDispatchService — wake queue (real Redis + Bul
     const conn = parseRedis(process.env.TEST_REDIS_URL!);
     queue = new Queue(SCHEDULED_DISPATCH_QUEUE, { connection: conn });
     const config = { get: vi.fn().mockReturnValue(undefined) };
-    service = new ScheduledDispatchService(queue as never, config as never);
+    service = new ScheduledDispatchService(queue as never, buildPolicy(config));
   });
 
   afterAll(async () => {

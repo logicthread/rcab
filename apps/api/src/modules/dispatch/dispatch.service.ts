@@ -1,6 +1,5 @@
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import { getNumber } from '../../common/utils/env';
+import { POLICY, type Policy } from '../../config/policy/policy';
 import { InjectQueue } from '@nestjs/bullmq';
 import { OnEvent } from '@nestjs/event-emitter';
 import { Queue, type Job } from 'bullmq';
@@ -36,7 +35,7 @@ import {
 import { DriverAssignmentProjection } from './driver-assignment.projection';
 import { withTxRetry } from './tx-retry';
 import { rearmScheduledRide } from '../scheduled/scheduled-retry';
-import { scheduledWindowFromConfig, type ScheduledDispatchWindow } from '../scheduled/scheduled-window';
+import { scheduledWindowFromPolicy, type ScheduledDispatchWindow } from '../scheduled/scheduled-window';
 import {
   wave2JobId as waveTwoJobId,
   hardFailJobId,
@@ -57,11 +56,6 @@ import {
 export const DISPATCH_QUEUE = 'dispatch';
 export const WAVE_TIMEOUT_JOB = 'dispatch:wave-timeout';
 export const HARD_FAIL_JOB = 'dispatch:hard-fail';
-
-/** Live offer lifetime. The authoritative deadline is `dispatch_offer.expires_at`. */
-export const OFFER_TTL_MS = 12_000;
-/** Geo-index over-fetch so ineligible / already-offered drivers do not starve a wave. */
-const CANDIDATE_HEADROOM = 4;
 
 export interface WaveTimeoutJob {
   rideId: string;
@@ -97,6 +91,10 @@ interface DispatchParams {
   r2Meters: number;
   waveOneTimeoutMs: number;
   hardFailMs: number;
+  /** Live offer lifetime. The authoritative deadline is `dispatch_offer.expires_at`. */
+  offerTtlMs: number;
+  /** Geo-index over-fetch so ineligible / already-offered drivers do not starve a wave. */
+  candidateHeadroom: number;
   /** Window for scheduled rides (RCAB-E8.S8): 4 min by default, see scheduled-window.ts. */
   scheduled: ScheduledDispatchWindow;
 }
@@ -127,23 +125,23 @@ export class DispatchService {
     @InjectQueue(DISPATCH_QUEUE) private readonly queue: Queue,
     @Inject(REDIS) private readonly redis: Redis,
     @Inject(DRIZZLE_DB) private readonly db: DrizzleDb,
-    @Inject(ConfigService) config: ConfigService,
+    @Inject(POLICY) policy: Policy,
     private readonly poolProjection: PoolProjectionService,
     // R09: Postgres snapshots for the post-commit outcome / pool broadcasts.
     // Optional so a harness without realtime still builds the service.
     @Optional() private readonly snapshots?: RealtimeSnapshotService,
   ) {
+    const d = policy.dispatch;
     this.params = {
-      k1: getNumber(config, 'DISPATCH_K1', 5, { integer: true, min: 1 }),
-      k2: getNumber(config, 'DISPATCH_K2', 10, { integer: true, min: 1 }),
-      r1Meters: getNumber(config, 'DISPATCH_R1_METERS', 2_000, { min: 1 }),
-      r2Meters: getNumber(config, 'DISPATCH_R2_METERS', 4_000, { min: 1 }),
-      waveOneTimeoutMs: getNumber(config, 'DISPATCH_WAVE_ONE_TIMEOUT_MS', 30_000, {
-        integer: true,
-        min: 1,
-      }),
-      hardFailMs: getNumber(config, 'DISPATCH_HARD_FAIL_MS', 60_000, { integer: true, min: 1 }),
-      scheduled: scheduledWindowFromConfig(config),
+      k1: d.k1,
+      k2: d.k2,
+      r1Meters: d.r1Meters,
+      r2Meters: d.r2Meters,
+      waveOneTimeoutMs: d.waveOneTimeoutMs,
+      hardFailMs: d.hardFailMs,
+      offerTtlMs: d.offerTtlMs,
+      candidateHeadroom: d.candidateHeadroom,
+      scheduled: scheduledWindowFromPolicy(policy),
     };
   }
 
@@ -462,13 +460,13 @@ export class DispatchService {
         driverId,
         generation,
         waveNumber,
-        ttlMs: OFFER_TTL_MS,
+        ttlMs: this.params.offerTtlMs,
       });
       if (!offer) continue;
       const payload: SoloRideOfferPayload = {
         offerId: offer.offerId,
         rideId: ride.id,
-        ttlMs: OFFER_TTL_MS,
+        ttlMs: this.params.offerTtlMs,
         expiresAt: offer.expiresAt.toISOString(),
         pickup: { lat: ride.originLat, lng: ride.originLng },
         dropoff: { lat: ride.destLat, lng: ride.destLng },
@@ -535,13 +533,13 @@ export class DispatchService {
           driverId,
           generation,
           waveNumber,
-          ttlMs: OFFER_TTL_MS,
+          ttlMs: this.params.offerTtlMs,
         });
         if (!offer) continue;
         const payload: SharedRideOfferPayload = {
           offerId: offer.offerId,
           sharedRideId: pool.rideId,
-          ttlMs: OFFER_TTL_MS,
+          ttlMs: this.params.offerTtlMs,
           expiresAt: offer.expiresAt.toISOString(),
           stops,
           passengerCount: pool.seatCount,
@@ -744,7 +742,7 @@ export class DispatchService {
       'm',
       'ASC',
       'COUNT',
-      opts.k * CANDIDATE_HEADROOM + offered.size,
+      opts.k * this.params.candidateHeadroom + offered.size,
     )) as string[];
     const fresh = raw.filter((id) => !offered.has(id));
     const eligible = await this.offers.eligibleCandidates(this.db, fresh, opts.seatsNeeded);

@@ -15,6 +15,7 @@ import type { Server, Socket } from 'socket.io';
 import { createAdapter } from '@socket.io/redis-adapter';
 import type Redis from 'ioredis';
 import { REDIS } from '../../infra/redis/redis.module';
+import { getPolicy } from '../../config/policy/policy';
 import { RealtimeBus } from './realtime.bus';
 import { RealtimeSnapshotService, isUuid } from './realtime-snapshot.service';
 import {
@@ -118,8 +119,9 @@ export class RealtimeGateway
   // `start_en_route`. Bounded by distinct rides served by this node; Phase-0
   // volume makes pruning unnecessary.
   private readonly _enRouteFired = new Set<string>();
-  private static readonly GEO_THROTTLE_MS = 3000;
-  private static readonly FAN_THROTTLE_MS = 1000;
+  // Policy realtime.geoIndexGateMs (3 s) / realtime.locationFanoutMs (1 Hz).
+  private readonly geoGateMs = getPolicy().realtime.geoIndexGateMs;
+  private readonly fanoutMs = getPolicy().realtime.locationFanoutMs;
 
   constructor(
     @Inject(JwtService) private jwt: JwtService,
@@ -204,7 +206,7 @@ export class RealtimeGateway
         } satisfies DriverFirstLocationEvent);
       }
       const lastFan = this._fanThrottle.get(currentRideId) ?? 0;
-      if (now - lastFan >= RealtimeGateway.FAN_THROTTLE_MS) {
+      if (now - lastFan >= this.fanoutMs) {
         this._fanThrottle.set(currentRideId, now);
         this.bus.toRide(currentRideId, DRIVER_LOCATION_EVENT, {
           rideId: currentRideId,
@@ -217,7 +219,7 @@ export class RealtimeGateway
 
     // Geo-index freshness (per-driver, 3 s).
     const lastGeo = this._geoThrottle.get(driverId) ?? 0;
-    if (now - lastGeo < RealtimeGateway.GEO_THROTTLE_MS) return;
+    if (now - lastGeo < this.geoGateMs) return;
     this._geoThrottle.set(driverId, now);
     await Promise.all([
       this.redis.geoadd('active_drivers', data.lng, data.lat, driverId),

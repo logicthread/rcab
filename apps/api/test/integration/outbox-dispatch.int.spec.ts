@@ -1,3 +1,4 @@
+import { buildPolicy } from '../../src/config/policy/policy';
 import { Pool } from 'pg';
 import Redis from 'ioredis';
 import { Queue, Worker, type Job } from 'bullmq';
@@ -192,7 +193,7 @@ describe.skipIf(skip)('outbox + durable dispatch (Postgres + Redis + BullMQ, ind
     dispatchQ = mkQueue('dispatch');
     scheduledQ = mkQueue('scheduled-dispatch');
     matchingQ = mkQueue('matching');
-    scheduled = new ScheduledDispatchService(scheduledQ as never, config as never);
+    scheduled = new ScheduledDispatchService(scheduledQ as never, buildPolicy(config));
     relay = new OutboxRelay(outbox, scheduled, dispatchQ as never, matchingQ as never);
     runner = new FakeRunner();
     start = new DispatchStartService(ridesRepo, sharedRepo, runner, db as never);
@@ -203,7 +204,7 @@ describe.skipIf(skip)('outbox + durable dispatch (Postgres + Redis + BullMQ, ind
       dispatchQ as never,
       scheduledQ as never,
       matchingQ as never,
-      config as never,
+      buildPolicy(config),
     );
   });
 

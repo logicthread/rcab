@@ -25,6 +25,8 @@ import { DispatchRunnerModule } from './modules/dispatch/dispatch-runner.module'
 import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
 import { MetricsMiddleware } from './common/middleware/metrics.middleware';
 import { AppExceptionFilter } from './common/filters/app-exception.filter';
+import { PolicyModule } from './config/policy/policy.module';
+import { getPolicy } from './config/policy/policy';
 
 function parseRedisConnection() {
   const raw = process.env.REDIS_URL ?? 'redis://redis:6379';
@@ -41,7 +43,15 @@ function parseRedisConnection() {
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
-    ThrottlerModule.forRoot([{ name: 'default', ttl: 60000, limit: 1000 }]),
+    // Business policy (RCAB-E8.S10): validated once at boot, fail-closed.
+    PolicyModule,
+    ThrottlerModule.forRoot([
+      {
+        name: 'default',
+        ttl: getPolicy().rateLimits.globalWindowMs,
+        limit: getPolicy().rateLimits.globalLimit,
+      },
+    ]),
     ScheduleModule.forRoot(),
     EventEmitterModule.forRoot(),
     BullModule.forRoot({ connection: parseRedisConnection() }),

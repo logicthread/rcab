@@ -2,9 +2,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   ScheduledDispatchService,
   SCHEDULED_WAKE_JOB,
-  SCHEDULED_WAKE_LEAD_MS,
   wakeJobId,
 } from './scheduled.service';
+import { buildPolicy, defaultPolicy } from '../../config/policy/policy';
+
+const SCHEDULED_WAKE_LEAD_MS = defaultPolicy().scheduled.wakeLeadMs;
 
 function makeQueue() {
   return {
@@ -13,7 +15,7 @@ function makeQueue() {
   };
 }
 
-const config = { get: vi.fn().mockReturnValue(undefined) } as never;
+const config = defaultPolicy();
 
 describe('ScheduledDispatchService', () => {
   const NOW = new Date('2026-07-15T00:00:00.000Z').getTime();
@@ -56,7 +58,7 @@ describe('ScheduledDispatchService', () => {
 
   it('honours a config-overridden lead time', async () => {
     const queue = makeQueue();
-    const overridden = { get: vi.fn().mockReturnValue(60_000) } as never; // 1min lead
+    const overridden = buildPolicy({ SCHEDULED_WAKE_LEAD_MS: '60000' }); // 1min lead
     const svc = new ScheduledDispatchService(queue as never, overridden);
     const { delayMs } = await svc.scheduleWake('ride-3', new Date(NOW + 2 * 60 * 60 * 1000));
     expect(delayMs).toBe(2 * 60 * 60 * 1000 - 60_000);

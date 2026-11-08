@@ -1,3 +1,5 @@
+import { getPolicy, type Policy } from '../../config/policy/policy';
+
 /**
  * PHASE-0 STAND-IN shared fare policy (F15 fare half, R10).
  *
@@ -15,6 +17,7 @@
  * cancellation, settlement record). Grep for SHARED_FARE_POLICY to find every
  * place that encodes the stand-in.
  */
-export const SHARED_FARE_POLICY = 'fixed_at_join' as const;
+export type SharedFarePolicy = Policy['pricing']['sharedFarePolicy'];
 
-export type SharedFarePolicy = typeof SHARED_FARE_POLICY;
+/** Code-fixed knob `pricing.sharedFarePolicy` (see config/policy/policy.schema.ts). */
+export const SHARED_FARE_POLICY: SharedFarePolicy = getPolicy().pricing.sharedFarePolicy;

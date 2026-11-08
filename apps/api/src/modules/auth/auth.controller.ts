@@ -1,5 +1,6 @@
 import { Controller, Post, Body, UseGuards, HttpCode, Req, Res, UnauthorizedException, Inject } from '@nestjs/common';
 import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
+import { getPolicy } from '../../config/policy/policy';
 import type { Request, Response } from 'express';
 import { FirebaseExchangeDto } from './dto/firebase-exchange.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
@@ -25,13 +26,18 @@ function tokenBody(tokens: TokenResponse): PublicTokenResponse {
   };
 }
 
+/** Policy rateLimits.authLimit / authWindowMs (10 per minute). */
+const AUTH_THROTTLE = {
+  default: { limit: getPolicy().rateLimits.authLimit, ttl: getPolicy().rateLimits.authWindowMs },
+};
+
 @Controller('v1/auth')
 @UseGuards(ThrottlerGuard)
 export class AuthController {
   constructor(@Inject(AuthService) private auth: AuthService) {}
 
   @Post('firebase-exchange')
-  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @Throttle(AUTH_THROTTLE)
   async firebaseExchange(
     @Body() dto: FirebaseExchangeDto,
     @Res({ passthrough: true }) res: Response,
@@ -80,7 +86,7 @@ export class AuthController {
 
   @Post('native/firebase-exchange')
   @HttpCode(200)
-  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @Throttle(AUTH_THROTTLE)
   async nativeFirebaseExchange(@Body() dto: FirebaseExchangeDto): Promise<TokenResponse> {
     return this.auth.exchangeFirebaseToken(dto.id_token);
   }
@@ -99,7 +105,7 @@ export class AuthController {
    */
   @Post('native/logout')
   @HttpCode(204)
-  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @Throttle(AUTH_THROTTLE)
   async nativeLogout(@Body() dto: NativeRefreshTokenDto): Promise<void> {
     await this.auth.revokePresented(dto.refresh_token);
   }

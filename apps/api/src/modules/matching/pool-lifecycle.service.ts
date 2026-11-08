@@ -1,7 +1,6 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'node:crypto';
-import { getNumber } from '../../common/utils/env';
+import { POLICY, type Policy } from '../../config/policy/policy';
 import { DRIZZLE_DB, type DrizzleDb, type DrizzleTx } from '../../infra/db/drizzle.module';
 import { RealtimeBus } from '../realtime/realtime.bus';
 import {
@@ -132,12 +131,9 @@ export class PoolLifecycleService {
     private readonly idempotency: IdempotencyRepository,
     private readonly relay: OutboxRelay,
     private readonly bus: RealtimeBus,
-    @Inject(ConfigService) config: ConfigService,
+    @Inject(POLICY) policy: Policy,
   ) {
-    this.poolTimeoutMs = getNumber(config, 'MATCHING_POOL_TIMEOUT_MS', 60_000, {
-      integer: true,
-      min: 1,
-    });
+    this.poolTimeoutMs = policy.matching.poolTimeoutMs;
   }
 
   /**

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { of, throwError } from 'rxjs';
 import { PricingService } from './pricing.service';
+import { buildPolicy } from '../../config/policy/policy';
 import { addMoney, inr, mulMoney, sumMoney, type Money } from './money';
 import { OsrmUnavailableException } from '../matching/osrm-unavailable.exception';
 
@@ -28,7 +29,7 @@ function buildConfig(overrides: Record<string, number | string> = {}) {
 }
 
 function makeService(http: unknown, redis: unknown, config: unknown): PricingService {
-  return new PricingService(http as never, redis as never, config as never);
+  return new PricingService(http as never, redis as never, config as never, buildPolicy(config as never));
 }
 
 function defaultOsrmResponse(distanceM: number, durationS: number) {

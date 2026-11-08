@@ -1,3 +1,4 @@
+import { buildPolicy } from '../../src/config/policy/policy';
 // Stage C slice A (R06; F05 / F06): authoritative offers + one driver
 // assignment guard across solo and shared trips, against real Postgres + Redis
 // + BullMQ. Contention uses INDEPENDENT pg Pools (one DispatchService per pool)
@@ -733,7 +734,7 @@ describe.skipIf(skip)('Stage C slice A — offers + assignment guard (multi-conn
         A.rides,
         busA as never,
         { emit: vi.fn() } as never,
-        { get: vi.fn().mockReturnValue(undefined) } as never,
+        buildPolicy({}),
         redis,
       );
 
