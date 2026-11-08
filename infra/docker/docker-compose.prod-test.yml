@@ -29,7 +29,16 @@ services:
       certbot:
         condition: service_completed_successfully
 
+  # Local/CI builds of the same image names/tags the registry would hold, so
+  # `pnpm prod:test` exercises the production Compose file unchanged (images are
+  # built from source instead of pulled). RCAB_VERSION is set by scripts/prod-up.sh.
   api:
+    build:
+      context: ../..
+      dockerfile: infra/docker/api/Dockerfile.prod
+      args:
+        RCAB_VERSION: ${RCAB_VERSION:?}
+        RCAB_BUILT_AT: ${RCAB_BUILT_AT:-unknown}
     env_file: []
     environment:
       NODE_ENV: production
@@ -50,9 +59,13 @@ services:
 
   web:
     build:
-      # Throwaway public values so the CI image builds; real values come from the
-      # compose .env in production.
+      context: ../..
+      dockerfile: infra/docker/web/Dockerfile.prod
+      # Throwaway public values so the CI image builds; the release pipeline
+      # supplies the real ones as build args (Jenkinsfile).
       args:
+        RCAB_VERSION: ${RCAB_VERSION:?}
+        RCAB_BUILT_AT: ${RCAB_BUILT_AT:-unknown}
         NEXT_PUBLIC_API_URL: https://api.rcab.example
         NEXT_PUBLIC_FIREBASE_API_KEY: ci-placeholder-api-key
         NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: rcab-ci.example
@@ -63,6 +76,8 @@ services:
       PORT: "3000"
 
   migrator:
+    # Reuses the api image built above (same tag); never pulled or rebuilt here.
+    pull_policy: never
     env_file: []
     environment:
       NODE_ENV: production

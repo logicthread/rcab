@@ -2,13 +2,19 @@ pipeline {
     agent any
 
     options {
-        timeout(time: 30, unit: 'MINUTES')
+        timeout(time: 45, unit: 'MINUTES')
         disableConcurrentBuilds()
     }
 
     environment {
-        IMAGE_API = 'ghcr.io/logicthread/rcab/api'
-        IMAGE_WEB = 'ghcr.io/logicthread/rcab/web'
+        // Images are <RCAB_REGISTRY>/rcab-api:<commit sha> and rcab-web:<commit sha>
+        // (the names docker-compose.prod.yml pulls). Release flow: scripts/deploy/.
+        RCAB_REGISTRY = 'ghcr.io/logicthread'
+        // Jenkins job/folder environment (not in this file):
+        //   NEXT_PUBLIC_*   public browser config inlined into the web image
+        //   PROD_API_URL    public https URL of the API on the VPS (default https://$PROD_HOST)
+        //   PROD_WEB_URL    optional public web URL; also asserted via /version.json
+        // Credentials: ghcr-pat, vps-ssh-key, vps-known-hosts, vps-host (= PROD_HOST).
     }
 
     stages {
@@ -74,27 +80,32 @@ pipeline {
 
         stage('Build images') {
             steps {
-                sh """
-                    docker build \\
-                        -f infra/docker/api/Dockerfile.prod \\
-                        -t ${IMAGE_API}:${env.GIT_COMMIT} \\
-                        -t ${IMAGE_API}:latest \\
-                        .
-                    # NEXT_PUBLIC_* are inlined at build time: define them as Jenkins
-                    # job/folder environment variables (public values only). The
-                    # Dockerfile fails the build when a required one is empty.
-                    docker build \\
-                        --build-arg NEXT_PUBLIC_API_URL="\$NEXT_PUBLIC_API_URL" \\
-                        --build-arg NEXT_PUBLIC_FIREBASE_API_KEY="\$NEXT_PUBLIC_FIREBASE_API_KEY" \\
-                        --build-arg NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN="\$NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN" \\
-                        --build-arg NEXT_PUBLIC_FIREBASE_PROJECT_ID="\$NEXT_PUBLIC_FIREBASE_PROJECT_ID" \\
-                        --build-arg NEXT_PUBLIC_FIREBASE_APP_ID="\$NEXT_PUBLIC_FIREBASE_APP_ID" \\
-                        --build-arg NEXT_PUBLIC_NOMINATIM_URL="\${NEXT_PUBLIC_NOMINATIM_URL:-https://nominatim.openstreetmap.org}" \\
-                        -f infra/docker/web/Dockerfile.prod \\
-                        -t ${IMAGE_WEB}:${env.GIT_COMMIT} \\
-                        -t ${IMAGE_WEB}:latest \\
-                        .
-                """
+                // Build API + web ONCE for this commit (RCAB-E8.S11). Tagged with the
+                // commit SHA only (no mutable `latest`); the SHA is also baked in as
+                // build args so the running service reports it. NEXT_PUBLIC_* are
+                // inlined at build time: define them as Jenkins job/folder environment
+                // variables (public values only). The web Dockerfile fails the build
+                // when a required one is empty.
+                sh 'bash scripts/deploy/build-images.sh --version "$GIT_COMMIT" --registry "$RCAB_REGISTRY"'
+            }
+        }
+
+        stage('Image identity check') {
+            steps {
+                // The artifact we are about to publish must carry the identity we
+                // intend to deploy: OCI revision label, and the version the api
+                // process itself will report at /v1/health/version.
+                sh '''
+                    set -eu
+                    for img in rcab-api rcab-web; do
+                        rev="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$RCAB_REGISTRY/$img:$GIT_COMMIT")"
+                        test "$rev" = "$GIT_COMMIT" || { echo "$img revision label '$rev' != $GIT_COMMIT"; exit 1; }
+                    done
+                    ver="$(docker run --rm --entrypoint node "$RCAB_REGISTRY/rcab-api:$GIT_COMMIT" -p 'process.env.RCAB_VERSION')"
+                    test "$ver" = "$GIT_COMMIT" || { echo "api image reports version '$ver' != $GIT_COMMIT"; exit 1; }
+                    wver="$(docker run --rm --entrypoint cat "$RCAB_REGISTRY/rcab-web:$GIT_COMMIT" /app/public/version.json)"
+                    case "$wver" in *"\\"$GIT_COMMIT\\""*) ;; *) echo "web version.json '$wver' lacks $GIT_COMMIT"; exit 1;; esac
+                '''
             }
         }
 
@@ -107,13 +118,24 @@ pipeline {
             }
             steps {
                 withCredentials([string(credentialsId: 'ghcr-pat', variable: 'GHCR_TOKEN')]) {
-                    sh """
-                        echo "\$GHCR_TOKEN" | docker login ghcr.io -u logicthread --password-stdin
-                        docker push ${IMAGE_API}:${env.GIT_COMMIT}
-                        docker push ${IMAGE_API}:latest
-                        docker push ${IMAGE_WEB}:${env.GIT_COMMIT}
-                        docker push ${IMAGE_WEB}:latest
-                    """
+                    sh '''
+                        set -eu
+                        echo "$GHCR_TOKEN" | docker login ghcr.io -u logicthread --password-stdin
+                        docker push "$RCAB_REGISTRY/rcab-api:$GIT_COMMIT"
+                        docker push "$RCAB_REGISTRY/rcab-web:$GIT_COMMIT"
+                        # Release manifest: the immutable identities that were published.
+                        api_digest="$(docker image inspect --format '{{ index .RepoDigests 0 }}' "$RCAB_REGISTRY/rcab-api:$GIT_COMMIT")"
+                        web_digest="$(docker image inspect --format '{{ index .RepoDigests 0 }}' "$RCAB_REGISTRY/rcab-web:$GIT_COMMIT")"
+                        printf '{"version":"%s","api":"%s","web":"%s","publishedAt":"%s"}\\n' \\
+                            "$GIT_COMMIT" "$api_digest" "$web_digest" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > release-manifest.json
+                        cat release-manifest.json
+                        docker logout ghcr.io
+                    '''
+                }
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: 'release-manifest.json', allowEmptyArchive: true
                 }
             }
         }
@@ -131,24 +153,36 @@ pipeline {
                 submitterParameter 'DEPLOY_APPROVER'
             }
             steps {
+                // deploy.sh (RCAB-E8.S11): records the previous version, ships infra/,
+                // pulls THIS commit's images, runs the migrator as a one-shot, starts
+                // api+web, then verifies the real target (PROD_API_URL, default
+                // https://$PROD_HOST) is ready AND reports version == $GIT_COMMIT. On a
+                // failed verification it rolls back to the previous SHA and the stage
+                // still FAILS (exit 10/11): a rolled-back release is not a green build.
+                // Host key is pinned via the vps-known-hosts file credential.
                 withCredentials([
                     sshUserPrivateKey(
-                        credentialsId: 'vps-ssh-key',
+                        credentialsId:  'vps-ssh-key',
                         keyFileVariable:  'SSH_KEY',
                         usernameVariable: 'SSH_USER'
                     ),
-                    string(credentialsId: 'vps-host', variable: 'VPS_HOST')
+                    file(credentialsId: 'vps-known-hosts', variable: 'KNOWN_HOSTS'),
+                    string(credentialsId: 'vps-host', variable: 'PROD_HOST')
                 ]) {
-                    sh """
-                        ssh -i "\$SSH_KEY" -o StrictHostKeyChecking=no "\$SSH_USER@\$VPS_HOST" '
-                            set -e
-                            cd /opt/rcab/compose
-                            docker compose pull
-                            docker compose up -d
-                        '
-                    """
+                    sh '''
+                        set -eu
+                        API_URL="${PROD_API_URL:-https://$PROD_HOST}"
+                        bash scripts/deploy/deploy.sh \\
+                            --version "$GIT_COMMIT" \\
+                            --remote "$SSH_USER@$PROD_HOST" \\
+                            --ssh-key "$SSH_KEY" \\
+                            --known-hosts "$KNOWN_HOSTS" \\
+                            --sync-infra \\
+                            --api-url "$API_URL" \\
+                            ${PROD_WEB_URL:+--web-url "$PROD_WEB_URL"} \\
+                            --timeout 180
+                    '''
                 }
-                sh 'bash scripts/prod-smoke.sh'
             }
         }
     }

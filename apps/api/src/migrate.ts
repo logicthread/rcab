@@ -3,6 +3,9 @@ import { join } from 'node:path';
 import { Client } from 'pg';
 
 const DATABASE_URL = process.env.DATABASE_URL ?? '';
+// Arbitrary constant: serialises concurrent migrators (a deploy racing a rollback,
+// two operators) on one Postgres. Held for the whole run; released with the session.
+const MIGRATION_LOCK_KEY = 726_001_011;
 const MIGRATIONS_DIR = join(__dirname, '..', 'migrations');
 
 async function runMigrations(client: Client, migrationsDir: string): Promise<void> {
@@ -40,6 +43,7 @@ async function main(): Promise<void> {
   await client.connect();
   try {
     console.log('[migrator] running migrations...');
+    await client.query('SELECT pg_advisory_lock($1)', [MIGRATION_LOCK_KEY]);
     await runMigrations(client, MIGRATIONS_DIR);
     console.log('[migrator] done');
   } finally {
