@@ -1,5 +1,7 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { sql } from 'drizzle-orm';
+import { POLICY, type Policy } from '../../config/policy/policy';
+import { scheduledRetryUntil } from '../scheduled/scheduled-window';
 import { DRIZZLE_DB, type DbExecutor, type DrizzleDb } from '../../infra/db/drizzle.module';
 import { RealtimeBus } from './realtime.bus';
 import {
@@ -58,6 +60,9 @@ interface RideDbRow extends Row {
   dest_lat: number | string;
   dest_lng: number | string;
   fare_cents: number | string;
+  type: string;
+  scheduled_for: Date | string | null;
+  dispatch_generation: number | string;
 }
 
 /**
@@ -78,6 +83,10 @@ export class RealtimeSnapshotService {
   constructor(
     @Inject(DRIZZLE_DB) private readonly db: DrizzleDb,
     @Inject(RealtimeBus) private readonly bus: RealtimeBus,
+    // Scheduled retry cutoff for `RideSnapshot.retryUntil`. Optional so a
+    // harness without the policy module still builds; without it `retryUntil`
+    // is null (the client then shows no cutoff time).
+    @Optional() @Inject(POLICY) private readonly policy?: Policy,
   ) {}
 
   private read<T>(fn: (tx: DbExecutor) => Promise<T>): Promise<T> {
@@ -164,7 +173,7 @@ export class RealtimeSnapshotService {
     return this.read(async (tx) => {
       const res = await tx.execute<RideDbRow>(sql`
         SELECT id, passenger_id, driver_id, status, origin_lat, origin_lng, dest_lat, dest_lng,
-               fare_cents
+               fare_cents, type, scheduled_for, dispatch_generation
           FROM rides
          WHERE id = ${rideId} AND (passenger_id = ${userId} OR driver_id = ${userId})
       `);
@@ -180,8 +189,24 @@ export class RealtimeSnapshotService {
         pickup: { lat: num(r.origin_lat), lng: num(r.origin_lng) },
         dropoff: { lat: num(r.dest_lat), lng: num(r.dest_lng) },
         fareCents: num(r.fare_cents),
+        retryUntil: this.retryUntil(r),
       };
     });
+  }
+
+  /**
+   * Scheduled rides only: when the server gives up looking for a driver. Only
+   * while the ride is actually searching (woken, still `requested`/`dispatching`,
+   * no driver); null otherwise, so a client never shows a stale cutoff.
+   */
+  private retryUntil(r: RideDbRow): string | null {
+    if (!this.policy || r.type !== 'scheduled' || !r.scheduled_for) return null;
+    if (r.driver_id || (r.status !== 'requested' && r.status !== 'dispatching')) return null;
+    if (num(r.dispatch_generation) < 1) return null;
+    return scheduledRetryUntil(
+      new Date(r.scheduled_for),
+      this.policy.scheduled.retryCutoffAfterPickupMs,
+    ).toISOString();
   }
 
   /** The driver's committed assignment (`driver_active_assignment`), or none. */

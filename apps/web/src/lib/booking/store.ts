@@ -52,6 +52,10 @@ export interface BookingState {
   rideId: string | null;
   rideStatus: RideStatus | null;
   driver: DriverPosition | null;
+  // Scheduled ride whose search was re-armed (or whose snapshot says it is still
+  // searching): the server keeps trying, optionally until `retryUntil` (ISO).
+  // Null for every other ride and for any non-searching status. RCAB-E8.S13.
+  searchRetry: { retryUntil: string | null } | null;
   // Whether the rider has rated (or skipped) this completed ride — RCAB-E4.S9.
   rated: boolean;
 
@@ -81,7 +85,10 @@ export interface BookingState {
   applyPoolUpdate: (sharedRideId: string, seatCount: number, poolStatus: PoolStatus) => void;
   setRequestError: (message: string) => void;
   setSoloRequested: (rideId: string, status: string) => void;
-  applyRideState: (state: string) => void;
+  /** `retryUntil`: from a `ride:snapshot` of a searching scheduled ride (undefined = no information). */
+  applyRideState: (state: string, retryUntil?: string | null) => void;
+  /** `ride_dispatch_retry` for the active ride; ignored once the ride is no longer searching. */
+  applyDispatchRetry: (rideId: string, retryUntil?: string | null) => void;
   applyDriverLocation: (rideId: string, lat: number, lng: number, heading: number) => void;
   markRated: () => void;
   reset: () => void;
@@ -104,6 +111,7 @@ const INITIAL_STATE = {
   rideId: null as string | null,
   rideStatus: null as RideStatus | null,
   driver: null as DriverPosition | null,
+  searchRetry: null as { retryUntil: string | null } | null,
   rated: false,
 };
 
@@ -111,6 +119,7 @@ const INITIAL_STATE = {
 // `requested` so the banner stays sane rather than rendering a raw string.
 const KNOWN_STATUSES: readonly RideStatus[] = [
   'requested',
+  'dispatching',
   'accepted',
   'en_route',
   'arrived',
@@ -120,6 +129,11 @@ const KNOWN_STATUSES: readonly RideStatus[] = [
   'cancelled',
   'no_show',
 ];
+
+/** Statuses in which the server is still looking for a driver. */
+export function isSearching(status: RideStatus | null): boolean {
+  return status === 'requested' || status === 'dispatching';
+}
 
 function normalizeStatus(state: string): RideStatus {
   return (KNOWN_STATUSES as readonly string[]).includes(state)
@@ -222,16 +236,37 @@ export const useBookingStore = create<BookingState>((set, get) => ({
       rideId,
       rideStatus: normalizeStatus(status),
       driver: null,
+      searchRetry: null,
       rated: false,
       stage: 'tracking',
     });
   },
 
-  applyRideState(state) {
+  applyRideState(state, retryUntil) {
     // Only the active ride's transitions matter; the socket is per-ride so this
     // is the live ride, but guard against a late event after reset.
     if (get().rideId === null) return;
-    set({ rideStatus: normalizeStatus(state) });
+    const rideStatus = normalizeStatus(state);
+    if (!isSearching(rideStatus)) {
+      // Accepted / cancelled / no_driver / ...: the search overlay is over.
+      set({ rideStatus, searchRetry: null });
+      return;
+    }
+    // A snapshot of a searching scheduled ride carries the cutoff; a plain
+    // `requested` event (retryUntil undefined) keeps what we already know.
+    set(
+      typeof retryUntil === 'string'
+        ? { rideStatus, searchRetry: { retryUntil } }
+        : { rideStatus },
+    );
+  },
+
+  applyDispatchRetry(rideId, retryUntil) {
+    const state = get();
+    if (state.rideId !== rideId || !isSearching(state.rideStatus)) return;
+    // Keep a cutoff we already know if this event does not repeat it.
+    const known = state.searchRetry?.retryUntil ?? null;
+    set({ searchRetry: { retryUntil: typeof retryUntil === 'string' ? retryUntil : known } });
   },
 
   applyDriverLocation(rideId, lat, lng, heading) {

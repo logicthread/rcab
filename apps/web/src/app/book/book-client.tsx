@@ -93,6 +93,7 @@ function BookPage() {
     requestError,
     rideId,
     rideStatus,
+    searchRetry,
     driver,
     rated,
     setRideType,
@@ -111,6 +112,7 @@ function BookPage() {
     setRequestError,
     setSoloRequested,
     applyRideState,
+    applyDispatchRetry,
     applyDriverLocation,
     markRated,
     reset,
@@ -218,17 +220,19 @@ function BookPage() {
   useEffect(() => {
     if (!authed || !rideId) return;
     const conn = connectBookingSocket(getToken);
-    const unsubState = conn.onRideStateChanged((p) => applyRideState(p.state));
+    const unsubState = conn.onRideStateChanged((p) => applyRideState(p.state, p.retryUntil));
+    const unsubRetry = conn.onDispatchRetry((p) => applyDispatchRetry(p.rideId, p.retryUntil));
     const unsubLoc = conn.onDriverLocation((p) =>
       applyDriverLocation(p.rideId, p.lat, p.lng, p.heading),
     );
     conn.subscribeRide(rideId);
     return () => {
       unsubState();
+      unsubRetry();
       unsubLoc();
       conn.close();
     };
-  }, [authed, getToken, rideId, applyRideState, applyDriverLocation]);
+  }, [authed, getToken, rideId, applyRideState, applyDispatchRetry, applyDriverLocation]);
 
   // Reconnect-restore: a saved active ride (full page reload) rehydrates the
   // tracking view from GET /v1/rides/:id; terminal rides clear the marker.
@@ -424,6 +428,7 @@ function BookPage() {
           </section>
           <RideTrackingPanel
             status={rideStatus ?? 'requested'}
+            searchRetry={searchRetry}
             driver={driver}
             onNewBooking={clearActiveRide}
             onCancel={cancelActiveRide}

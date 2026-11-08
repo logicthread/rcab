@@ -217,8 +217,13 @@ export const POLICY_SCHEMA = {
     }),
     dispatchWindowMs: ms({
       env: 'SCHEDULED_DISPATCH_WINDOW_MS', default: 4 * MIN, min: 1, unit: 'ms',
-      description: 'Scheduled rides: accept/escalation window after wake; unanswered → retried (no cap), never expired.',
+      description: 'Scheduled rides: accept/escalation window after wake; unanswered → retried until the retry cutoff, then no_driver.',
       decision: 'owner 2026-11-06 (Stage-C flag F-1, RCAB-E8.S8): scheduled window 4 min.',
+    }),
+    retryCutoffAfterPickupMs: ms({
+      env: 'SCHEDULED_RETRY_CUTOFF_AFTER_PICKUP_MS', default: 30 * MIN, min: 0, unit: 'ms',
+      description: 'Scheduled rides: stop re-arming an unanswered ride this long after its scheduled pickup time; it then ends as no_driver.',
+      decision: 'owner 2026-11-08: stop retrying 30 min after scheduled pickup; tunable.',
     }),
     dispatchWaveOneMs: ms({
       env: 'SCHEDULED_DISPATCH_WAVE_ONE_MS',

@@ -7,6 +7,7 @@ import { WEB_POLICY } from '../../config/policy';
 
 const BANNER: Record<RideStatus, string> = {
   requested: 'Finding your driver…',
+  dispatching: 'Finding your driver…',
   accepted: 'Driver assigned — getting ready',
   en_route: 'Your driver is on the way',
   arrived: 'Your driver has arrived',
@@ -24,8 +25,24 @@ const TERMINAL: ReadonlySet<RideStatus> = new Set<RideStatus>([
   'no_show',
 ]);
 
+/**
+ * "Still looking for a driver — we'll keep trying until 10:30 AM" (scheduled
+ * rides whose search was re-armed). The time is shown ONLY when the server sent
+ * a valid `retryUntil`; otherwise the sentence stops at "keep trying".
+ */
+export function searchingBanner(retryUntil: string | null): string {
+  const until = retryUntil ? new Date(retryUntil) : null;
+  if (!until || Number.isNaN(until.getTime())) {
+    return "Still looking for a driver — we'll keep trying";
+  }
+  const time = until.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  return `Still looking for a driver — we'll keep trying until ${time}`;
+}
+
 export interface RideTrackingPanelProps {
   status: RideStatus;
+  /** Scheduled ride still searching after a re-arm; null/absent for every other ride. */
+  searchRetry?: { retryUntil: string | null } | null;
   driver: DriverPosition | null;
   onNewBooking: () => void;
   /** Cancel the active ride. Shown only before the trip starts (a rider cannot
@@ -45,6 +62,7 @@ export interface RideTrackingPanelProps {
  * driver marker live in the page; this panel is the text/controls. */
 export function RideTrackingPanel({
   status,
+  searchRetry = null,
   driver,
   onNewBooking,
   onCancel,
@@ -56,6 +74,7 @@ export function RideTrackingPanel({
   // A rider may bail any time before the trip starts; once `in_progress` the
   // server rejects a client cancel, so hide the control.
   const canCancel = !terminal && status !== 'in_progress';
+  const searching = searchRetry !== null && (status === 'requested' || status === 'dispatching');
   return (
     <section
       data-testid="tracking-panel"
@@ -68,7 +87,7 @@ export function RideTrackingPanel({
       }}
     >
       <div data-testid="tracking-status" style={{ fontSize: 16, fontWeight: 700 }}>
-        {BANNER[status]}
+        {searching ? searchingBanner(searchRetry.retryUntil) : BANNER[status]}
       </div>
       {driver && !terminal && (
         <div data-testid="tracking-live" style={{ fontSize: 12, color: '#2563eb', marginTop: 6 }}>

@@ -231,6 +231,52 @@ describe('connectBookingSocket solo ride subscription', () => {
   });
 });
 
+describe('ride_dispatch_retry + snapshot retryUntil (RCAB-E8.S13)', () => {
+  it('forwards retry events for the followed ride only', () => {
+    ioMock.mockReset();
+    const s = fakeSocket(true);
+    ioMock.mockReturnValue(s);
+    const conn = connectBookingSocket(() => Promise.resolve('t'));
+    const seen: unknown[] = [];
+    conn.onDispatchRetry((p) => seen.push(p));
+    conn.subscribeRide('r1');
+
+    s.fire('ride_dispatch_retry', { rideId: 'r1', retryCount: 1, retryUntil: '2026-11-08T10:30:00.000Z' });
+    s.fire('ride_dispatch_retry', { rideId: 'r-other', retryCount: 1 });
+    s.fire('ride_dispatch_retry', undefined);
+
+    expect(seen).toEqual([{ rideId: 'r1', retryCount: 1, retryUntil: '2026-11-08T10:30:00.000Z' }]);
+  });
+
+  it('close() drops retry handlers', () => {
+    ioMock.mockReset();
+    const s = fakeSocket(true);
+    ioMock.mockReturnValue(s);
+    const conn = connectBookingSocket(() => Promise.resolve('t'));
+    const seen: unknown[] = [];
+    conn.onDispatchRetry((p) => seen.push(p));
+    conn.subscribeRide('r1');
+    conn.close();
+    s.fire('ride_dispatch_retry', { rideId: 'r1', retryCount: 1 });
+    expect(seen).toEqual([]);
+  });
+
+  it('a ride:snapshot passes retryUntil through; one without it adds no key', () => {
+    ioMock.mockReset();
+    const s = fakeSocket(true);
+    ioMock.mockReturnValue(s);
+    const conn = connectBookingSocket(() => Promise.resolve('t'));
+    const events: Array<Record<string, unknown>> = [];
+    conn.onRideStateChanged((p) => events.push(p as unknown as Record<string, unknown>));
+    conn.subscribeRide('r1');
+
+    s.fire('ride:snapshot', { rideId: 'r1', version: 1, status: 'requested', terminal: false, retryUntil: '2026-11-08T10:30:00.000Z' });
+    s.fire('ride:snapshot', { rideId: 'r1', version: 1, status: 'requested', terminal: false });
+    expect(events[0].retryUntil).toBe('2026-11-08T10:30:00.000Z');
+    expect('retryUntil' in events[1]).toBe(false);
+  });
+});
+
 describe('subscribe ack retry on unavailable', () => {
   let s: ReturnType<typeof fakeSocket>;
   beforeEach(() => {

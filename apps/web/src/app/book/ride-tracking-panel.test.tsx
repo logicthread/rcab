@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { RideTrackingPanel, type RideTrackingPanelProps } from './ride-tracking-panel';
+import { RideTrackingPanel, searchingBanner, type RideTrackingPanelProps } from './ride-tracking-panel';
 
 const noop = () => undefined;
 
@@ -112,5 +112,58 @@ describe('RideTrackingPanel', () => {
   it('does not show the rating card on a cancelled ride', () => {
     render(panel({ status: 'cancelled' }));
     expect(screen.queryByTestId('rating-card')).not.toBeInTheDocument();
+  });
+});
+
+describe('RideTrackingPanel scheduled searching state (RCAB-E8.S13)', () => {
+  const UNTIL = '2026-11-08T10:30:00.000Z';
+  const untilText = new Date(UNTIL).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+
+  it('shows the still-looking banner with the time when the server sent the cutoff', () => {
+    render(panel({ status: 'requested', searchRetry: { retryUntil: UNTIL } }));
+    expect(screen.getByTestId('tracking-status')).toHaveTextContent(
+      `Still looking for a driver — we'll keep trying until ${untilText}`,
+    );
+  });
+
+  it('omits the time when the server did not send one (never invents a cutoff)', () => {
+    render(panel({ status: 'requested', searchRetry: { retryUntil: null } }));
+    expect(screen.getByTestId('tracking-status').textContent).toBe(
+      "Still looking for a driver — we'll keep trying",
+    );
+  });
+
+  it('omits the time for an unparseable cutoff', () => {
+    expect(searchingBanner('not-a-date')).toBe("Still looking for a driver — we'll keep trying");
+  });
+
+  it('applies to the dispatching status too', () => {
+    render(panel({ status: 'dispatching', searchRetry: { retryUntil: UNTIL } }));
+    expect(screen.getByTestId('tracking-status')).toHaveTextContent(/Still looking for a driver/);
+  });
+
+  it('a normal searching ride (no searchRetry) keeps "Finding your driver..."', () => {
+    const { rerender } = render(panel({ status: 'requested' }));
+    expect(screen.getByTestId('tracking-status')).toHaveTextContent('Finding your driver…');
+    rerender(panel({ status: 'dispatching' }));
+    expect(screen.getByTestId('tracking-status')).toHaveTextContent('Finding your driver…');
+  });
+
+  it('offers Cancel while searching and invokes onCancel', async () => {
+    const onCancel = vi.fn();
+    render(panel({ status: 'requested', searchRetry: { retryUntil: UNTIL }, onCancel }));
+    await userEvent.click(screen.getByTestId('tracking-cancel'));
+    expect(onCancel).toHaveBeenCalledOnce();
+  });
+
+  it('the terminal no_driver shows the normal no-driver message even if a stale searchRetry lingers', () => {
+    render(panel({ status: 'no_driver', searchRetry: { retryUntil: UNTIL } }));
+    expect(screen.getByTestId('tracking-status')).toHaveTextContent('No driver available — please try again');
+    expect(screen.queryByTestId('tracking-cancel')).not.toBeInTheDocument();
+  });
+
+  it('once a driver is assigned the searching text is gone', () => {
+    render(panel({ status: 'accepted', searchRetry: { retryUntil: UNTIL } }));
+    expect(screen.getByTestId('tracking-status')).toHaveTextContent('Driver assigned');
   });
 });

@@ -34,7 +34,7 @@ import {
 } from './assignment.repository';
 import { DriverAssignmentProjection } from './driver-assignment.projection';
 import { withTxRetry } from './tx-retry';
-import { rearmScheduledRide } from '../scheduled/scheduled-retry';
+import { rearmScheduledRide, type ScheduledRetryOptions } from '../scheduled/scheduled-retry';
 import { scheduledWindowFromPolicy, type ScheduledDispatchWindow } from '../scheduled/scheduled-window';
 import {
   wave2JobId as waveTwoJobId,
@@ -97,6 +97,8 @@ interface DispatchParams {
   candidateHeadroom: number;
   /** Window for scheduled rides (RCAB-E8.S8): 4 min by default, see scheduled-window.ts. */
   scheduled: ScheduledDispatchWindow;
+  /** Scheduled retry cutoff (RCAB-E8.S13), see scheduled-retry.ts. */
+  scheduledRetry: ScheduledRetryOptions;
 }
 
 /** What the accept transaction decided, plus what to tell people after commit. */
@@ -142,6 +144,7 @@ export class DispatchService {
       offerTtlMs: d.offerTtlMs,
       candidateHeadroom: d.candidateHeadroom,
       scheduled: scheduledWindowFromPolicy(policy),
+      scheduledRetry: { cutoffAfterPickupMs: policy.scheduled.retryCutoffAfterPickupMs },
     };
   }
 
@@ -633,18 +636,63 @@ export class DispatchService {
    * commit. The passenger hears about it on the first re-arm only.
    */
   private async retryScheduledRide(rideId: string, generation: number | undefined): Promise<void> {
-    const retried = await rearmScheduledRide(this.db, rideId, generation);
+    const retried = await rearmScheduledRide(this.db, rideId, generation, this.params.scheduledRetry);
     if (!retried) return;
+    if (retried.outcome === 'no_driver') {
+      // Past the retry cutoff: the ride ended as no_driver in the same
+      // transaction. Same passenger-facing tail as a normal ride's no_driver.
+      await this.afterScheduledNoDriver(rideId, retried.passengerId, retried.revokedOffers, retried.generation);
+      return;
+    }
     this.notifyRevoked({ kind: 'solo', rideId }, retried.revokedOffers, 'revoked');
     if (retried.firstRetry) {
       this.safely('ride_dispatch_retry', () =>
         this.bus.toUser(retried.passengerId, 'ride_dispatch_retry', {
           rideId,
           retryCount: retried.retryCount,
+          retryUntil: retried.retryUntil.toISOString(),
         }),
       );
     }
     await this.removeTimers(rideId, retried.previousGeneration);
+  }
+
+  /**
+   * Post-commit tail of a scheduled ride that ended `no_driver` at its retry
+   * cutoff. Mirrors the normal hard-fail tail above (same events, same payloads):
+   * revoke the live offers on the drivers' side, tell the passenger and the ride
+   * room, drop the timers.
+   */
+  private async afterScheduledNoDriver(
+    rideId: string,
+    passengerId: string,
+    revokedOffers: RevokedOffer[],
+    generation: number,
+  ): Promise<void> {
+    this.notifyRevoked({ kind: 'solo', rideId }, revokedOffers, 'revoked');
+    this.safely('ride_no_driver', () => this.bus.toUser(passengerId, 'ride_no_driver', { rideId }));
+    this.safely('ride_state_changed', () =>
+      this.bus.toRide(rideId, 'ride_state_changed', {
+        rideId,
+        state: 'no_driver',
+        by: 'system',
+        version: rideStatusVersion('no_driver'),
+      }),
+    );
+    await this.removeTimers(rideId, generation);
+  }
+
+  /**
+   * Notify + clean up after the reconciler ended a scheduled ride past its retry
+   * cutoff (the DB transition already committed in `rearmScheduledRide`).
+   */
+  async onScheduledNoDriver(ended: {
+    rideId: string;
+    passengerId: string;
+    generation: number;
+    revokedOffers: RevokedOffer[];
+  }): Promise<void> {
+    await this.afterScheduledNoDriver(ended.rideId, ended.passengerId, ended.revokedOffers, ended.generation);
   }
 
   /**

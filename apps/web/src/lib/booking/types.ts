@@ -96,6 +96,7 @@ export interface SoloRideResponse {
 /** Forward solo lifecycle states the rider's tracking view reacts to (RCAB-E4.S7). */
 export type RideStatus =
   | 'requested'
+  | 'dispatching'
   | 'accepted'
   | 'en_route'
   | 'arrived'
@@ -120,6 +121,23 @@ export interface RideStateChangedEvent {
   by: string;
   /** Status rank; absent on legacy emits (the wrapper derives it from `state`). */
   version?: number;
+  /**
+   * Only set when produced from a `ride:snapshot` of a scheduled ride that is
+   * still searching: ISO instant after which the server stops retrying. Absent
+   * or null = the server did not send a cutoff.
+   */
+  retryUntil?: string | null;
+}
+
+/**
+ * `ride_dispatch_retry` (scheduled rides): the accept window closed with no
+ * driver and the server re-armed the search. Sent to the passenger on the first
+ * re-arm; `retryUntil` is the server's retry cutoff (RCAB-E8.S13).
+ */
+export interface RideDispatchRetryEvent {
+  rideId: string;
+  retryCount: number;
+  retryUntil?: string | null;
 }
 
 /** Authoritative solo ride state (server `ride:snapshot`). */
@@ -129,6 +147,8 @@ export interface RideSnapshotEvent {
   status: string;
   terminal: boolean;
   driverId: string | null;
+  /** Scheduled rides still searching only; see `RideStateChangedEvent.retryUntil`. */
+  retryUntil?: string | null;
 }
 
 /** Subset of GET /v1/rides/:id used to rehydrate the tracking view on reload. */

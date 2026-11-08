@@ -55,6 +55,7 @@ describe('policy schema', () => {
       wakeLeadMs: 10 * 60_000,
       dispatchWindowMs: 240_000,
       dispatchWaveOneMs: 120_000,
+      retryCutoffAfterPickupMs: 30 * 60_000,
       dispatchConcurrency: 5,
     });
     expect(p.matching).toEqual({
@@ -137,6 +138,21 @@ describe('buildPolicy — reading and overrides', () => {
     } finally {
       if (before === undefined) delete process.env.DISPATCH_K2;
       else process.env.DISPATCH_K2 = before;
+    }
+  });
+
+  it('scheduled retry cutoff (RCAB-E8.S13): 30 min default, env override, 0 allowed, negative/garbage rejected', () => {
+    expect(buildPolicy().scheduled.retryCutoffAfterPickupMs).toBe(1_800_000);
+    expect(
+      buildPolicy({ SCHEDULED_RETRY_CUTOFF_AFTER_PICKUP_MS: '600000' }).scheduled.retryCutoffAfterPickupMs,
+    ).toBe(600_000);
+    expect(
+      buildPolicy({ SCHEDULED_RETRY_CUTOFF_AFTER_PICKUP_MS: '0' }).scheduled.retryCutoffAfterPickupMs,
+    ).toBe(0);
+    for (const bad of ['-1', 'soon', '1.5']) {
+      expect(() => buildPolicy({ SCHEDULED_RETRY_CUTOFF_AFTER_PICKUP_MS: bad })).toThrow(
+        /SCHEDULED_RETRY_CUTOFF_AFTER_PICKUP_MS/,
+      );
     }
   });
 

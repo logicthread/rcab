@@ -1,13 +1,13 @@
-import { Inject, Injectable, Logger, OnApplicationBootstrap, OnModuleDestroy } from '@nestjs/common';
+import { Inject, Injectable, Logger, OnApplicationBootstrap, OnModuleDestroy, Optional } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import type { Job, Queue } from 'bullmq';
 import { and, eq, gt, inArray, sql } from 'drizzle-orm';
 import { POLICY, type Policy } from '../../config/policy/policy';
-import { rearmScheduledRide } from '../scheduled/scheduled-retry';
+import { rearmScheduledRide, type ScheduledRetryOptions } from '../scheduled/scheduled-retry';
 import { scheduledWindowFromPolicy, type ScheduledDispatchWindow } from '../scheduled/scheduled-window';
 import { DRIZZLE_DB, type DrizzleDb } from '../../infra/db/drizzle.module';
 import { dispatchOffer, rides, sharedRide } from '../../db/schema';
-import { HARD_FAIL_JOB, WAVE_TIMEOUT_JOB } from '../dispatch/dispatch.service';
+import { DispatchService, HARD_FAIL_JOB, WAVE_TIMEOUT_JOB } from '../dispatch/dispatch.service';
 import {
   DISPATCH_QUEUE_NAME,
   MATCHING_QUEUE_NAME,
@@ -34,6 +34,8 @@ export interface ReconcileReport {
   timersRestored: number;
   /** Scheduled rides re-armed under a new generation because their window closed unanswered. */
   scheduledRetried: number;
+  /** Scheduled rides ended as no_driver because the retry cutoff had passed. */
+  scheduledExpired: number;
   poolExpireRearmed: number;
   outboxPending: number;
   outboxOldestPendingAgeS: number | null;
@@ -64,6 +66,7 @@ export class DispatchReconciler implements OnApplicationBootstrap, OnModuleDestr
   private readonly hardFailMs: number;
   private readonly poolTimeoutMs: number;
   private readonly scheduledWindow: ScheduledDispatchWindow;
+  private readonly scheduledRetry: ScheduledRetryOptions;
   private readonly everyMs: number;
   /** Ignore trips touched this recently: the relay/worker is probably mid-flight. */
   private readonly graceMs: number;
@@ -76,11 +79,15 @@ export class DispatchReconciler implements OnApplicationBootstrap, OnModuleDestr
     @InjectQueue(SCHEDULED_QUEUE_NAME) private readonly scheduledQueue: Queue,
     @InjectQueue(MATCHING_QUEUE_NAME) private readonly matchingQueue: Queue,
     @Inject(POLICY) policy: Policy,
+    // Passenger / driver notification after the reconciler ends a scheduled ride
+    // at its retry cutoff. Optional so a harness without realtime still builds.
+    @Optional() private readonly dispatch?: DispatchService,
   ) {
     // Same knobs as DispatchService / PoolLifecycleService (one policy object).
     this.waveOneTimeoutMs = policy.dispatch.waveOneTimeoutMs;
     this.hardFailMs = policy.dispatch.hardFailMs;
     this.scheduledWindow = scheduledWindowFromPolicy(policy);
+    this.scheduledRetry = { cutoffAfterPickupMs: policy.scheduled.retryCutoffAfterPickupMs };
     this.poolTimeoutMs = policy.matching.poolTimeoutMs;
     this.everyMs = policy.outbox.reconcileIntervalMs;
     this.graceMs = policy.outbox.reconcileGraceMs;
@@ -121,6 +128,7 @@ export class DispatchReconciler implements OnApplicationBootstrap, OnModuleDestr
       dispatchRearmed: 0,
       timersRestored: 0,
       scheduledRetried: 0,
+      scheduledExpired: 0,
       poolExpireRearmed: 0,
       outboxPending: 0,
       outboxOldestPendingAgeS: null,
@@ -146,6 +154,7 @@ export class DispatchReconciler implements OnApplicationBootstrap, OnModuleDestr
         report.dispatchRearmed +
         report.timersRestored +
         report.scheduledRetried +
+        report.scheduledExpired +
         report.poolExpireRearmed >
       0
     ) {
@@ -323,14 +332,25 @@ export class DispatchReconciler implements OnApplicationBootstrap, OnModuleDestr
 
     // A scheduled ride still `requested` after its window, with no timer left to
     // close that window (lost, or exhausted), is RETRIED under a new generation
-    // with a fresh window, never expired and never capped (owner decision,
-    // RCAB-E8.S8). Same transaction + generation guard as the hard-fail path, so
-    // a concurrent hard-fail / cancel / accept makes this a no-op (null). Not
-    // announced to the passenger from here: only the hard-fail path notifies.
+    // with a fresh window (owner decision, RCAB-E8.S8) until the retry cutoff
+    // after its pickup time, after which it ends as no_driver (RCAB-E8.S13). Same
+    // transaction + generation guard as the hard-fail path, so a concurrent
+    // hard-fail / cancel / accept makes this a no-op (null). A re-arm is not
+    // announced to the passenger from here (only the hard-fail path does); the
+    // terminal no_driver is, since nothing else ever will.
     if (ctx.scheduled && !hasHardFail) {
       const windowStart = (offers.firstOfferedAt ?? ctx.idleSince).getTime();
       if (Date.now() >= windowStart + hardFailMs) {
-        if (await rearmScheduledRide(this.db, tripId, generation)) report.scheduledRetried++;
+        const settled = await rearmScheduledRide(this.db, tripId, generation, this.scheduledRetry);
+        if (settled?.outcome === 'rearmed') report.scheduledRetried++;
+        if (settled?.outcome === 'no_driver') {
+          // Past the retry cutoff: ended as no_driver in the transaction; tell
+          // the passenger exactly as the hard-fail path does.
+          report.scheduledExpired++;
+          await this.dispatch?.onScheduledNoDriver(settled).catch((err: unknown) => {
+            this.log.error({ err, rideId: tripId }, 'scheduled no_driver notification failed');
+          });
+        }
         return;
       }
     }

@@ -867,6 +867,8 @@ describe('DispatchService.onRideCancelled / releaseDispatch', () => {
 describe('DispatchService: scheduled window (RCAB-E8.S8)', () => {
   const job = (data: HardFailJob) => ({ data }) as Job<HardFailJob>;
   const retryResult = (o: Record<string, unknown> = {}) => ({
+    outcome: 'rearmed' as const,
+    retryUntil: new Date('2026-11-08T10:30:00.000Z'),
     rideId: RIDE,
     passengerId: 'c-1',
     previousGeneration: 1,
@@ -920,10 +922,14 @@ describe('DispatchService: scheduled window (RCAB-E8.S8)', () => {
     const m = makeService();
     m.ridesRepo.findById.mockResolvedValue(soloRide({ id: RIDE, type: 'scheduled' }));
     await m.svc.handleHardFail(job({ rideId: RIDE, kind: 'solo', generation: 1 }));
-    expect(rearm).toHaveBeenCalledWith(m.db, RIDE, 1);
+    expect(rearm).toHaveBeenCalledWith(m.db, RIDE, 1, { cutoffAfterPickupMs: 1_800_000 });
     expect(m.ridesRepo.markNoDriver).not.toHaveBeenCalled();
     expect(m.bus.toUser).toHaveBeenCalledTimes(1);
-    expect(m.bus.toUser).toHaveBeenCalledWith('c-1', 'ride_dispatch_retry', { rideId: RIDE, retryCount: 1 });
+    expect(m.bus.toUser).toHaveBeenCalledWith('c-1', 'ride_dispatch_retry', {
+      rideId: RIDE,
+      retryCount: 1,
+      retryUntil: '2026-11-08T10:30:00.000Z',
+    });
     expect(m.bus.toUser).not.toHaveBeenCalledWith('c-1', 'ride_no_driver', expect.anything());
     expect(m.bus.toDriver).toHaveBeenCalledWith(DRIVER, 'ride_offer_revoked', expect.objectContaining({ offerId: OFFER }));
     expect(m.queue.remove).toHaveBeenCalledWith(hardFailJobId(RIDE, 1));
@@ -940,6 +946,52 @@ describe('DispatchService: scheduled window (RCAB-E8.S8)', () => {
     await m.svc.handleHardFail(job({ rideId: RIDE, kind: 'solo', generation: 1 }));
     expect(m.bus.toUser).not.toHaveBeenCalled();
     expect(m.ridesRepo.markNoDriver).not.toHaveBeenCalled();
+  });
+
+  it('passes the policy retry cutoff to the re-arm transaction', async () => {
+    rearm.mockReset().mockResolvedValue(null);
+    const m = makeService({ SCHEDULED_RETRY_CUTOFF_AFTER_PICKUP_MS: '600000' });
+    m.ridesRepo.findById.mockResolvedValue(soloRide({ id: RIDE, type: 'scheduled' }));
+    await m.svc.handleHardFail(job({ rideId: RIDE, kind: 'solo', generation: 1 }));
+    expect(rearm).toHaveBeenCalledWith(m.db, RIDE, 1, { cutoffAfterPickupMs: 600_000 });
+  });
+
+  it('past the retry cutoff the scheduled ride ends as no_driver with the normal terminal notifications', async () => {
+    rearm.mockReset().mockResolvedValue({
+      outcome: 'no_driver',
+      rideId: RIDE,
+      passengerId: 'c-1',
+      generation: 4,
+      retryUntil: new Date('2026-11-08T10:30:00.000Z'),
+      revokedOffers: [{ offerId: OFFER, driverId: DRIVER }],
+    });
+    const m = makeService();
+    m.ridesRepo.findById.mockResolvedValue(soloRide({ id: RIDE, type: 'scheduled' }));
+    await m.svc.handleHardFail(job({ rideId: RIDE, kind: 'solo', generation: 4 }));
+    // Same passenger-facing events as a normal ride's hard-fail no_driver.
+    expect(m.bus.toUser).toHaveBeenCalledWith('c-1', 'ride_no_driver', { rideId: RIDE });
+    expect(m.bus.toUser).not.toHaveBeenCalledWith('c-1', 'ride_dispatch_retry', expect.anything());
+    expect(m.bus.toRide).toHaveBeenCalledWith(
+      RIDE,
+      'ride_state_changed',
+      expect.objectContaining({ state: 'no_driver', by: 'system' }),
+    );
+    expect(m.bus.toDriver).toHaveBeenCalledWith(DRIVER, 'ride_offer_revoked', expect.objectContaining({ offerId: OFFER }));
+    expect(m.queue.remove).toHaveBeenCalledWith(hardFailJobId(RIDE, 4));
+    expect(m.ridesRepo.markNoDriver).not.toHaveBeenCalled();
+  });
+
+  it('onScheduledNoDriver (reconciler path) sends the same terminal notifications', async () => {
+    const m = makeService();
+    await m.svc.onScheduledNoDriver({
+      rideId: RIDE,
+      passengerId: 'c-1',
+      generation: 2,
+      revokedOffers: [],
+    });
+    expect(m.bus.toUser).toHaveBeenCalledWith('c-1', 'ride_no_driver', { rideId: RIDE });
+    expect(m.bus.toRide).toHaveBeenCalledWith(RIDE, 'ride_state_changed', expect.objectContaining({ state: 'no_driver' }));
+    expect(m.queue.remove).toHaveBeenCalledWith(hardFailJobId(RIDE, 2));
   });
 
   it('a normal ride still goes to no_driver (never re-armed)', async () => {

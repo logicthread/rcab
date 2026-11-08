@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { scheduledWindowFromPolicy } from './scheduled-window';
+import { scheduledRetryUntil, scheduledWindowFromPolicy } from './scheduled-window';
 import { buildPolicy } from '../../config/policy/policy';
 
 const cfg = (o: Record<string, unknown> = {}) => ({ get: (k: string) => o[k] });
@@ -31,5 +31,20 @@ describe('scheduledWindowFromPolicy', () => {
     [{ SCHEDULED_DISPATCH_WAVE_ONE_MS: '0' }],
   ])('rejects invalid config %j', (o) => {
     expect(() => scheduledWindowFromConfig(cfg(o))).toThrow(/SCHEDULED_DISPATCH/);
+  });
+});
+
+describe('scheduledRetryUntil', () => {
+  it('is scheduled_for plus the cutoff', () => {
+    expect(scheduledRetryUntil(new Date('2026-11-08T10:00:00.000Z'), 1_800_000).toISOString()).toBe(
+      '2026-11-08T10:30:00.000Z',
+    );
+  });
+
+  it('uses the policy default of 30 minutes', () => {
+    const cutoff = buildPolicy(cfg()).scheduled.retryCutoffAfterPickupMs;
+    expect(scheduledRetryUntil(new Date('2026-11-08T10:00:00.000Z'), cutoff).toISOString()).toBe(
+      '2026-11-08T10:30:00.000Z',
+    );
   });
 });

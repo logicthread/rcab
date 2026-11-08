@@ -12,13 +12,13 @@ ride lifecycle, sessions, rate limits, realtime cadence, the outbox loop, and th
   (one deployment), then run `pnpm policy:doc`. "Code-fixed" knobs have no env var: change them in the schema.
 - **Clients:** `apps/web/src/config/policy.ts` and `apps/driver-app/lib/core/config/policy.dart`.
 
-56 server knobs (53 env-overridable) in 11 categories, 9 cross-field rules, 8 web and 9 driver-app knobs.
+57 server knobs (54 env-overridable) in 11 categories, 9 cross-field rules, 8 web and 9 driver-app knobs.
 
 ## Contents
 
 - Pricing & fares (10)
 - Dispatch (normal rides) (9)
-- Scheduled booking (6)
+- Scheduled booking (7)
 - Shared-ride matching & pools (6)
 - Ride lifecycle (3)
 - Driver presence (2)
@@ -72,7 +72,8 @@ Booking window, wake lead and the scheduled accept window.
 | `scheduled.minLeadMs` | `SCHEDULED_MIN_LEAD_MS` | 900000 (15 min) | integer ≥ 0 | ms | Earliest bookable pickup, measured from now. | RCAB-E6.S2 / features-scheduled-booking: 15 min – 24 h window. |
 | `scheduled.maxLeadMs` | `SCHEDULED_MAX_LEAD_MS` | 86400000 (1 d) | integer ≥ 1 | ms | Latest bookable pickup, measured from now. | RCAB-E6.S2 / features-scheduled-booking: 15 min – 24 h window. |
 | `scheduled.wakeLeadMs` | `SCHEDULED_WAKE_LEAD_MS` | 600000 (10 min) | integer ≥ 0 | ms | Wake a scheduled ride (start dispatch) this long before pickup (T−10). | RCAB-E6.S3 / features-scheduled-booking: wake at T−10 min; kept by Stage-C F-1. |
-| `scheduled.dispatchWindowMs` | `SCHEDULED_DISPATCH_WINDOW_MS` | 240000 (4 min) | integer ≥ 1 | ms | Scheduled rides: accept/escalation window after wake; unanswered → retried (no cap), never expired. | owner 2026-11-06 (Stage-C flag F-1, RCAB-E8.S8): scheduled window 4 min. |
+| `scheduled.dispatchWindowMs` | `SCHEDULED_DISPATCH_WINDOW_MS` | 240000 (4 min) | integer ≥ 1 | ms | Scheduled rides: accept/escalation window after wake; unanswered → retried until the retry cutoff, then no_driver. | owner 2026-11-06 (Stage-C flag F-1, RCAB-E8.S8): scheduled window 4 min. |
+| `scheduled.retryCutoffAfterPickupMs` | `SCHEDULED_RETRY_CUTOFF_AFTER_PICKUP_MS` | 1800000 (30 min) | integer ≥ 0 | ms | Scheduled rides: stop re-arming an unanswered ride this long after its scheduled pickup time; it then ends as no_driver. | owner 2026-11-08: stop retrying 30 min after scheduled pickup; tunable. |
 | `scheduled.dispatchWaveOneMs` | `SCHEDULED_DISPATCH_WAVE_ONE_MS` | ⌊scheduled.dispatchWindowMs / 2⌋ = 120000 (2 min) | integer ≥ 1 | ms | Scheduled rides: delay from wave 1 to wave 2 inside the window. | owner 2026-11-06 (F-1): wave 2 at half the window by default. |
 | `scheduled.dispatchConcurrency` | `SCHEDULED_DISPATCH_CONCURRENCY` | 5 | integer ≥ 1 | jobs | Wake jobs processed in parallel by one api process. | RCAB-E6.S3: modest default for the Phase-0 VPS budget. |
 
