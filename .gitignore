@@ -70,3 +70,6 @@ apps/api/migrations/*.snapshot
 
 # Claude Code agent worktrees
 .claude/worktrees/
+
+# k6 load identities (dev/test only, RCAB-E8.S12)
+infra/load/tokens.generated.json
