@@ -125,6 +125,7 @@ audience: both
 | RCAB-E8.S7 | [[story-rcab-e8-s7-review-remediation-stage-ab]] — Review remediation Stage A+B (runtime, config, sessions, booking, idempotency) | ▶ |
 | RCAB-E8.S8 | [[story-rcab-e8-s8-review-remediation-stage-c]] — Review remediation Stage C (offer auth, driver exclusivity, durable dispatch, pool transactions) | ▶ |
 | RCAB-E8.S9 | [[story-rcab-e8-s9-shared-fare-readjustment-policy]] — Shared fare readjustment policy (replaces the fixed-at-join stand-in) | · |
+| RCAB-E8.S10 | [[story-rcab-e8-s10-central-policy-config]] — Centralize business policy configuration (one typed, validated table + generated overview) | ▶ |
 
 ## E9 — Pilot rollout → Demo 8 · "Real drivers, real city"
 *Closed pilot, observation, iteration to Phase-0 scale.* See [[epic-e9-pilot-rollout]].
