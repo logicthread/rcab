@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import type { RideStatus } from '../../lib/booking/types';
 import type { DriverPosition } from '../../lib/booking/store';
+import { WEB_POLICY } from '../../config/policy';
 
 const BANNER: Record<RideStatus, string> = {
   requested: 'Finding your driver…',
@@ -150,7 +151,7 @@ function RatingCard({
         value={text}
         onChange={(e) => setText(e.target.value)}
         placeholder="Add a comment (optional)"
-        maxLength={1000}
+        maxLength={WEB_POLICY.booking.ratingCommentMaxLength}
         rows={2}
         style={{ width: '100%', marginTop: 8, fontSize: 13, padding: 6, boxSizing: 'border-box' }}
       />

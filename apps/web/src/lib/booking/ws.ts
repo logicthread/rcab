@@ -1,4 +1,5 @@
 import { io, type Socket } from 'socket.io-client';
+import { WEB_POLICY } from '../../config/policy';
 import type {
   DriverLocationEvent,
   PoolSnapshotEvent,
@@ -52,8 +53,8 @@ export interface VersionGate {
 }
 
 /** Total subscribe attempts on `unavailable` (1 initial + 4 retries). */
-const SUBSCRIBE_MAX_TRIES = 5;
-const SUBSCRIBE_BACKOFF_MS = [1_000, 2_000, 4_000, 8_000];
+const SUBSCRIBE_MAX_TRIES = WEB_POLICY.realtime.subscribeMaxTries;
+const SUBSCRIBE_BACKOFF_MS = WEB_POLICY.realtime.subscribeBackoffMs;
 
 export function createVersionGate(): VersionGate {
   let followed: string | null = null;
@@ -124,7 +125,7 @@ export function connectBookingSocket(getToken: TokenProvider): BookingSocket {
       );
     },
     reconnection: true,
-    reconnectionDelayMax: 5_000,
+    reconnectionDelayMax: WEB_POLICY.realtime.reconnectDelayMaxMs,
   });
 
   const poolGate = createVersionGate();

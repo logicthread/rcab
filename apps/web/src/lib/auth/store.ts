@@ -1,11 +1,12 @@
 'use client';
 
 import { create } from 'zustand';
+import { WEB_POLICY } from '../../config/policy';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000';
 
 /** Refresh this long before the access token's `exp` so a request never leaves with a token about to lapse. */
-export const TOKEN_EXPIRY_SKEW_MS = 30_000;
+export const TOKEN_EXPIRY_SKEW_MS = WEB_POLICY.auth.tokenRefreshMarginMs;
 
 export interface AuthUser {
   id: string;

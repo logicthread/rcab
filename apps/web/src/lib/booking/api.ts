@@ -7,6 +7,7 @@ import type {
   SoloRideResponse,
 } from './types';
 import { useAuthStore } from '../auth/store';
+import { WEB_POLICY } from '../../config/policy';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000';
 
@@ -107,7 +108,7 @@ async function postJson<T>(
 }
 
 /** Pause before the single replay of a request the server reports as still in progress. */
-export const IDEMPOTENCY_IN_PROGRESS_RETRY_MS = 1000;
+export const IDEMPOTENCY_IN_PROGRESS_RETRY_MS = WEB_POLICY.booking.idempotencyInProgressRetryMs;
 
 /**
  * POST a create with an `Idempotency-Key`. A 409 `idempotency_request_in_progress`
