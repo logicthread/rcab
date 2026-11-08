@@ -11,6 +11,7 @@ import { OutboxRepository } from '../../src/modules/outbox/outbox.repository';
 import { DispatchReconciler } from '../../src/modules/outbox/dispatch-reconciler.service';
 import { rearmScheduledRide } from '../../src/modules/scheduled/scheduled-retry';
 import { hardFailJobId, wave2JobId } from '../../src/modules/outbox/outbox.jobs';
+import { dispatchOutcome } from '../../src/metrics';
 
 const skip = process.env.RCAB_INT_SKIPPED === '1';
 
@@ -133,12 +134,21 @@ describe.skipIf(skip)('scheduled ride retry (Postgres + BullMQ)', () => {
     await pg.end().catch(() => undefined);
   });
 
+  async function scheduledRetries(): Promise<number> {
+    return (await dispatchOutcome.get()).values
+      .filter((v) => v.labels.outcome === 'scheduled_retry' && v.labels.kind === 'solo')
+      .reduce((sum, v) => sum + v.value, 0);
+  }
+
   describe('rearmScheduledRide', () => {
     it('bumps the generation, revokes live offers and writes the new generation intent atomically; ride stays requested', async () => {
       const r = await wokenRide(1, 0);
       const driver = await offer(r.id, 1, 5, true);
+      const retries0 = await scheduledRetries();
 
       const out = await rearmScheduledRide(db as never, r.id, 1);
+      // One committed re-arm = one scheduled_retry outcome.
+      expect(await scheduledRetries()).toBe(retries0 + 1);
       expect(out).toMatchObject({
         previousGeneration: 1,
         generation: 2,
@@ -175,12 +185,15 @@ describe.skipIf(skip)('scheduled ride retry (Postgres + BullMQ)', () => {
 
     it('a duplicate timer for the same window re-arms once (generation guard)', async () => {
       const r = await wokenRide(1, 0);
+      const retries0 = await scheduledRetries();
       const results = await Promise.all([
         rearmScheduledRide(db as never, r.id, 1),
         rearmScheduledRide(db as never, r.id, 1),
         rearmScheduledRide(db as never, r.id, 1),
       ]);
       expect(results.filter(Boolean)).toHaveLength(1);
+      // Duplicate timers are deduplicated by the generation guard AND by the metric.
+      expect(await scheduledRetries()).toBe(retries0 + 1);
       expect((await ride(r.id)).dispatch_generation).toBe(2);
       expect(await intents(r.id)).toHaveLength(1);
     });

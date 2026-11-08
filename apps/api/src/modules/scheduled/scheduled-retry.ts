@@ -2,7 +2,7 @@ import { Logger } from '@nestjs/common';
 import { and, eq, sql } from 'drizzle-orm';
 import type { DrizzleDb } from '../../infra/db/drizzle.module';
 import { rides } from '../../db/schema';
-import { dispatchOutcome } from '../../metrics';
+import { recordDispatchOutcome } from '../../metrics';
 import { DispatchOfferRepository } from '../dispatch/offer.repository';
 import { enqueueOutbox } from '../outbox/outbox.writer';
 import { OutboxTopic } from '../outbox/outbox.types';
@@ -18,7 +18,7 @@ import { OutboxTopic } from '../outbox/outbox.types';
  * leaves the loop only by being accepted or cancelled. The retry count is
  * observable as `dispatch_generation - 1` (the wake is generation 1), logged on
  * every re-arm and counted in
- * `rcab_dispatch_outcome_total{outcome="scheduled_retry"}`.
+ * `rcab_dispatch_outcome_total{outcome="scheduled_retry",kind="solo"}`.
  *
  * Passenger notification policy (one per re-arm at most): the caller tells the
  * passenger only on the FIRST re-arm (`firstRetry`); later windows retry
@@ -97,7 +97,7 @@ export async function rearmScheduledRide(
     } satisfies ScheduledRetryResult;
   });
   if (result) {
-    dispatchOutcome.inc({ outcome: 'scheduled_retry' });
+    recordDispatchOutcome('scheduled_retry', 'solo');
     log.warn(
       { rideId, generation: result.generation, retryCount: result.retryCount },
       'scheduled ride had no driver this window; re-armed with a fresh window (no retry cap)',

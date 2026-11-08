@@ -12,6 +12,7 @@ import { enqueueOutbox } from '../outbox/outbox.writer';
 import { OutboxRelay } from '../outbox/outbox.relay';
 import { OutboxTopic } from '../outbox/outbox.types';
 import { IdempotencyRepository, type IdempotencyScope } from '../rides/idempotency.repository';
+import { poolClosures, poolJoins } from '../../metrics';
 import { computeStops } from './itinerary';
 import {
   PoolMembershipRepository,
@@ -236,8 +237,16 @@ export class PoolLifecycleService {
         return { seatCount: seat.seatCount, poolClosedAt, quote };
       },
       () => null,
-    );
-    if (committed === null) throw new PoolOpenRejectedError('conflict');
+    ).catch((err: unknown) => {
+      // A refusal creates nothing; count it by its typed reason (bounded set).
+      if (err instanceof PoolOpenRejectedError) poolJoins.inc({ result: err.reason });
+      throw err;
+    });
+    if (committed === null) {
+      poolJoins.inc({ result: 'conflict' });
+      throw new PoolOpenRejectedError('conflict');
+    }
+    poolJoins.inc({ result: 'opened' });
 
     const row = await this.afterCommit(poolId, { joinPassengerId: p.passengerId, kickRelay: true });
     const quote = committed.quote;
@@ -361,7 +370,10 @@ export class PoolLifecycleService {
       () => ({ joined: false, reason: 'conflict' }),
     );
 
+    // Counted after commit: a typed refusal wrote nothing, a join committed a seat.
+    poolJoins.inc({ result: result.joined ? 'joined' : result.reason });
     if (result.joined) {
+      if (result.closedFull) poolClosures.inc({ reason: 'closed_full' });
       await this.afterCommit(p.poolId, {
         joinPassengerId: p.joiner.passenger_id,
         kickRelay: result.closedFull,
@@ -391,8 +403,10 @@ export class PoolLifecycleService {
       throw new Error(`closeIfOpen(${poolId}): transaction retries exhausted`);
     }
     if (result === 'closed') {
+      poolClosures.inc({ reason: 'closed_timeout' });
       await this.afterCommit(poolId, { joinPassengerId: null, kickRelay: true });
     } else if (result === 'aborted_empty') {
+      poolClosures.inc({ reason: 'aborted_empty' });
       this.log.warn({ poolId }, 'open pool with no members timed out → aborted');
       await this.afterCommit(poolId, { joinPassengerId: null, kickRelay: false });
     }

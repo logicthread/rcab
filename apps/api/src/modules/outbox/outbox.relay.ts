@@ -14,6 +14,7 @@ import {
 import { OutboxRepository, type LeasedOutboxRow } from './outbox.repository';
 import { OutboxTopic } from './outbox.types';
 import { POLICY, getPolicy, type Policy } from '../../config/policy/policy';
+import { outboxPublish } from '../../metrics';
 
 /** Raised for a row the relay can never publish; the row is exhausted at once. */
 class PermanentPublishError extends Error {}
@@ -121,6 +122,7 @@ export class OutboxRelay implements OnApplicationBootstrap, OnModuleDestroy {
         continue;
       }
       published++;
+      outboxPublish.inc({ result: 'published' });
       try {
         const acked = await this.repo.ack(row.id, row.leaseToken);
         if (!acked) {
@@ -140,6 +142,8 @@ export class OutboxRelay implements OnApplicationBootstrap, OnModuleDestroy {
     const permanent = err instanceof PermanentPublishError;
     try {
       const outcome = await this.repo.fail(row.id, row.leaseToken, message, { permanent });
+      // Attempts, counted separately from business completions.
+      outboxPublish.inc({ result: outcome });
       const ctx = { outboxId: row.id, topic: row.topic, attempts: row.attempts, outcome };
       if (outcome === 'exhausted') {
         this.log.error({ ...ctx, err }, 'outbox row exhausted; operator or reconciler must re-arm');

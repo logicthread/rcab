@@ -9,6 +9,7 @@ import { enqueueOutbox } from '../outbox/outbox.writer';
 import { OutboxTopic } from '../outbox/outbox.types';
 import { toRow, type RideRow } from './ride-row';
 import { getPolicy } from '../../config/policy/policy';
+import { recordDispatchOutcome, recordRideTransition } from '../../metrics';
 
 export type { RideRow } from './ride-row';
 
@@ -160,6 +161,8 @@ export class RidesRepository {
     });
 
     if (inserted) {
+      // Counted once, after the ride + its intent committed (replays insert nothing).
+      recordRideTransition('none', 'requested');
       return { row: toRow(inserted), created: true, requestFingerprint: fingerprint };
     }
     const existing = await this.findByIdempotencyScope(
@@ -212,7 +215,7 @@ export class RidesRepository {
    * the driver already holds an active trip, or the ride already has a driver.
    */
   async claimSolo(rideId: string, driverId: string): Promise<RideRow | null> {
-    return this.db.transaction(async (tx) => {
+    const claimed = await this.db.transaction(async (tx) => {
       const ride = await this.assignments.lockSoloTrip(tx, rideId);
       if (!ride || ride.status !== 'requested' || ride.driverId) return null;
       const generation = Math.max(ride.dispatchGeneration, 1);
@@ -228,6 +231,11 @@ export class RidesRepository {
       await this.offers.revokeLiveForTrip(tx, trip);
       return row;
     });
+    if (claimed) {
+      recordRideTransition('requested', 'accepted');
+      recordDispatchOutcome('assigned', 'solo');
+    }
+    return claimed;
   }
 
   /**
@@ -241,7 +249,7 @@ export class RidesRepository {
     rideId: string,
     generation?: number,
   ): Promise<{ row: RideRow; revokedOffers: RevokedOffer[] } | null> {
-    return this.db.transaction(async (tx) => {
+    const failed = await this.db.transaction(async (tx) => {
       const ride = await this.assignments.lockSoloTrip(tx, rideId);
       if (!ride || ride.status !== 'requested' || ride.driverId) return null;
       if (generation !== undefined && generation !== ride.dispatchGeneration) return null;
@@ -253,6 +261,11 @@ export class RidesRepository {
       const revokedOffers = await this.offers.revokeLiveForTrip(tx, { kind: 'solo', rideId });
       return { row: toRow(updated[0]), revokedOffers };
     });
+    if (failed) {
+      recordRideTransition('requested', 'no_driver');
+      recordDispatchOutcome('no_driver', 'solo');
+    }
+    return failed;
   }
 
   /**
@@ -272,7 +285,7 @@ export class RidesRepository {
     fromStatus: string,
     toStatus: string,
   ): Promise<RideTransitionResult> {
-    return this.db.transaction(async (tx) => {
+    const result = await this.db.transaction(async (tx): Promise<RideTransitionResult> => {
       const rows = await tx.select().from(rides).where(eq(rides.id, rideId)).for('update').limit(1);
       const current = rows[0];
       if (!current) return { ok: false, reason: 'not_found' };
@@ -290,6 +303,8 @@ export class RidesRepository {
       }
       return { ok: true, row: toRow(updated[0]) };
     });
+    if (result.ok) recordRideTransition(fromStatus, toStatus);
+    return result;
   }
 
   /**
@@ -314,7 +329,9 @@ export class RidesRepository {
     noShowWaitMs: number;
   }): Promise<RideCancelResult> {
     const { rideId, actor, actorId, isNoShow, reason, noShowWaitMs } = params;
-    return this.db.transaction(async (tx) => {
+    let fromStatus = '';
+    let wasDispatching = false;
+    const result = await this.db.transaction(async (tx): Promise<RideCancelResult> => {
       const rows = await tx.select().from(rides).where(eq(rides.id, rideId)).for('update').limit(1);
       const current = rows[0];
       if (!current) return { ok: false, reason: 'not_found' };
@@ -324,6 +341,9 @@ export class RidesRepository {
       if (!owns) return { ok: false, reason: 'not_owner' };
 
       const now = new Date();
+      fromStatus = current.status;
+      // A scheduled ride is generation 0 until its wake: not yet in dispatch.
+      wasDispatching = current.dispatchGeneration >= 1;
       let toStatus: 'cancelled' | 'no_show';
       if (isNoShow) {
         // No-show is driver-only (the controller enforces the role) and only
@@ -360,5 +380,11 @@ export class RidesRepository {
       }
       return { ok: true, row: toRow(updated[0]), revokedOffers };
     });
+    if (result.ok) {
+      recordRideTransition(fromStatus, result.row.status);
+      // Cancelled while still unassigned: a dispatch generation ended by the rider.
+      if (fromStatus === 'requested' && wasDispatching) recordDispatchOutcome('cancelled', 'solo');
+    }
+    return result;
   }
 }

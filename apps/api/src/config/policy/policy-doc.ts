@@ -280,6 +280,24 @@ export function renderEnvBlock(): string {
   return lines.join('\n');
 }
 
+/**
+ * The load-test gates for k6 (`infra/load`): the `perfBudget` category at its
+ * schema defaults, rendered as JSON k6 can `open()` at init. Generated, never
+ * edited: the policy schema stays the single place a target is decided
+ * (RCAB-E8.S12).
+ */
+export function renderPerfBudget(): string {
+  const defaults = defaultPolicy().perfBudget as unknown as Record<string, number>;
+  const out: Record<string, unknown> = {
+    _generated:
+      'by `pnpm policy:doc` from apps/api/src/config/policy/policy.schema.ts (perfBudget); do not edit. Override per run with k6 -e PERF_BUDGET_<NAME>=... (see infra/load/lib/config.js).',
+  };
+  for (const k of policyKnobs().filter((e) => e.category === 'perfBudget')) {
+    out[k.name] = { value: defaults[k.name], unit: k.knob.unit, env: k.knob.env };
+  }
+  return JSON.stringify(out, null, 2);
+}
+
 /** Replace the generated block in an env example (or append it when absent). */
 export function spliceEnvBlock(existing: string, block: string): string {
   const start = existing.indexOf(ENV_BLOCK_START);

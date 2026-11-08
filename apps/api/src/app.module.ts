@@ -22,6 +22,7 @@ import { RatingModule } from './modules/rating/rating.module';
 import { ScheduledModule } from './modules/scheduled/scheduled.module';
 import { OutboxModule } from './modules/outbox/outbox.module';
 import { DispatchRunnerModule } from './modules/dispatch/dispatch-runner.module';
+import { MetricsModule } from './modules/metrics/metrics.module';
 import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
 import { MetricsMiddleware } from './common/middleware/metrics.middleware';
 import { AppExceptionFilter } from './common/filters/app-exception.filter';
@@ -71,6 +72,7 @@ function parseRedisConnection() {
     ScheduledModule,
     OutboxModule,
     DispatchRunnerModule,
+    MetricsModule,
   ],
   providers: [
     { provide: APP_FILTER, useClass: AppExceptionFilter },

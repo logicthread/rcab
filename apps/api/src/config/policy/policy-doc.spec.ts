@@ -9,6 +9,7 @@ import {
   humanMs,
   parseDartPolicy,
   renderEnvBlock,
+  renderPerfBudget,
   renderPolicyDoc,
   spliceEnvBlock,
   webKnobs,
@@ -164,3 +165,26 @@ describe('formatting helpers', () => {
     );
   });
 });
+
+describe('renderPerfBudget (k6 load gates)', () => {
+  const budget = JSON.parse(renderPerfBudget()) as Record<string, unknown>;
+
+  it('carries every perfBudget knob with its default, unit and env override name, and nothing else', () => {
+    const knobs = policyKnobs().filter((k) => k.category === 'perfBudget');
+    expect(knobs.length).toBeGreaterThan(0);
+    expect(Object.keys(budget).filter((k) => k !== '_generated').sort()).toEqual(knobs.map((k) => k.name).sort());
+    expect(budget.apiP99Ms).toEqual({ value: 800, unit: 'ms', env: 'PERF_BUDGET_API_P99_MS' });
+    expect(budget.errorRate5xx).toEqual({ value: 0.005, unit: 'ratio', env: 'PERF_BUDGET_ERROR_RATE_5XX' });
+  });
+
+  it('is deterministic and says it is generated', () => {
+    expect(renderPerfBudget()).toBe(renderPerfBudget());
+    expect(String(budget._generated)).toContain('pnpm policy:doc');
+  });
+
+  it('the committed file is current (pnpm policy:doc:check enforces the same in CI)', () => {
+    const committed = readFileSync(join(__dirname, '../../../../../infra/load/perf-budget.generated.json'), 'utf8');
+    expect(committed).toBe(renderPerfBudget() + '\n');
+  });
+});
+

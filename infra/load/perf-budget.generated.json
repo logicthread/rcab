@@ -1,0 +1,38 @@
+{
+  "_generated": "by `pnpm policy:doc` from apps/api/src/config/policy/policy.schema.ts (perfBudget); do not edit. Override per run with k6 -e PERF_BUDGET_<NAME>=... (see infra/load/lib/config.js).",
+  "apiP95Ms": {
+    "value": 400,
+    "unit": "ms",
+    "env": "PERF_BUDGET_API_P95_MS"
+  },
+  "apiP99Ms": {
+    "value": 800,
+    "unit": "ms",
+    "env": "PERF_BUDGET_API_P99_MS"
+  },
+  "quoteP95Ms": {
+    "value": 250,
+    "unit": "ms",
+    "env": "PERF_BUDGET_QUOTE_P95_MS"
+  },
+  "dispatchP95Ms": {
+    "value": 3000,
+    "unit": "ms",
+    "env": "PERF_BUDGET_DISPATCH_P95_MS"
+  },
+  "errorRate5xx": {
+    "value": 0.005,
+    "unit": "ratio",
+    "env": "PERF_BUDGET_ERROR_RATE_5XX"
+  },
+  "minBusinessSuccessRate": {
+    "value": 0.99,
+    "unit": "ratio",
+    "env": "PERF_BUDGET_MIN_BUSINESS_SUCCESS"
+  },
+  "driverLocationIntervalMs": {
+    "value": 5000,
+    "unit": "ms",
+    "env": "PERF_BUDGET_DRIVER_LOCATION_INTERVAL_MS"
+  }
+}

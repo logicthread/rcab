@@ -417,6 +417,57 @@ export const POLICY_SCHEMA = {
       decision: 'RCAB-E8.S8 (R07).',
     }),
   },
+
+  observability: {
+    sampleIntervalMs: ms({
+      env: 'METRICS_SAMPLE_INTERVAL_MS', default: 15_000, min: 1000, unit: 'ms',
+      description: 'How often the gauges sampled from Postgres / Redis (active + busy drivers, outbox backlog, match rate) refresh.',
+      decision: 'RCAB-E8.S12: 15 s, the same cadence as the driver auto-offline sweep and a typical Prometheus scrape.',
+    }),
+    matchRateWindowMs: ms({
+      env: 'METRICS_MATCH_RATE_WINDOW_MS', default: 15 * MIN, min: MIN, unit: 'ms',
+      description: 'Rolling window of closed pools behind rcab_shared_match_rate (riders who shared a ride / riders in pools that closed).',
+      decision: 'RCAB-E8.S12: 15 min, long enough to hold several pool lifetimes (matching.poolTimeoutMs is 60 s) at pilot volume.',
+    }),
+  },
+
+  perfBudget: {
+    apiP95Ms: ms({
+      env: 'PERF_BUDGET_API_P95_MS', default: 400, min: 1, unit: 'ms',
+      description: 'Load-test gate: API p95 latency across the exercised scenarios. Not read by the running API.',
+      decision: '90-quality/performance-budget.md backend table: API p95 ≤ 400 ms.',
+    }),
+    apiP99Ms: ms({
+      env: 'PERF_BUDGET_API_P99_MS', default: 800, min: 1, unit: 'ms',
+      description: 'Load-test gate: API p99 latency across the exercised scenarios. Not read by the running API.',
+      decision: '90-quality/performance-budget.md backend table: API p99 ≤ 800 ms (the ApiHighP99Latency alert at 1.5 s is deliberately looser).',
+    }),
+    quoteP95Ms: ms({
+      env: 'PERF_BUDGET_QUOTE_P95_MS', default: 250, min: 1, unit: 'ms',
+      description: 'Load-test gate: POST /v1/rides/quote p95 (local OSRM).',
+      decision: '90-quality/performance-budget.md backend table: quote p95 ≤ 250 ms.',
+    }),
+    dispatchP95Ms: ms({
+      env: 'PERF_BUDGET_DISPATCH_P95_MS', default: 3000, min: 1, unit: 'ms',
+      description: 'Load-test gate: ride create -> first ride_offer received by a simulated driver, p95.',
+      decision: '90-quality/performance-budget.md backend table: dispatch p95 ≤ 3.0 s (request -> first offer).',
+    }),
+    errorRate5xx: num({
+      env: 'PERF_BUDGET_ERROR_RATE_5XX', default: 0.005, min: 0, max: 1, unit: 'ratio',
+      description: 'Load-test gate (error budget): share of HTTP responses that may be 5xx.',
+      decision: '90-quality/performance-budget.md backend table: 5xx rate ≤ 0.5 % (the ApiHighErrorRate alert at 1 % is deliberately looser).',
+    }),
+    minBusinessSuccessRate: num({
+      env: 'PERF_BUDGET_MIN_BUSINESS_SUCCESS', default: 0.99, min: 0, max: 1, unit: 'ratio',
+      description: 'Load-test gate: share of quote / ride-create / location operations that must SUCCEED (a fast 409 or 503 storm is not capacity).',
+      decision: 'RCAB-E8.S12 (R12): success is measured as a business outcome, not an HTTP-status-any answer.',
+    }),
+    driverLocationIntervalMs: ms({
+      env: 'PERF_BUDGET_DRIVER_LOCATION_INTERVAL_MS', default: 5000, min: 100, unit: 'ms',
+      description: 'Load-test driver location cadence per simulated driver; mirrors the driver app foreground task.',
+      decision: 'server-mirror of apps/driver-app/lib/core/config/policy.dart locationIntervalMs (RCAB-E3.S4: 5 s). Keep in step.',
+    }),
+  },
 } as const satisfies Record<string, Record<string, Knob>>;
 
 export type PolicySchema = typeof POLICY_SCHEMA;
@@ -435,6 +486,12 @@ export const POLICY_CATEGORIES: Record<PolicyCategory, { title: string; blurb: s
   idempotency: { title: 'Idempotency', blurb: 'Create-request claim reclaim.' },
   rateLimits: { title: 'Rate limits', blurb: 'HTTP throttling.' },
   outbox: { title: 'Outbox relay & reconciler', blurb: 'Durable work publication, retries and repair loop.' },
+  observability: { title: 'Observability sampling', blurb: 'Cadence and window of the sampled business gauges.' },
+  perfBudget: {
+    title: 'Performance budget (load-test gates)',
+    blurb:
+      'Phase-0 targets the k6 workloads in infra/load assert (generated into infra/load/perf-budget.generated.json). Targets, not results; the running API does not read them.',
+  },
 };
 
 // ── Derived types ────────────────────────────────────────────────────────────
@@ -509,6 +566,11 @@ export const POLICY_RULES: readonly PolicyRule[] = [
     keys: ['realtime.geoIndexGateMs', 'drivers.staleAfterMs'],
     description: 'last_seen is refreshed through the geo gate, so it must be shorter than the stale cutoff',
     check: (p) => p.realtime.geoIndexGateMs < p.drivers.staleAfterMs,
+  },
+  {
+    keys: ['perfBudget.apiP95Ms', 'perfBudget.apiP99Ms'],
+    description: 'the p95 budget cannot exceed the p99 budget (apiP95Ms ≤ apiP99Ms)',
+    check: (p) => p.perfBudget.apiP95Ms <= p.perfBudget.apiP99Ms,
   },
   {
     keys: ['sessions.accessTokenTtlS', 'sessions.refreshTokenTtlMs'],
