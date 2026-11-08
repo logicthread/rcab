@@ -27,6 +27,21 @@ pipeline {
                 sh 'pnpm test:load'
             }
         }
+
+        // RCAB-E8.S3: monthly (1st, UTC) end-to-end rehearsal of the backup image and the
+        // restore drill on fixture data. Secret-free: throwaway containers, a freshly
+        // generated age key, a local-backend rclone remote. The restore drill against REAL
+        // backups needs the age identity and is a separate operator cron: see
+        // docs/operations/recovery-runbook.md section 3.
+        stage('Backup + restore rehearsal (monthly)') {
+            when {
+                expression { return sh(returnStdout: true, script: 'date -u +%d').trim() == '01' }
+            }
+            steps {
+                sh 'scripts/recovery/backup-rehearsal.sh'
+                sh 'scripts/recovery/redis-loss-drill.sh'
+            }
+        }
     }
 
     post {
