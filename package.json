@@ -19,7 +19,7 @@
     "test:int": "turbo test:int",
     "test:e2e": "turbo test:e2e",
     "test:load": "k6 run infra/load/probe.js",
-    "verify": "pnpm lint && pnpm --filter @rcab/api run test:cov && pnpm test:int",
+    "verify": "pnpm lint && pnpm policy:doc:check && pnpm --filter @rcab/api run test:cov && pnpm test:int",
     "prod:up": "bash scripts/prod-up.sh",
     "prod:down": "docker compose -f infra/docker/docker-compose.prod.yml -f infra/docker/docker-compose.prod-test.yml down -v",
     "prod:smoke": "bash scripts/prod-smoke.sh",
@@ -29,7 +29,9 @@
     "system:probe": "node scripts/system-probe.mjs",
     "test:probe": "vitest run --config vitest.probe.config.mjs",
     "code:graph": "node scripts/codegraph/build.mjs",
-    "code:graph:check": "node scripts/codegraph/drift-check.mjs"
+    "code:graph:check": "node scripts/codegraph/drift-check.mjs",
+    "policy:doc": "tsx scripts/policy-doc.ts",
+    "policy:doc:check": "tsx scripts/policy-doc.ts --check"
   },
   "devDependencies": {
     "@typescript-eslint/eslint-plugin": "^8.32.1",

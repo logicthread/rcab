@@ -21,6 +21,9 @@ pipeline {
         stage('Lint') {
             steps {
                 sh 'pnpm lint'
+                // docs/POLICY.md + api.env.example policy block are generated from
+                // the business policy schema (RCAB-E8.S10); fail on drift.
+                sh 'pnpm policy:doc:check'
                 // The repo root has no tsconfig, so a root-level `tsc --noEmit` checks
                 // nothing. Type-check every workspace package instead; workspace
                 // libs are built first because the api/web resolve them via dist/.
