@@ -1,32 +1,35 @@
 # rcab code graph
 
-Generated 2026-07-17T09:29:28+05:30 @ d679c633de12eb5b306ffd6e3c5da184447593ba. **Do not hand-edit** — run `pnpm code:graph`.
+Generated 2026-11-07T17:35:02+05:30 @ c4820cddf41084958c663694a8c0cf1235ce99ad. **Do not hand-edit** — run `pnpm code:graph`.
 
-Nodes: 247 (143 file, 17 module, 56 symbol, 22 route, 9 table). Edges: 390 (275 imports, 31 di-import, 34 di-provides, 22 route, 22 riverpod-provides, 6 fk).
+Nodes: 308 (181 file, 20 module, 67 symbol, 25 route, 15 table). Edges: 621 (469 imports, 43 di-import, 46 di-provides, 25 route, 22 riverpod-provides, 16 fk).
 
 > Known v1 limit: import edges are syntactic (per-file), so barrel re-exports may under-resolve.
 
-## NestJS modules (17)
+## NestJS modules (20)
 
-- **AppModule** `apps/api/src/app.module.ts` → AuthModule, DispatchModule, DriversModule, DrizzleModule, FirebaseModule, GoogleModule, HealthModule, RatingModule, RealtimeModule, RedisModule, RideLifecycleModule, RidesModule, ScheduledModule, VehiclesModule
+- **AppModule** `apps/api/src/app.module.ts` → AuthModule, DispatchModule, DispatchRunnerModule, DriversModule, DrizzleModule, FirebaseModule, GoogleModule, HealthModule, OutboxModule, PolicyModule, RatingModule, RealtimeModule, RedisModule, RideLifecycleModule, RidesModule, ScheduledModule, VehiclesModule
 - **AuthModule** `apps/api/src/modules/auth/auth.module.ts`
 - **DispatchModule** `apps/api/src/modules/dispatch/dispatch.module.ts` → MatchingModule, RealtimeModule, RidesModule
+- **DispatchRunnerModule** `apps/api/src/modules/dispatch/dispatch-runner.module.ts` → DispatchModule, MatchingModule, OutboxModule, RidesModule, ScheduledModule
 - **DriversModule** `apps/api/src/modules/drivers/drivers.module.ts` → AuthModule, RealtimeModule
 - **DrizzleModule** `apps/api/src/infra/db/drizzle.module.ts`
 - **FirebaseModule** `apps/api/src/infra/firebase/firebase.module.ts`
 - **GoogleModule** `apps/api/src/infra/google/google.module.ts`
 - **HealthModule** `apps/api/src/modules/health/health.module.ts`
-- **MatchingModule** `apps/api/src/modules/matching/matching.module.ts` → RealtimeModule
+- **MatchingModule** `apps/api/src/modules/matching/matching.module.ts` → OutboxModule, RealtimeModule
+- **OutboxModule** `apps/api/src/modules/outbox/outbox.module.ts` → ScheduledModule
+- **PolicyModule** `apps/api/src/config/policy/policy.module.ts`
 - **PricingModule** `apps/api/src/modules/pricing/pricing.module.ts`
 - **RatingModule** `apps/api/src/modules/rating/rating.module.ts` → AuthModule, RidesModule
 - **RealtimeModule** `apps/api/src/modules/realtime/realtime.module.ts` → AuthModule
 - **RedisModule** `apps/api/src/infra/redis/redis.module.ts`
-- **RideLifecycleModule** `apps/api/src/modules/ride-lifecycle/ride-lifecycle.module.ts` → MatchingModule, RealtimeModule
-- **RidesModule** `apps/api/src/modules/rides/rides.module.ts` → AuthModule, MatchingModule, PricingModule, RealtimeModule, ScheduledModule
+- **RideLifecycleModule** `apps/api/src/modules/ride-lifecycle/ride-lifecycle.module.ts` → DispatchModule, MatchingModule, RealtimeModule
+- **RidesModule** `apps/api/src/modules/rides/rides.module.ts` → AuthModule, MatchingModule, OutboxModule, PricingModule, RealtimeModule, ScheduledModule
 - **ScheduledModule** `apps/api/src/modules/scheduled/scheduled.module.ts`
 - **VehiclesModule** `apps/api/src/modules/vehicles/vehicles.module.ts` → AuthModule
 
-## HTTP routes (22)
+## HTTP routes (25)
 
 - `GET /` → HealthController.rootReady `apps/api/src/modules/health/health.controller.ts`
 - `GET /metrics` → HealthController.metrics `apps/api/src/modules/health/health.controller.ts`
@@ -41,6 +44,9 @@ Nodes: 247 (143 file, 17 module, 56 symbol, 22 route, 9 table). Edges: 390 (275 
 - `POST /v1/auth/google/link` → AuthController.googleLink `apps/api/src/modules/auth/auth.controller.ts`
 - `POST /v1/auth/google/login` → AuthController.googleLogin `apps/api/src/modules/auth/auth.controller.ts`
 - `POST /v1/auth/logout` → AuthController.logout `apps/api/src/modules/auth/auth.controller.ts`
+- `POST /v1/auth/native/firebase-exchange` → AuthController.nativeFirebaseExchange `apps/api/src/modules/auth/auth.controller.ts`
+- `POST /v1/auth/native/logout` → AuthController.nativeLogout `apps/api/src/modules/auth/auth.controller.ts`
+- `POST /v1/auth/native/refresh` → AuthController.nativeRefresh `apps/api/src/modules/auth/auth.controller.ts`
 - `POST /v1/auth/refresh` → AuthController.refresh `apps/api/src/modules/auth/auth.controller.ts`
 - `POST /v1/drivers/offline` → DriversController.goOffline `apps/api/src/modules/drivers/drivers.controller.ts`
 - `POST /v1/drivers/online` → DriversController.goOnline `apps/api/src/modules/drivers/drivers.controller.ts`
@@ -51,12 +57,18 @@ Nodes: 247 (143 file, 17 module, 56 symbol, 22 route, 9 table). Edges: 390 (275 
 - `POST /v1/rides/quote` → RidesController.quote `apps/api/src/modules/rides/rides.controller.ts`
 - `POST /v1/vehicles` → VehiclesController.create `apps/api/src/modules/vehicles/vehicles.controller.ts`
 
-## DB tables (9)
+## DB tables (15)
 
 - **appUser** (`app_user`)
 - **authRefreshToken** (`auth_refresh_token`) → appUser
 - **client** (`client`) → appUser
+- **dispatchOffer** (`dispatch_offer`) → driver, rides, sharedRide
 - **driver** (`driver`) → appUser
+- **driverActiveAssignment** (`driver_active_assignment`) → dispatchOffer, driver, rides, sharedRide
+- **idempotencyRecord** (`idempotency_record`) → appUser
+- **migrationConflict** (`migration_conflict`)
+- **outbox** (`outbox`)
+- **poolMember** (`pool_member`) → appUser, sharedRide
 - **ratings** (`ratings`)
 - **rides** (`rides`) → appUser
 - **rideStop** (`ride_stops`) → sharedRide
