@@ -1,0 +1,70 @@
+// Manual rollback job (RCAB-E8.S11). Create a Jenkins Pipeline job ("rcab-rollback")
+// pointing at this file. It re-deploys a previously released commit and verifies the
+// REAL target reports that version. It never runs migrations and never reverses one:
+// only roll back across a schema that the older version also accepts (see
+// scripts/deploy/README.md). Same credentials and job environment as Jenkinsfile.
+pipeline {
+    agent any
+
+    parameters {
+        string(
+            name: 'ROLLBACK_TO',
+            defaultValue: '',
+            description: 'Commit SHA to roll back to. Leave BLANK to use RCAB_PREVIOUS_VERSION recorded on the VPS by the last deploy.'
+        )
+    }
+
+    options {
+        timeout(time: 15, unit: 'MINUTES')
+        disableConcurrentBuilds()
+    }
+
+    stages {
+        stage('Confirm') {
+            input {
+                message 'Roll back production-like VPS?'
+                ok 'Roll back'
+                submitterParameter 'ROLLBACK_APPROVER'
+            }
+            steps {
+                echo "Rollback approved by ${env.ROLLBACK_APPROVER}; target: ${params.ROLLBACK_TO ?: '<previous recorded on host>'}"
+            }
+        }
+
+        stage('Rollback') {
+            steps {
+                withCredentials([
+                    sshUserPrivateKey(
+                        credentialsId:  'vps-ssh-key',
+                        keyFileVariable:  'SSH_KEY',
+                        usernameVariable: 'SSH_USER'
+                    ),
+                    file(credentialsId: 'vps-known-hosts', variable: 'KNOWN_HOSTS'),
+                    string(credentialsId: 'vps-host', variable: 'PROD_HOST')
+                ]) {
+                    sh '''
+                        set -eu
+                        API_URL="${PROD_API_URL:-https://$PROD_HOST}"
+                        if [ -n "${ROLLBACK_TO:-}" ]; then set -- --to "$ROLLBACK_TO"; else set -- --previous; fi
+                        bash scripts/deploy/rollback.sh "$@" \\
+                            --remote "$SSH_USER@$PROD_HOST" \\
+                            --ssh-key "$SSH_KEY" \\
+                            --known-hosts "$KNOWN_HOSTS" \\
+                            --api-url "$API_URL" \\
+                            ${PROD_WEB_URL:+--web-url "$PROD_WEB_URL"} \\
+                            --timeout 180
+                    '''
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            cleanWs()
+        }
+        failure {
+            echo "ROLLBACK FAILED — stack state unknown, intervene on the VPS. Build: ${env.BUILD_URL}"
+        }
+    }
+}

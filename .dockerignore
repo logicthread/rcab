@@ -1,0 +1,31 @@
+# Keep the build context to what the Dockerfiles COPY. Without this the host's
+# node_modules (macOS-built, symlinked into .pnpm) overlay the container install
+# and every build ships the whole Obsidian vault as context.
+**/node_modules
+**/dist
+**/.next
+**/coverage
+**/*.tsbuildinfo
+.git
+.claude
+.obsidian
+.env*
+**/.env*
+00-index
+10-product
+20-architecture
+30-domain
+40-backend
+50-clients
+60-integrations
+70-algorithms
+80-infrastructure
+90-quality
+95-delivery
+99-decisions
+docs
+codegraph
+apps/driver-app
+apps/web/test-results
+**/test-results
+system-probe-report.json

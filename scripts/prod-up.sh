@@ -25,6 +25,12 @@ if [[ -z "${FIREBASE_SERVICE_ACCOUNT_JSON:-}" ]]; then
   export FIREBASE_SERVICE_ACCOUNT_JSON
 fi
 
+# The prod Compose file requires RCAB_VERSION (it names the image tags). For the
+# local/CI prod-test the images are built from source under that tag; the smoke
+# step then asserts the running containers report the same version.
+export RCAB_VERSION="${RCAB_VERSION:-prodtest}"
+export RCAB_BUILT_AT="${RCAB_BUILT_AT:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
+
 exec docker compose \
   -f infra/docker/docker-compose.prod.yml \
   -f infra/docker/docker-compose.prod-test.yml \

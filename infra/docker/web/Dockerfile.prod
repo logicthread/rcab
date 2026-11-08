@@ -78,6 +78,17 @@ WORKDIR /app
 
 COPY --from=deploy /deploy ./
 
+# Build identity (RCAB-E8.S11). Declared LAST (cache-friendly). The version is
+# served as a static file at /version.json so a deploy can assert what is running
+# without executing the app; `next start` serves public/ from the working dir.
+ARG RCAB_VERSION=dev
+ARG RCAB_BUILT_AT=unknown
+RUN printf '{"version":"%s","builtAt":"%s"}\n' "$RCAB_VERSION" "$RCAB_BUILT_AT" > public/version.json
+LABEL org.opencontainers.image.revision=$RCAB_VERSION \
+      org.opencontainers.image.created=$RCAB_BUILT_AT \
+      org.opencontainers.image.title="rcab-web" \
+      org.opencontainers.image.source="https://github.com/logicthread/rcab"
+
 USER rcab
 
 EXPOSE 3000

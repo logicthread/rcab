@@ -12,6 +12,19 @@ export class HealthController {
     return this.health.liveness();
   }
 
+  /**
+   * Running build identity (RCAB-E8.S11). Injected at image build time via the
+   * RCAB_VERSION / RCAB_BUILT_AT build args (Dockerfile.prod); the release
+   * pipeline asserts `version` equals the commit it just deployed.
+   */
+  @Get('v1/health/version')
+  version(): { version: string; builtAt: string } {
+    return {
+      version: process.env.RCAB_VERSION || 'dev',
+      builtAt: process.env.RCAB_BUILT_AT || 'unknown',
+    };
+  }
+
   @Get('v1/health/ready')
   @HttpCode(200)
   async ready(@Res() res: Response): Promise<void> {
