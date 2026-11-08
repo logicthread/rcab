@@ -1,14 +1,14 @@
 # rcab code graph
 
-Generated 2026-11-07T17:35:02+05:30 @ c4820cddf41084958c663694a8c0cf1235ce99ad. **Do not hand-edit** — run `pnpm code:graph`.
+Generated 2026-11-08T21:49:16+05:30 @ 83329b5953c37c0b266f3faebe12d72d7135248d. **Do not hand-edit** — run `pnpm code:graph`.
 
-Nodes: 308 (181 file, 20 module, 67 symbol, 25 route, 15 table). Edges: 621 (469 imports, 43 di-import, 46 di-provides, 25 route, 22 riverpod-provides, 16 fk).
+Nodes: 313 (183 file, 21 module, 68 symbol, 26 route, 15 table). Edges: 643 (487 imports, 45 di-import, 47 di-provides, 26 route, 22 riverpod-provides, 16 fk).
 
 > Known v1 limit: import edges are syntactic (per-file), so barrel re-exports may under-resolve.
 
-## NestJS modules (20)
+## NestJS modules (21)
 
-- **AppModule** `apps/api/src/app.module.ts` → AuthModule, DispatchModule, DispatchRunnerModule, DriversModule, DrizzleModule, FirebaseModule, GoogleModule, HealthModule, OutboxModule, PolicyModule, RatingModule, RealtimeModule, RedisModule, RideLifecycleModule, RidesModule, ScheduledModule, VehiclesModule
+- **AppModule** `apps/api/src/app.module.ts` → AuthModule, DispatchModule, DispatchRunnerModule, DriversModule, DrizzleModule, FirebaseModule, GoogleModule, HealthModule, MetricsModule, OutboxModule, PolicyModule, RatingModule, RealtimeModule, RedisModule, RideLifecycleModule, RidesModule, ScheduledModule, VehiclesModule
 - **AuthModule** `apps/api/src/modules/auth/auth.module.ts`
 - **DispatchModule** `apps/api/src/modules/dispatch/dispatch.module.ts` → MatchingModule, RealtimeModule, RidesModule
 - **DispatchRunnerModule** `apps/api/src/modules/dispatch/dispatch-runner.module.ts` → DispatchModule, MatchingModule, OutboxModule, RidesModule, ScheduledModule
@@ -18,6 +18,7 @@ Nodes: 308 (181 file, 20 module, 67 symbol, 25 route, 15 table). Edges: 621 (469
 - **GoogleModule** `apps/api/src/infra/google/google.module.ts`
 - **HealthModule** `apps/api/src/modules/health/health.module.ts`
 - **MatchingModule** `apps/api/src/modules/matching/matching.module.ts` → OutboxModule, RealtimeModule
+- **MetricsModule** `apps/api/src/modules/metrics/metrics.module.ts` → OutboxModule
 - **OutboxModule** `apps/api/src/modules/outbox/outbox.module.ts` → ScheduledModule
 - **PolicyModule** `apps/api/src/config/policy/policy.module.ts`
 - **PricingModule** `apps/api/src/modules/pricing/pricing.module.ts`
@@ -29,12 +30,13 @@ Nodes: 308 (181 file, 20 module, 67 symbol, 25 route, 15 table). Edges: 621 (469
 - **ScheduledModule** `apps/api/src/modules/scheduled/scheduled.module.ts`
 - **VehiclesModule** `apps/api/src/modules/vehicles/vehicles.module.ts` → AuthModule
 
-## HTTP routes (25)
+## HTTP routes (26)
 
 - `GET /` → HealthController.rootReady `apps/api/src/modules/health/health.controller.ts`
 - `GET /metrics` → HealthController.metrics `apps/api/src/modules/health/health.controller.ts`
 - `GET /v1/health/live` → HealthController.live `apps/api/src/modules/health/health.controller.ts`
 - `GET /v1/health/ready` → HealthController.ready `apps/api/src/modules/health/health.controller.ts`
+- `GET /v1/health/version` → HealthController.version `apps/api/src/modules/health/health.controller.ts`
 - `GET /v1/rides/:id` → RidesController.getRide `apps/api/src/modules/rides/rides.controller.ts`
 - `GET /v1/rides/:id/stops` → RidesController.listStops `apps/api/src/modules/rides/rides.controller.ts`
 - `GET /v1/vehicles` → VehiclesController.findAll `apps/api/src/modules/vehicles/vehicles.controller.ts`

@@ -1,22 +1,22 @@
 {
   "version": 1,
-  "generatedAt": "2026-11-07T17:35:02+05:30",
-  "gitSha": "c4820cddf41084958c663694a8c0cf1235ce99ad",
+  "generatedAt": "2026-11-08T21:49:16+05:30",
+  "gitSha": "83329b5953c37c0b266f3faebe12d72d7135248d",
   "counts": {
-    "nodes": 308,
-    "edges": 621,
+    "nodes": 313,
+    "edges": 643,
     "byNodeKind": {
-      "file": 181,
-      "module": 20,
-      "symbol": 67,
-      "route": 25,
+      "file": 183,
+      "module": 21,
+      "symbol": 68,
+      "route": 26,
       "table": 15
     },
     "byEdgeKind": {
-      "imports": 469,
-      "di-import": 43,
-      "di-provides": 46,
-      "route": 25,
+      "imports": 487,
+      "di-import": 45,
+      "di-provides": 47,
+      "route": 26,
       "riverpod-provides": 22,
       "fk": 16
     }
@@ -49,7 +49,8 @@
           "RatingModule",
           "ScheduledModule",
           "OutboxModule",
-          "DispatchRunnerModule"
+          "DispatchRunnerModule",
+          "MetricsModule"
         ],
         "providers": [],
         "controllers": [],
@@ -981,6 +982,49 @@
       "kind": "symbol",
       "path": "apps/api/src/modules/matching/shared-ride.repository.ts",
       "name": "SharedRideRepository",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/metrics/business-metrics.sampler.ts",
+      "kind": "file",
+      "path": "apps/api/src/modules/metrics/business-metrics.sampler.ts",
+      "name": "business-metrics.sampler.ts",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/metrics/business-metrics.sampler.ts#BusinessMetricsSampler",
+      "kind": "symbol",
+      "path": "apps/api/src/modules/metrics/business-metrics.sampler.ts",
+      "name": "BusinessMetricsSampler",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/metrics/metrics.module.ts",
+      "kind": "file",
+      "path": "apps/api/src/modules/metrics/metrics.module.ts",
+      "name": "metrics.module.ts",
+      "app": "api"
+    },
+    {
+      "meta": {
+        "imports": [
+          "OutboxModule"
+        ],
+        "providers": [
+          "BusinessMetricsSampler"
+        ],
+        "controllers": [],
+        "exports": [
+          "BusinessMetricsSampler"
+        ]
+      },
+      "id": "apps/api/src/modules/metrics/metrics.module.ts#MetricsModule",
+      "kind": "module",
+      "path": "apps/api/src/modules/metrics/metrics.module.ts",
+      "name": "MetricsModule",
       "app": "api"
     },
     {
@@ -2499,6 +2543,19 @@
     {
       "meta": {
         "method": "GET",
+        "path": "/v1/health/version",
+        "controller": "HealthController",
+        "handler": "version"
+      },
+      "id": "route:GET /v1/health/version",
+      "kind": "route",
+      "path": "apps/api/src/modules/health/health.controller.ts",
+      "name": "GET /v1/health/version",
+      "app": "api"
+    },
+    {
+      "meta": {
+        "method": "GET",
         "path": "/v1/rides/:id",
         "controller": "RidesController",
         "handler": "getRide"
@@ -3232,6 +3289,14 @@
     },
     {
       "from": "apps/api/src/app.module.ts",
+      "to": "apps/api/src/modules/metrics/metrics.module.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./modules/metrics/metrics.module"
+      }
+    },
+    {
+      "from": "apps/api/src/app.module.ts",
       "to": "apps/api/src/modules/outbox/outbox.module.ts",
       "kind": "imports",
       "meta": {
@@ -3343,6 +3408,12 @@
     {
       "from": "apps/api/src/app.module.ts#AppModule",
       "to": "apps/api/src/modules/health/health.module.ts#HealthModule",
+      "kind": "di-import",
+      "meta": {}
+    },
+    {
+      "from": "apps/api/src/app.module.ts#AppModule",
+      "to": "apps/api/src/modules/metrics/metrics.module.ts#MetricsModule",
       "kind": "di-import",
       "meta": {}
     },
@@ -4106,6 +4177,14 @@
     },
     {
       "from": "apps/api/src/modules/dispatch/dispatch.processor.ts",
+      "to": "apps/api/src/metrics.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../metrics"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/dispatch/dispatch.processor.ts",
       "to": "apps/api/src/modules/dispatch/dispatch-start.service.ts",
       "kind": "imports",
       "meta": {
@@ -4150,6 +4229,14 @@
       "kind": "imports",
       "meta": {
         "spec": "../../infra/redis/redis.module"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/dispatch/dispatch.service.ts",
+      "to": "apps/api/src/metrics.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../metrics"
       }
     },
     {
@@ -4230,6 +4317,14 @@
       "kind": "imports",
       "meta": {
         "spec": "../outbox/outbox.jobs"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/dispatch/dispatch.service.ts",
+      "to": "apps/api/src/modules/outbox/outbox.types.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../outbox/outbox.types"
       }
     },
     {
@@ -4561,6 +4656,14 @@
       }
     },
     {
+      "from": "apps/api/src/modules/health/health.controller.ts#HealthController",
+      "to": "route:GET /v1/health/version",
+      "kind": "route",
+      "meta": {
+        "handler": "version"
+      }
+    },
+    {
       "from": "apps/api/src/modules/health/health.module.ts",
       "to": "apps/api/src/modules/health/health.controller.ts",
       "kind": "imports",
@@ -4856,6 +4959,14 @@
     },
     {
       "from": "apps/api/src/modules/matching/pool-lifecycle.service.ts",
+      "to": "apps/api/src/metrics.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../metrics"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/matching/pool-lifecycle.service.ts",
       "to": "apps/api/src/modules/matching/itinerary.ts",
       "kind": "imports",
       "meta": {
@@ -5063,6 +5174,74 @@
       }
     },
     {
+      "from": "apps/api/src/modules/metrics/business-metrics.sampler.ts",
+      "to": "apps/api/src/config/policy/policy.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../config/policy/policy"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/metrics/business-metrics.sampler.ts",
+      "to": "apps/api/src/infra/db/drizzle.module.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../infra/db/drizzle.module"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/metrics/business-metrics.sampler.ts",
+      "to": "apps/api/src/infra/redis/redis.module.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../infra/redis/redis.module"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/metrics/business-metrics.sampler.ts",
+      "to": "apps/api/src/metrics.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../metrics"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/metrics/business-metrics.sampler.ts",
+      "to": "apps/api/src/modules/outbox/outbox.repository.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../outbox/outbox.repository"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/metrics/metrics.module.ts",
+      "to": "apps/api/src/modules/metrics/business-metrics.sampler.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./business-metrics.sampler"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/metrics/metrics.module.ts",
+      "to": "apps/api/src/modules/outbox/outbox.module.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../outbox/outbox.module"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/metrics/metrics.module.ts#MetricsModule",
+      "to": "apps/api/src/modules/metrics/business-metrics.sampler.ts#BusinessMetricsSampler",
+      "kind": "di-provides",
+      "meta": {}
+    },
+    {
+      "from": "apps/api/src/modules/metrics/metrics.module.ts#MetricsModule",
+      "to": "apps/api/src/modules/outbox/outbox.module.ts#OutboxModule",
+      "kind": "di-import",
+      "meta": {}
+    },
+    {
       "from": "apps/api/src/modules/outbox/dispatch-reconciler.service.ts",
       "to": "apps/api/src/config/policy/policy.ts",
       "kind": "imports",
@@ -5198,6 +5377,14 @@
       "kind": "imports",
       "meta": {
         "spec": "../../config/policy/policy"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/outbox/outbox.relay.ts",
+      "to": "apps/api/src/metrics.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../metrics"
       }
     },
     {
@@ -5510,6 +5697,14 @@
     },
     {
       "from": "apps/api/src/modules/realtime/realtime-snapshot.service.ts",
+      "to": "apps/api/src/config/policy/policy.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../config/policy/policy"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/realtime/realtime-snapshot.service.ts",
       "to": "apps/api/src/infra/db/drizzle.module.ts",
       "kind": "imports",
       "meta": {
@@ -5530,6 +5725,14 @@
       "kind": "imports",
       "meta": {
         "spec": "./realtime.protocol"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/realtime/realtime-snapshot.service.ts",
+      "to": "apps/api/src/modules/scheduled/scheduled-window.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../scheduled/scheduled-window"
       }
     },
     {
@@ -5562,6 +5765,14 @@
       "kind": "imports",
       "meta": {
         "spec": "../../infra/redis/redis.module"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/realtime/realtime.gateway.ts",
+      "to": "apps/api/src/metrics.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../metrics"
       }
     },
     {
@@ -6334,6 +6545,14 @@
     },
     {
       "from": "apps/api/src/modules/rides/rides.repository.ts",
+      "to": "apps/api/src/metrics.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../metrics"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/rides/rides.repository.ts",
       "to": "apps/api/src/modules/dispatch/assignment.repository.ts",
       "kind": "imports",
       "meta": {
@@ -6426,6 +6645,14 @@
       "kind": "imports",
       "meta": {
         "spec": "../outbox/outbox.writer"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/scheduled/scheduled-retry.ts",
+      "to": "apps/api/src/modules/scheduled/scheduled-window.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./scheduled-window"
       }
     },
     {
