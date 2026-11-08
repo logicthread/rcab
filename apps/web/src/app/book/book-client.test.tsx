@@ -13,6 +13,8 @@ vi.mock('../../lib/geo/nominatim', async (importOriginal) => ({
 }));
 const wsConn = vi.hoisted(() => ({
   poolHandler: null as null | ((p: unknown) => void),
+  stateHandler: null as null | ((p: unknown) => void),
+  retryHandler: null as null | ((p: unknown) => void),
   subscribePool: vi.fn(),
   subscribeRide: vi.fn(),
 }));
@@ -25,7 +27,14 @@ vi.mock('../../lib/booking/ws', () => ({
     },
     onPoolSnapshot: () => () => undefined,
     onDriverLocation: () => () => undefined,
-    onRideStateChanged: () => () => undefined,
+    onRideStateChanged: (h: (p: unknown) => void) => {
+      wsConn.stateHandler = h;
+      return () => undefined;
+    },
+    onDispatchRetry: (h: (p: unknown) => void) => {
+      wsConn.retryHandler = h;
+      return () => undefined;
+    },
     subscribePool: wsConn.subscribePool,
     subscribeRide: wsConn.subscribeRide,
     close: () => undefined,
@@ -453,5 +462,80 @@ describe('BookPage sign out (F12)', () => {
     expect(window.localStorage.getItem('rcab_active_ride')).toBeNull();
     expect(useBookingStore.getState().pickup).toBeNull();
     expect(useBookingStore.getState().quote).toBeNull();
+  });
+});
+
+describe('BookPage scheduled searching state (RCAB-E8.S13)', () => {
+  const UNTIL = '2026-11-08T10:30:00.000Z';
+  const untilText = new Date(UNTIL).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+
+  function track(status = 'requested') {
+    act(() => {
+      useBookingStore.getState().setSoloRequested('r-sched', status);
+    });
+  }
+
+  beforeEach(() => {
+    wsConn.stateHandler = null;
+    wsConn.retryHandler = null;
+  });
+
+  it('ride_dispatch_retry flips the tracking banner to "still looking ... until <time>" with a Cancel button', async () => {
+    render(<BookClient />);
+    track();
+    expect(screen.getByTestId('tracking-status')).toHaveTextContent('Finding your driver');
+    await waitFor(() => expect(wsConn.retryHandler).not.toBeNull());
+
+    act(() => wsConn.retryHandler!({ rideId: 'r-sched', retryCount: 1, retryUntil: UNTIL }));
+
+    const banner = screen.getByTestId('tracking-status');
+    expect(banner).toHaveTextContent(/Still looking for a driver/);
+    expect(banner).toHaveTextContent(`we'll keep trying until ${untilText}`);
+    expect(screen.getByTestId('tracking-cancel')).toBeInTheDocument();
+  });
+
+  it('a ride:snapshot (requested + retryUntil) restores the searching state after a reload/reconnect', async () => {
+    render(<BookClient />);
+    track();
+    await waitFor(() => expect(wsConn.stateHandler).not.toBeNull());
+
+    act(() =>
+      wsConn.stateHandler!({ rideId: 'r-sched', state: 'requested', by: 'snapshot', version: 1, retryUntil: UNTIL }),
+    );
+    expect(screen.getByTestId('tracking-status')).toHaveTextContent(`until ${untilText}`);
+  });
+
+  it('shows no time when the server sent none', async () => {
+    render(<BookClient />);
+    track();
+    await waitFor(() => expect(wsConn.retryHandler).not.toBeNull());
+    act(() => wsConn.retryHandler!({ rideId: 'r-sched', retryCount: 1 }));
+    const banner = screen.getByTestId('tracking-status');
+    expect(banner).toHaveTextContent("Still looking for a driver — we'll keep trying");
+    expect(banner).not.toHaveTextContent(/until/);
+  });
+
+  it('the terminal no_driver replaces the searching banner with the normal no-driver message', async () => {
+    render(<BookClient />);
+    track();
+    await waitFor(() => expect(wsConn.retryHandler).not.toBeNull());
+    act(() => wsConn.retryHandler!({ rideId: 'r-sched', retryCount: 1, retryUntil: UNTIL }));
+    act(() => wsConn.stateHandler!({ rideId: 'r-sched', state: 'no_driver', by: 'system', version: 10 }));
+    expect(screen.getByTestId('tracking-status')).toHaveTextContent('No driver available — please try again');
+    expect(screen.queryByTestId('tracking-cancel')).not.toBeInTheDocument();
+    expect(useBookingStore.getState().searchRetry).toBeNull();
+  });
+
+  it('Cancel from the searching state cancels the ride', async () => {
+    vi.mocked(api.cancelRide).mockResolvedValue({ rideId: 'r-sched', status: 'cancelled' } as never);
+    render(<BookClient />);
+    track();
+    await waitFor(() => expect(wsConn.retryHandler).not.toBeNull());
+    act(() => wsConn.retryHandler!({ rideId: 'r-sched', retryCount: 1, retryUntil: UNTIL }));
+    fireEvent.click(screen.getByTestId('tracking-cancel'));
+    await waitFor(() => expect(api.cancelRide).toHaveBeenCalledWith('r-sched'));
+    await waitFor(() =>
+      expect(screen.getByTestId('tracking-status')).toHaveTextContent('Ride cancelled'),
+    );
   });
 });

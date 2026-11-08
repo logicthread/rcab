@@ -33,3 +33,12 @@ export function scheduledWindowFromPolicy(policy: Policy): ScheduledDispatchWind
     hardFailMs: policy.scheduled.dispatchWindowMs,
   };
 }
+
+/**
+ * The moment after which an unanswered scheduled ride stops being retried and
+ * ends as `no_driver`: `scheduled_for` + `scheduled.retryCutoffAfterPickupMs`
+ * (RCAB-E8.S13). Pure, so the retry transaction and the realtime snapshot agree.
+ */
+export function scheduledRetryUntil(scheduledFor: Date, cutoffAfterPickupMs: number): Date {
+  return new Date(scheduledFor.getTime() + cutoffAfterPickupMs);
+}
