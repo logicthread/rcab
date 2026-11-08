@@ -1,0 +1,90 @@
+name: rcab-recovery-drill
+
+# DISPOSABLE stack for scripts/recovery/redis-loss-drill.sh (RCAB-E8.S3).
+# Never run alongside, or instead of, the dev stack: it has its own compose
+# project name, network, volumes and loopback-only host ports, so it can run next
+# to `pnpm dev:up` without touching it. The script always passes `-p` with a
+# unique project name and removes the volumes on teardown.
+#
+# Credentials here are throwaway literals for a stack that is destroyed after the
+# drill; the JWT secret is generated per run by the script.
+
+services:
+  postgres:
+    build:
+      context: ./postgres
+    networks: [drill_net]
+    ports:
+      - "127.0.0.1:${DRILL_PG_PORT:-15432}:5432"
+    environment:
+      POSTGRES_USER: rcab
+      POSTGRES_PASSWORD: drill
+      POSTGRES_DB: rcab
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rcab -d rcab"]
+      interval: 3s
+      timeout: 3s
+      retries: 60
+      start_period: 5s
+
+  # Deliberately WITHOUT append-only persistence: this is the "Redis lost everything" case.
+  redis:
+    image: redis:7-alpine
+    networks: [drill_net]
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    ports:
+      - "127.0.0.1:${DRILL_REDIS_PORT:-16379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  api:
+    # Same image/command as the dev stack (source is bind-mounted, `pnpm dev`).
+    # `image:` lets a locally built rcab-dev-api be reused instead of rebuilding.
+    image: ${DRILL_API_IMAGE:-rcab-dev-api:latest}
+    build:
+      context: ../..
+      dockerfile: infra/docker/api/Dockerfile.dev
+    networks: [drill_net]
+    ports:
+      - "127.0.0.1:${DRILL_API_PORT:-13000}:3000"
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+      DATABASE_URL: postgres://rcab:drill@postgres:5432/rcab
+      REDIS_URL: redis://redis:6379
+      OSRM_URL: http://osrm.invalid:5000
+      JWT_SECRET: ${DRILL_JWT_SECRET:?set by redis-loss-drill.sh}
+      # The api constructs the Firebase Admin client at boot and parses the key, but never
+      # calls Firebase unless someone logs in. The script generates a throwaway RSA key.
+      FIREBASE_PROJECT_ID: rcab-drill
+      FIREBASE_SERVICE_ACCOUNT_JSON: ${DRILL_FIREBASE_JSON:?set by redis-loss-drill.sh}
+      # Tuned so the drill's dispatch artefacts outlive the loss/restart window.
+      DISPATCH_WAVE_ONE_TIMEOUT_MS: "30000"
+      DISPATCH_HARD_FAIL_MS: "300000"
+    volumes:
+      - ../../apps/api:/workspace/apps/api
+      - ../../packages/shared/src:/workspace/packages/shared/src
+      - ../../packages/api-client/src:/workspace/packages/api-client/src
+      - /workspace/node_modules
+      - /workspace/apps/api/node_modules
+      - /workspace/packages/shared/node_modules
+      - /workspace/packages/api-client/node_modules
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:3000/v1/health/live || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 40
+      start_period: 15s
+
+networks:
+  drill_net:

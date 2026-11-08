@@ -1,2 +1,4 @@
-# IST 02:30 = UTC 21:00
-0 21 * * * /usr/local/bin/backup.sh >> /var/log/backup.log 2>&1
+# Nightly at 21:00 UTC = 02:30 IST. busybox crond does not pass the container
+# environment, so the job sources the snapshot written by entrypoint.sh.
+# Output goes to PID 1's stdout so `docker compose logs backup` shows it.
+0 21 * * * . /etc/backup-env.sh; /usr/local/bin/backup.sh > /proc/1/fd/1 2>&1

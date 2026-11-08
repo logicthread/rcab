@@ -130,6 +130,9 @@ services:
     command: ["osrm-routed", "--algorithm", "mld", "--port", "5000", "/data/region.osrm"]
     restart: unless-stopped
 
+  # Nightly pg_dump -Fc -> age -> /opt/rcab/backups (+ optional env-configured
+  # rclone offsite). /opt/rcab/secrets/age.key must hold the PUBLIC age recipient
+  # only. Runbook: docs/operations/recovery-runbook.md (RCAB-E8.S3).
   backup:
     build:
       context: ./backup
