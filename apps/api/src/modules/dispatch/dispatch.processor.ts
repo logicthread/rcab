@@ -1,4 +1,4 @@
-import { Processor, WorkerHost } from '@nestjs/bullmq';
+import { OnWorkerEvent, Processor, WorkerHost } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
 import type { Job } from 'bullmq';
 import {
@@ -11,6 +11,7 @@ import {
 } from './dispatch.service';
 import { DispatchStartService } from './dispatch-start.service';
 import { DISPATCH_START_JOB, type DispatchStartJobData } from '../outbox/outbox.jobs';
+import { recordDispatchOutcome } from '../../metrics';
 
 /**
  * Worker for the `dispatch` queue. Errors are never caught here: a job that
@@ -28,6 +29,20 @@ export class DispatchProcessor extends WorkerHost {
     private readonly start: DispatchStartService,
   ) {
     super();
+  }
+
+  /**
+   * A dispatch job that failed for good (BullMQ attempts used up) is a dispatch
+   * generation lost to infrastructure trouble; the reconciler will rebuild the
+   * work, but the failure must be visible. A failure that BullMQ will retry is
+   * not counted (that is an attempt, not an outcome).
+   */
+  @OnWorkerEvent('failed')
+  onFailed(job: Job | undefined): void {
+    if (!job) return;
+    if (job.attemptsMade < (job.opts?.attempts ?? 1)) return;
+    const kind = (job.data as { kind?: string } | undefined)?.kind === 'solo' ? 'solo' : 'pool';
+    recordDispatchOutcome('infra_failure', kind);
   }
 
   async process(job: Job): Promise<void> {

@@ -12,7 +12,7 @@ ride lifecycle, sessions, rate limits, realtime cadence, the outbox loop, and th
   (one deployment), then run `pnpm policy:doc`. "Code-fixed" knobs have no env var: change them in the schema.
 - **Clients:** `apps/web/src/config/policy.ts` and `apps/driver-app/lib/core/config/policy.dart`.
 
-58 server knobs (55 env-overridable) in 11 categories, 9 cross-field rules, 8 web and 9 driver-app knobs.
+67 server knobs (64 env-overridable) in 13 categories, 10 cross-field rules, 8 web and 9 driver-app knobs.
 
 ## Contents
 
@@ -27,6 +27,8 @@ ride lifecycle, sessions, rate limits, realtime cadence, the outbox loop, and th
 - Idempotency (1)
 - Rate limits (4)
 - Outbox relay & reconciler (9)
+- Observability sampling (2)
+- Performance budget (load-test gates) (7)
 - Cross-field rules
 - Client knobs (web, driver app)
 
@@ -165,6 +167,29 @@ Durable work publication, retries and repair loop.
 | `outbox.reconcileGraceMs` | `OUTBOX_RECONCILE_GRACE_MS` | 15000 (15 s) | integer ≥ 0 | ms | Trips touched more recently than this are skipped (likely mid-flight). | RCAB-E8.S8 (R07): 15 s grace. |
 | `outbox.reconcileMaxPerPass` | `OUTBOX_RECONCILE_MAX_PER_PASS` | 500 | integer ≥ 1 | trips | Upper bound of trips inspected per reconcile query. | RCAB-E8.S8 (R07). |
 
+## Observability sampling
+
+Cadence and window of the sampled business gauges.
+
+| Key | Env var | Default | Allowed | Unit | Description | Decision |
+| --- | --- | --- | --- | --- | --- | --- |
+| `observability.sampleIntervalMs` | `METRICS_SAMPLE_INTERVAL_MS` | 15000 (15 s) | integer ≥ 1000 | ms | How often the gauges sampled from Postgres / Redis (active + busy drivers, outbox backlog, match rate) refresh. | RCAB-E8.S12: 15 s, the same cadence as the driver auto-offline sweep and a typical Prometheus scrape. |
+| `observability.matchRateWindowMs` | `METRICS_MATCH_RATE_WINDOW_MS` | 900000 (15 min) | integer ≥ 60000 | ms | Rolling window of closed pools behind rcab_shared_match_rate (riders who shared a ride / riders in pools that closed). | RCAB-E8.S12: 15 min, long enough to hold several pool lifetimes (matching.poolTimeoutMs is 60 s) at pilot volume. |
+
+## Performance budget (load-test gates)
+
+Phase-0 targets the k6 workloads in infra/load assert (generated into infra/load/perf-budget.generated.json). Targets, not results; the running API does not read them.
+
+| Key | Env var | Default | Allowed | Unit | Description | Decision |
+| --- | --- | --- | --- | --- | --- | --- |
+| `perfBudget.apiP95Ms` | `PERF_BUDGET_API_P95_MS` | 400 (400 ms) | integer ≥ 1 | ms | Load-test gate: API p95 latency across the exercised scenarios. Not read by the running API. | 90-quality/performance-budget.md backend table: API p95 ≤ 400 ms. |
+| `perfBudget.apiP99Ms` | `PERF_BUDGET_API_P99_MS` | 800 (800 ms) | integer ≥ 1 | ms | Load-test gate: API p99 latency across the exercised scenarios. Not read by the running API. | 90-quality/performance-budget.md backend table: API p99 ≤ 800 ms (the ApiHighP99Latency alert at 1.5 s is deliberately looser). |
+| `perfBudget.quoteP95Ms` | `PERF_BUDGET_QUOTE_P95_MS` | 250 (250 ms) | integer ≥ 1 | ms | Load-test gate: POST /v1/rides/quote p95 (local OSRM). | 90-quality/performance-budget.md backend table: quote p95 ≤ 250 ms. |
+| `perfBudget.dispatchP95Ms` | `PERF_BUDGET_DISPATCH_P95_MS` | 3000 (3 s) | integer ≥ 1 | ms | Load-test gate: ride create -> first ride_offer received by a simulated driver, p95. | 90-quality/performance-budget.md backend table: dispatch p95 ≤ 3.0 s (request -> first offer). |
+| `perfBudget.errorRate5xx` | `PERF_BUDGET_ERROR_RATE_5XX` | 0.005 | number 0 – 1 | ratio | Load-test gate (error budget): share of HTTP responses that may be 5xx. | 90-quality/performance-budget.md backend table: 5xx rate ≤ 0.5 % (the ApiHighErrorRate alert at 1 % is deliberately looser). |
+| `perfBudget.minBusinessSuccessRate` | `PERF_BUDGET_MIN_BUSINESS_SUCCESS` | 0.99 | number 0 – 1 | ratio | Load-test gate: share of quote / ride-create / location operations that must SUCCEED (a fast 409 or 503 storm is not capacity). | RCAB-E8.S12 (R12): success is measured as a business outcome, not an HTTP-status-any answer. |
+| `perfBudget.driverLocationIntervalMs` | `PERF_BUDGET_DRIVER_LOCATION_INTERVAL_MS` | 5000 (5 s) | integer ≥ 100 | ms | Load-test driver location cadence per simulated driver; mirrors the driver app foreground task. | server-mirror of apps/driver-app/lib/core/config/policy.dart locationIntervalMs (RCAB-E3.S4: 5 s). Keep in step. |
+
 ## Cross-field rules
 
 Checked at boot after every single knob is valid.
@@ -179,6 +204,7 @@ Checked at boot after every single knob is valid.
 | the up-front shared quote must assume a reachable pool size (sharedQuoteSeats ≤ maxSeats) | `SHARED_QUOTE_SEATS`, `MATCHING_MAX_SEATS` |
 | the sweep is a seconds cron: whole seconds that divide 60 | `DRIVER_AUTO_OFFLINE_SWEEP_MS` |
 | last_seen is refreshed through the geo gate, so it must be shorter than the stale cutoff | `REALTIME_GEO_INDEX_GATE_MS`, `DRIVER_STALE_AFTER_MS` |
+| the p95 budget cannot exceed the p99 budget (apiP95Ms ≤ apiP99Ms) | `PERF_BUDGET_API_P95_MS`, `PERF_BUDGET_API_P99_MS` |
 | an access token never outlives its refresh session (accessTokenTtlS × 1000 < refreshTokenTtlMs) | `ACCESS_TOKEN_TTL_S`, `REFRESH_TOKEN_TTL_MS` |
 
 ## Client knobs

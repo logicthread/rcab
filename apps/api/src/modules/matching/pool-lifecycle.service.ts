@@ -12,6 +12,7 @@ import { enqueueOutbox } from '../outbox/outbox.writer';
 import { OutboxRelay } from '../outbox/outbox.relay';
 import { OutboxTopic } from '../outbox/outbox.types';
 import { IdempotencyRepository, type IdempotencyScope } from '../rides/idempotency.repository';
+import { poolClosures, poolJoins } from '../../metrics';
 import { computeStops } from './itinerary';
 import {
   PoolMembershipRepository,
@@ -252,8 +253,16 @@ export class PoolLifecycleService {
         return { seatCount: seat.seatCount, poolClosedAt };
       },
       () => null,
-    );
-    if (committed === null) throw new PoolOpenRejectedError('conflict');
+    ).catch((err: unknown) => {
+      // A refusal creates nothing; count it by its typed reason (bounded set).
+      if (err instanceof PoolOpenRejectedError) poolJoins.inc({ result: err.reason });
+      throw err;
+    });
+    if (committed === null) {
+      poolJoins.inc({ result: 'conflict' });
+      throw new PoolOpenRejectedError('conflict');
+    }
+    poolJoins.inc({ result: 'opened' });
 
     const row = await this.afterCommit(poolId, { joinPassengerId: p.passengerId, kickRelay: true });
     return {
@@ -325,11 +334,17 @@ export class PoolLifecycleService {
     quoteFare: SeatFareQuoter;
     idempotency?: SeatIdempotency;
   }): Promise<JoinPoolResult> {
+    // Every outcome is counted once (a typed refusal wrote nothing, a join committed a seat).
+    const done = (r: JoinPoolResult): JoinPoolResult => {
+      poolJoins.inc({ result: r.joined ? 'joined' : r.reason });
+      if (r.joined && r.closedFull) poolClosures.inc({ reason: 'closed_full' });
+      return r;
+    };
     for (let attempt = 0; attempt <= this.joinPriceRetries; attempt++) {
       const snap = await this.members.snapshotPool(this.db, p.poolId);
-      if (!snap) return { joined: false, reason: 'not_found' };
-      if (snap.pool.poolState !== 'open') return { joined: false, reason: 'pool_closed' };
-      if (snap.pool.seatCount >= snap.pool.maxSeats) return { joined: false, reason: 'pool_full' };
+      if (!snap) return done({ joined: false, reason: 'not_found' });
+      if (snap.pool.poolState !== 'open') return done({ joined: false, reason: 'pool_closed' });
+      if (snap.pool.seatCount >= snap.pool.maxSeats) return done({ joined: false, reason: 'pool_full' });
 
       // No transaction is open here: a slow OSRM cannot hold any pool lock.
       const quote = await p.quoteFare({
@@ -422,14 +437,14 @@ export class PoolLifecycleService {
           kickRelay: result.closedFull,
         });
       }
-      return result;
+      return done(result);
     }
 
     this.log.warn(
       { poolId: p.poolId, retries: this.joinPriceRetries },
       'pool kept changing while pricing the seat; join gives up (conflict)',
     );
-    return { joined: false, reason: 'conflict' };
+    return done({ joined: false, reason: 'conflict' });
   }
 
   /**
@@ -453,8 +468,10 @@ export class PoolLifecycleService {
       throw new Error(`closeIfOpen(${poolId}): transaction retries exhausted`);
     }
     if (result === 'closed') {
+      poolClosures.inc({ reason: 'closed_timeout' });
       await this.afterCommit(poolId, { joinPassengerId: null, kickRelay: true });
     } else if (result === 'aborted_empty') {
+      poolClosures.inc({ reason: 'aborted_empty' });
       this.log.warn({ poolId }, 'open pool with no members timed out → aborted');
       await this.afterCommit(poolId, { joinPassengerId: null, kickRelay: false });
     }

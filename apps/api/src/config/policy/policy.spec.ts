@@ -98,6 +98,17 @@ describe('policy schema', () => {
       reconcileGraceMs: 15_000,
       reconcileMaxPerPass: 500,
     });
+    expect(p.observability).toEqual({ sampleIntervalMs: 15_000, matchRateWindowMs: 15 * 60_000 });
+    // Phase-0 targets from 90-quality/performance-budget.md (targets, not results).
+    expect(p.perfBudget).toEqual({
+      apiP95Ms: 400,
+      apiP99Ms: 800,
+      quoteP95Ms: 250,
+      dispatchP95Ms: 3000,
+      errorRate5xx: 0.005,
+      minBusinessSuccessRate: 0.99,
+      driverLocationIntervalMs: 5000,
+    });
   });
 
   it('every knob is documented, categorised and has a unique env var', () => {
@@ -241,6 +252,7 @@ describe('buildPolicy — cross-field rules', () => {
     [{ DRIVER_AUTO_OFFLINE_SWEEP_MS: '1500' }, /divide 60/],
     [{ REALTIME_GEO_INDEX_GATE_MS: '60000' }, /stale cutoff/],
     [{ ACCESS_TOKEN_TTL_S: '2592000' }, /never outlives/],
+    [{ PERF_BUDGET_API_P95_MS: '900' }, /apiP95Ms ≤ apiP99Ms/],
   ])('rejects %j', (env, reason) => {
     const err = issuesOf(() => buildPolicy(env));
     expect(err.issues).toHaveLength(1);

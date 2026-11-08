@@ -16,6 +16,7 @@ import { createAdapter } from '@socket.io/redis-adapter';
 import type Redis from 'ioredis';
 import { REDIS } from '../../infra/redis/redis.module';
 import { getPolicy } from '../../config/policy/policy';
+import { wsConnections } from '../../metrics';
 import { RealtimeBus } from './realtime.bus';
 import { RealtimeSnapshotService, isUuid } from './realtime-snapshot.service';
 import {
@@ -169,6 +170,7 @@ export class RealtimeGateway
       const payload: JwtPayload = verifyAccessToken(this.jwt, token);
       client.data.userId = payload.sub;
       client.data.role = payload.role;
+      wsConnections.inc();
       void client.join(`user:${payload.sub}`);
       if (payload.role === 'driver') {
         void client.join(`driver:${payload.sub}`);
@@ -377,6 +379,8 @@ export class RealtimeGateway
   }
 
   handleDisconnect(client: Socket): void {
+    // Only authenticated sockets were counted on connect (userId is set after verify).
+    if (client.data?.userId) wsConnections.dec();
     this.log.debug(`WS disconnected: ${(client.data.userId as string | undefined) ?? 'unknown'}`);
   }
 

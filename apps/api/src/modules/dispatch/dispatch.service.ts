@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { POLICY, type Policy } from '../../config/policy/policy';
 import { InjectQueue } from '@nestjs/bullmq';
 import { OnEvent } from '@nestjs/event-emitter';
+import { sql } from 'drizzle-orm';
 import { Queue, type Job } from 'bullmq';
 import type Redis from 'ioredis';
 import { REDIS } from '../../infra/redis/redis.module';
@@ -34,6 +35,13 @@ import {
 } from './assignment.repository';
 import { DriverAssignmentProjection } from './driver-assignment.projection';
 import { withTxRetry } from './tx-retry';
+import {
+  observeDispatchLatency,
+  recordDispatchOutcome,
+  recordRideTransition,
+  type TripKindLabel,
+} from '../../metrics';
+import { OutboxTopic, outboxDedupeKey } from '../outbox/outbox.types';
 import { rearmScheduledRide, type ScheduledRetryOptions } from '../scheduled/scheduled-retry';
 import { scheduledWindowFromPolicy, type ScheduledDispatchWindow } from '../scheduled/scheduled-window';
 import {
@@ -105,6 +113,8 @@ interface DispatchParams {
 interface AcceptOutcome {
   result: AcceptOfferResult;
   revoked: RevokedOffer[];
+  /** When the accepted offer was created (DB clock); absent on a rejection. */
+  offeredAt?: Date;
 }
 
 function rejected(reason: AcceptOfferFailure): AcceptOutcome {
@@ -194,6 +204,7 @@ export class DispatchService {
 
     const { result } = outcome;
     if (result.ok) {
+      this.recordAccepted(result, outcome.offeredAt);
       await this.afterAccepted(driverId, offerId, result, outcome.revoked);
     } else if (result.reason !== 'conflict') {
       // A lost lock race leaves the offer live: the ack says retry, no revoke.
@@ -294,7 +305,26 @@ export class DispatchService {
     }
     await this.offers.markAccepted(tx, offerId);
     const revoked = await this.offers.revokeLiveForTrip(tx, trip, offerId);
-    return { result: { ok: true, trip, generation: offer.generation, replay: false }, revoked };
+    return {
+      result: { ok: true, trip, generation: offer.generation, replay: false },
+      revoked,
+      offeredAt: offer.offeredAt,
+    };
+  }
+
+  /**
+   * Business metrics for a COMMITTED accept (strictly after the transaction;
+   * a replay of an earlier commit is not counted again).
+   */
+  private recordAccepted(
+    result: Extract<AcceptOfferResult, { ok: true }>,
+    offeredAt: Date | undefined,
+  ): void {
+    if (result.replay) return;
+    const kind: TripKindLabel = result.trip.kind === 'solo' ? 'solo' : 'pool';
+    recordDispatchOutcome('assigned', kind);
+    if (result.trip.kind === 'solo') recordRideTransition('requested', 'accepted');
+    if (offeredAt) observeDispatchLatency('offer_to_accept', kind, (Date.now() - offeredAt.getTime()) / 1000);
   }
 
   private async afterAccepted(
@@ -445,11 +475,13 @@ export class DispatchService {
     }
     const trip: TripRef = { kind: 'solo', rideId: ride.id };
     const { k, radiusMeters } = this.waveParams(waveNumber);
-    const candidates = await this.selectCandidates(trip, generation, ride.originLat, ride.originLng, {
-      k,
-      radiusMeters,
-      seatsNeeded: 1,
-    });
+    const { drivers: candidates, priorOffers } = await this.selectCandidates(
+      trip,
+      generation,
+      ride.originLat,
+      ride.originLng,
+      { k, radiusMeters, seatsNeeded: 1 },
+    );
     if (candidates.length === 0) {
       this.log.warn(
         { rideId: ride.id, waveNumber, radiusMeters },
@@ -457,6 +489,7 @@ export class DispatchService {
       );
     }
 
+    let created = 0;
     for (const driverId of candidates) {
       const offer = await this.offers.createOffer(this.db, {
         trip,
@@ -466,6 +499,7 @@ export class DispatchService {
         ttlMs: this.params.offerTtlMs,
       });
       if (!offer) continue;
+      created++;
       const payload: SoloRideOfferPayload = {
         offerId: offer.offerId,
         rideId: ride.id,
@@ -479,6 +513,9 @@ export class DispatchService {
       this.safely('ride_offer', () => this.bus.toDriver(driverId, 'ride_offer', payload));
     }
 
+    if (waveNumber === 1 && priorOffers === 0 && created > 0) {
+      await this.observeIntentToFirstOffer(trip, generation, 'solo');
+    }
     if (waveNumber === 1) {
       await this.scheduleTimers(ride.id, 'solo', generation, ride.type === 'scheduled');
     }
@@ -517,7 +554,7 @@ export class DispatchService {
       );
     } else {
       const { k, radiusMeters } = this.waveParams(waveNumber);
-      const candidates = await this.selectCandidates(
+      const { drivers: candidates, priorOffers } = await this.selectCandidates(
         trip,
         generation,
         pool.originLat,
@@ -530,6 +567,7 @@ export class DispatchService {
           'no fresh candidates this wave',
         );
       }
+      let created = 0;
       for (const driverId of candidates) {
         const offer = await this.offers.createOffer(this.db, {
           trip,
@@ -539,6 +577,7 @@ export class DispatchService {
           ttlMs: this.params.offerTtlMs,
         });
         if (!offer) continue;
+        created++;
         const payload: SharedRideOfferPayload = {
           offerId: offer.offerId,
           sharedRideId: pool.rideId,
@@ -549,6 +588,9 @@ export class DispatchService {
           waveNumber,
         };
         this.safely('ride_offer', () => this.bus.toDriver(driverId, 'ride_offer', payload));
+      }
+      if (waveNumber === 1 && priorOffers === 0 && created > 0) {
+        await this.observeIntentToFirstOffer(trip, generation, 'pool');
       }
     }
 
@@ -620,6 +662,7 @@ export class DispatchService {
       return { generation: g, revoked: await this.offers.revokeLiveForTrip(tx, trip) };
     });
     if (!aborted) return;
+    recordDispatchOutcome('pool_aborted', 'pool');
     this.log.warn({ rideId }, 'dispatch hard-fail → aborting pool');
     this.notifyRevoked(trip, aborted.revoked, 'revoked');
     await this.removeTimers(rideId, aborted.generation);
@@ -780,7 +823,7 @@ export class DispatchService {
     originLat: number,
     originLng: number,
     opts: { k: number; radiusMeters: number; seatsNeeded: number },
-  ): Promise<string[]> {
+  ): Promise<{ drivers: string[]; priorOffers: number }> {
     const offered = new Set(await this.offers.offeredDriverIds(this.db, trip, generation));
     const raw = (await this.redis.georadius(
       'active_drivers',
@@ -794,7 +837,34 @@ export class DispatchService {
     )) as string[];
     const fresh = raw.filter((id) => !offered.has(id));
     const eligible = await this.offers.eligibleCandidates(this.db, fresh, opts.seatsNeeded);
-    return eligible.slice(0, opts.k);
+    return { drivers: eligible.slice(0, opts.k), priorOffers: offered.size };
+  }
+
+  /**
+   * `dispatch latency, intent to first offer`: the durable dispatch intent
+   * (outbox row of this generation) to the first offer of the generation having
+   * committed, on the DB clock. Includes relay and queue delay by design. A
+   * generation with no intent row (a scheduled ride's first wake) is skipped.
+   * Observability must never fail dispatch, so every error is swallowed.
+   */
+  private async observeIntentToFirstOffer(
+    trip: TripRef,
+    generation: number,
+    kind: TripKindLabel,
+  ): Promise<void> {
+    try {
+      const key =
+        trip.kind === 'solo'
+          ? outboxDedupeKey(OutboxTopic.RideDispatchRequested, trip.rideId, generation)
+          : outboxDedupeKey(OutboxTopic.PoolDispatchRequested, trip.sharedRideId, generation);
+      const res = await this.db.execute<{ age_s: string }>(sql`
+        SELECT extract(epoch FROM clock_timestamp() - created_at) AS age_s
+          FROM outbox WHERE dedupe_key = ${key}`);
+      const age = res.rows[0]?.age_s;
+      if (age !== undefined) observeDispatchLatency('intent_to_first_offer', kind, Number(age));
+    } catch (err) {
+      this.log.debug({ err }, 'dispatch latency observation skipped');
+    }
   }
 
   /** A delivery failure after commit is logged, never surfaced as a failed command. */

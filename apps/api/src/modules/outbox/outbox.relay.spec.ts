@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { OutboxRelay } from './outbox.relay';
 import type { LeasedOutboxRow } from './outbox.repository';
 import { OutboxTopic } from './outbox.types';
+import { outboxPublish } from '../../metrics';
 
 const ID = '7d1f3c1e-6f9a-4c55-9d43-0b1c2f3a4b5c';
 
@@ -187,5 +188,34 @@ describe('OutboxRelay timers', () => {
     await vi.advanceTimersByTimeAsync(1_500);
     expect(repo.lease.mock.calls.length).toBeGreaterThanOrEqual(2);
     relay.onModuleDestroy();
+  });
+});
+
+describe('OutboxRelay publish metrics (attempts, counted separately from completions)', () => {
+  const total = async (result: string) =>
+    (await outboxPublish.get()).values
+      .filter((v) => v.labels.result === result)
+      .reduce((s, v) => s + v.value, 0);
+
+  it('counts published, retry and exhausted by result', async () => {
+    const published0 = await total('published');
+    const retry0 = await total('retry');
+    const exhausted0 = await total('exhausted');
+    const { relay, repo, dispatchQ } = make([row({ id: 'a' }), row({ id: 'b' }), row({ id: 'c' })]);
+    dispatchQ.add.mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('x')).mockRejectedValueOnce(new Error('y'));
+    repo.fail.mockResolvedValueOnce('retry').mockResolvedValueOnce('exhausted');
+    await relay.drainOnce();
+    expect(await total('published')).toBe(published0 + 1);
+    expect(await total('retry')).toBe(retry0 + 1);
+    expect(await total('exhausted')).toBe(exhausted0 + 1);
+  });
+
+  it('a lost lease on fail() is counted as such', async () => {
+    const before = await total('lost_lease');
+    const { relay, repo, dispatchQ } = make([row()]);
+    dispatchQ.add.mockRejectedValueOnce(new Error('x'));
+    repo.fail.mockResolvedValueOnce('lost_lease');
+    await relay.drainOnce();
+    expect(await total('lost_lease')).toBe(before + 1);
   });
 });
