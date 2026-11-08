@@ -85,9 +85,9 @@ export class PricingService {
   private readonly fare: FareParams;
   private readonly shared: SharedParams;
   /**
-   * Bound on one OSRM call. Seat pricing runs INSIDE the join transaction
-   * (holding the pool row lock), so an unbounded routing call would stall every
-   * other joiner of that pool.
+   * Bound on one OSRM call. Seat pricing runs OUTSIDE the join transaction
+   * (optimistic pricing, RCAB-E8.S13), so a slow routing call delays only the
+   * joiner being priced and never holds the pool row lock.
    */
   private readonly osrmTimeoutMs: number;
 

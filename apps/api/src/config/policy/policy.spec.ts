@@ -63,6 +63,7 @@ describe('policy schema', () => {
       prefilterRadiusM: 1500,
       detourBudgetM: 800,
       similarityThreshold: 0.7,
+      joinPriceRetries: 3,
       similaritySaturationM: 1200,
     });
     expect(p.rides.noShowWaitMs).toBe(300_000);

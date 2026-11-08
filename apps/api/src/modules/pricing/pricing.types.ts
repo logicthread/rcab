@@ -27,8 +27,9 @@ export interface SeatQuote {
 }
 
 /**
- * Everything needed to price one seat, taken from the LOCKED pool state inside
- * the seat transaction.
+ * Everything needed to price one seat, taken from an UNLOCKED snapshot of the
+ * pool. The seat transaction re-validates the snapshot (`state_version`) under
+ * the pool lock before it persists the quoted fare.
  */
 export interface SeatFareContext {
   poolId: string;
@@ -46,8 +47,9 @@ export interface SeatFareContext {
 }
 
 /**
- * Prices a seat. Called inside the join/open transaction; must throw (never
- * resolve to an absent price) when the fare cannot be determined, so the seat
- * is not committed.
+ * Prices a seat. Called OUTSIDE any transaction / pool lock (it makes network
+ * calls) and possibly more than once per join, when a concurrent change forces a
+ * re-quote; must throw (never resolve to an absent price) when the fare cannot
+ * be determined, so the seat is not committed.
  */
 export type SeatFareQuoter = (ctx: SeatFareContext) => Promise<SeatQuote>;

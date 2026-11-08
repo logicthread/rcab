@@ -135,6 +135,22 @@ export function memberFromDb(r: MemberDbRow): SharedRideMember {
   };
 }
 
+function lockRowFromDb(r: LockDbRow): PoolLockRow {
+  return {
+    poolId: r.ride_id,
+    poolState: r.pool_state,
+    seatCount: Number(r.seat_count),
+    maxSeats: Number(r.max_seats),
+    dispatchGeneration: Number(r.dispatch_generation),
+    stateVersion: Number(r.state_version),
+    claimedByDriverId: r.claimed_by_driver_id ?? null,
+    originLat: Number(r.origin_lat),
+    originLng: Number(r.origin_lng),
+    destLat: Number(r.dest_lat),
+    destLng: Number(r.dest_lng),
+  };
+}
+
 @Injectable()
 export class PoolMembershipRepository {
   /** `SELECT … FOR UPDATE` on the pool row — the one serialization point for a pool. */
@@ -146,21 +162,30 @@ export class PoolMembershipRepository {
        WHERE ride_id = ${poolId}
          FOR UPDATE
     `);
-    const r = res.rows[0];
-    if (!r) return null;
-    return {
-      poolId: r.ride_id,
-      poolState: r.pool_state,
-      seatCount: Number(r.seat_count),
-      maxSeats: Number(r.max_seats),
-      dispatchGeneration: Number(r.dispatch_generation),
-      stateVersion: Number(r.state_version),
-      claimedByDriverId: r.claimed_by_driver_id ?? null,
-      originLat: Number(r.origin_lat),
-      originLng: Number(r.origin_lng),
-      destLat: Number(r.dest_lat),
-      destLng: Number(r.dest_lng),
-    };
+    return res.rows[0] ? lockRowFromDb(res.rows[0]) : null;
+  }
+
+  /**
+   * Optimistic-pricing snapshot, taken WITHOUT a row lock: the pool row (with
+   * its `state_version`) and then its members. Read in this order on purpose:
+   * every membership change bumps `state_version` in the same commit, so if
+   * anything changed between the two reads the caller's later
+   * `lockPool().stateVersion` check fails and it re-prices. The members are
+   * therefore exact whenever the version still matches under the lock.
+   */
+  async snapshotPool(
+    db: DbExecutor,
+    poolId: string,
+  ): Promise<{ pool: PoolLockRow; members: SharedRideMember[] } | null> {
+    const res = await db.execute<LockDbRow>(sql`
+      SELECT ride_id, pool_state, seat_count, max_seats, dispatch_generation,
+             state_version, claimed_by_driver_id, origin_lat, origin_lng, dest_lat, dest_lng
+        FROM shared_rides
+       WHERE ride_id = ${poolId}
+    `);
+    if (!res.rows[0]) return null;
+    const pool = lockRowFromDb(res.rows[0]);
+    return { pool, members: await this.listMembers(db, poolId) };
   }
 
   /**

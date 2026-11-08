@@ -263,6 +263,14 @@ export const POLICY_SCHEMA = {
       description: 'Minimum route-similarity score to join a pool.',
       decision: 'algo-shared-ride-matching: 0.7 separates same corridor from vaguely parallel.',
     }),
+    joinPriceRetries: int({
+      env: 'MATCHING_JOIN_PRICE_RETRIES', default: 3, min: 0, max: 10, unit: 'retries',
+      description:
+        'Shared join: how many times the seat is re-priced (OSRM, outside any lock) after a concurrent ' +
+        'change to the pool invalidated the quote, before the join gives up as a typed conflict and the ' +
+        'booking falls through to the next candidate / a new pool.',
+      decision: 'stand-in pricing: optimistic, retry on concurrent change (RCAB-E8.S13).',
+    }),
     similaritySaturationM: num({
       env: 'ROUTE_SIMILARITY_SATURATION_M', default: 1200, min: 1, unit: 'm',
       description: 'Mean route separation at which similarity reaches 0 (s = 1 − d̄/sat).',
