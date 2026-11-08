@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../di/providers.dart';
+import '../../core/config/policy.dart';
 
 class SignInScreen extends ConsumerStatefulWidget {
   const SignInScreen({super.key});
@@ -38,7 +39,7 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
 
     await ref.read(firebaseAuthProvider).verifyPhoneNumber(
       phoneNumber: _phoneController.text.trim(),
-      timeout: const Duration(seconds: 60),
+      timeout: DriverPolicy.otpAutoRetrievalTimeout,
       verificationCompleted: (PhoneAuthCredential credential) async {
         await _signInWithCredential(credential);
       },

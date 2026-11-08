@@ -1,3 +1,5 @@
+import '../../core/config/policy.dart';
+
 /// Solo ride lifecycle as seen by the driver app. The wire values match the
 /// `rides.status` column (RCAB-E4.S6); `en_route` / `arrived` carry no
 /// `_pickup` suffix for solo rides.
@@ -65,7 +67,7 @@ enum RideStatus {
 
 /// How long after arrival the driver must wait before a no-show can be reported
 /// (mirrors the server-side gate; the server re-validates regardless). RCAB-E4.S8.
-const Duration kNoShowWait = Duration(minutes: 5);
+const Duration kNoShowWait = DriverPolicy.noShowWait;
 
 /// Parsed `GET /v1/rides/:id` payload (the fields the driver screen needs).
 class RideDetail {
