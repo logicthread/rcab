@@ -34,6 +34,14 @@ class DriverPolicy {
   /// unit: ms | source: client | decision: RCAB-E3.S4 foreground service 5 s.
   static const int locationIntervalMs = 5000;
 
+  /// Re-send an unchanged position after this long so a stationary online driver is not swept offline (must stay well under the server's drivers.staleAfterMs, 60 s).
+  /// unit: ms | source: client | decision: RCAB-E8.S14 parked-driver heartbeat 20 s (3 sends per stale window).
+  static const int locationHeartbeatMs = 20000;
+
+  /// Upper bound on one background location fix; on timeout the task falls back to the last known position (a fix that never resolves used to stall streaming for good).
+  /// unit: ms | source: client | decision: RCAB-E8.S14 bounded background fix 4 s (under the 5 s task interval).
+  static const int locationFixTimeoutMs = 4000;
+
   /// Minimum movement before a new location fix is sent to the server.
   /// unit: m | source: client | decision: RCAB-E3.S5 location streaming 10 m.
   static const double locationMinMoveMeters = 10.0;

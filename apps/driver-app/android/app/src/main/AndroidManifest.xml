@@ -48,9 +48,18 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+
+        <!-- flutter_foreground_task's service (RCAB-E3.S4). The plugin does not
+             declare it; without this declaration "go online" never started the
+             location service, no position reached the server and the driver was
+             swept offline after drivers.staleAfterMs (RCAB-E8.S14). -->
+        <service
+            android:name="com.pravera.flutter_foreground_task.service.ForegroundService"
+            android:foregroundServiceType="location"
+            android:stopWithTask="false"
+            android:exported="false" />
     </application>
 
-    <!-- flutter_foreground_task foreground service declaration (RCAB-E3.S4) -->
     <queries>
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT" />

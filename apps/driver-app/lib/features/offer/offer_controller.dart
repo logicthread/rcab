@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import '../../core/realtime/driver_assignment.dart';
 import '../../core/realtime/offer_outcome.dart';
 import '../../di/providers.dart';
+import '../home/driver_notice.dart';
 import 'offer_models.dart';
 import 'offer_provider.dart';
 import '../../core/config/policy.dart';
@@ -145,11 +146,10 @@ class OfferController {
   void _onRevoked(Map<String, dynamic> payload) {
     final offerId = payload['offerId'] as String?;
     if (offerId == null) return;
-    if (_notifier.applyRevoked(
-      offerId: offerId,
-      reason: payload['reason'] as String?,
-    )) {
+    final reason = payload['reason'] as String?;
+    if (_notifier.applyRevoked(offerId: offerId, reason: reason)) {
       _cancelTicker();
+      container.read(driverNoticeProvider.notifier).state = offerEndedNotice(reason);
       _navigate('/home');
     }
   }
@@ -160,6 +160,7 @@ class OfferController {
       _notifier.tick();
       if (container.read(offerProvider).phase == OfferPhase.expired) {
         _cancelTicker();
+        container.read(driverNoticeProvider.notifier).state = offerEndedNotice('expired');
         _navigate('/home');
       }
     });

@@ -7,10 +7,14 @@ class StopListTile extends StatelessWidget {
     super.key,
     required this.stopState,
     required this.isCurrent,
+    this.passengerLabel,
   });
 
   final StopState stopState;
   final bool isCurrent;
+
+  /// e.g. "Passenger 2" (see [passengerLabels]); falls back to the id.
+  final String? passengerLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -34,7 +38,7 @@ class StopListTile extends StatelessWidget {
       key: Key('stop_${stop.sequenceIndex}'),
       leading: Icon(icon, color: color, size: 28),
       title: Text(
-        '${stop.typeLabel} · passenger ${stop.passengerId}',
+        '${stop.typeLabel} · ${passengerLabel ?? 'passenger ${stop.passengerId}'}',
         style: theme.textTheme.titleMedium?.copyWith(
           fontWeight: isCurrent ? FontWeight.bold : FontWeight.normal,
           color: confirmed ? Colors.green.shade700 : null,

@@ -1,6 +1,7 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
+import 'package:socket_io_client/socket_io_client.dart' as io;
 
 import 'package:driver_app/core/auth/token_store.dart';
 import 'package:driver_app/core/driver/driver_state.dart';
@@ -96,13 +97,61 @@ void main() {
       expect((notifier.state as DriverOnline).sessionId, 'sess-123');
     });
 
-    test('goOnline returns error message when currentVehicleId is null', () async {
-      final notifier = _makeNotifier(vehicleId: null);
+    test('goOnline surfaces the server no_vehicle_selected rule', () async {
+      final mockDio = MockDio();
+      final req = RequestOptions(path: '/v1/drivers/online');
+      when(() => mockDio.post<Map<String, dynamic>>(
+            any(),
+            data: any(named: 'data'),
+            options: any(named: 'options'),
+            cancelToken: any(named: 'cancelToken'),
+            onSendProgress: any(named: 'onSendProgress'),
+            onReceiveProgress: any(named: 'onReceiveProgress'),
+          )).thenThrow(DioException(
+        requestOptions: req,
+        response: Response(
+          requestOptions: req,
+          statusCode: 400,
+          // The real API envelope (AppExceptionFilter); the server's own text
+          // differs from the app's so the test proves the code is recognised.
+          data: {
+            'error': {'code': 'no_vehicle_selected', 'message': 'no current vehicle', 'request_id': 'r-1'},
+          },
+        ),
+        type: DioExceptionType.badResponse,
+      ));
+      final notifier = _makeNotifier(dio: mockDio, vehicleId: null);
 
-      final error = await notifier.goOnline(lat: 0, lng: 0);
+      final error = await notifier.goOnline(lat: 26.19, lng: 91.82);
 
-      expect(error, 'Please select a vehicle before going online');
+      expect(error, DriverStateNotifier.noVehicleMessage);
       expect(notifier.state, isA<DriverOffline>());
+    });
+
+    // Regression (RCAB-E8.S14): the local vehicle id is never known on a cold
+    // start, and a client-side pre-check blocked every driver from going online
+    // even though the server had a current vehicle.
+    test('goOnline does not require a locally known vehicle id', () async {
+      final mockDio = MockDio();
+      when(() => mockDio.post<Map<String, dynamic>>(
+            any(),
+            data: any(named: 'data'),
+            options: any(named: 'options'),
+            cancelToken: any(named: 'cancelToken'),
+            onSendProgress: any(named: 'onSendProgress'),
+            onReceiveProgress: any(named: 'onReceiveProgress'),
+          )).thenAnswer((_) async => Response(
+            data: {'ok': true, 'session_id': 'sess-cold'},
+            requestOptions: RequestOptions(path: '/v1/drivers/online'),
+            statusCode: 201,
+          ));
+      final notifier = _makeNotifier(dio: mockDio, vehicleId: null);
+
+      final error = await notifier.goOnline(lat: 26.19, lng: 91.82);
+
+      expect(error, isNull);
+      expect(notifier.state, isA<DriverOnline>());
+      expect((notifier.state as DriverOnline).vehicleId, isNull);
     });
 
     test('goOnline starts the foreground service on success', () async {
@@ -178,6 +227,40 @@ void main() {
 
       expect(notifier.state, isA<DriverOffline>());
       expect(fakeFg.stopped, isTrue);
+    });
+  });
+
+  // Regression (RCAB-E8.S14): socket_io_client caches one Manager per host, so
+  // the presence socket used to be the very Socket the app's RealtimeSocket
+  // owns; going offline disposed it and cleared every offer listener.
+  group('presence socket', () {
+    const url = 'http://10.0.2.2:39999';
+
+    test('is a separate Socket from one already open to the same host', () {
+      final app = io.io(
+        url,
+        io.OptionBuilder().setTransports(['websocket']).disableAutoConnect().build(),
+      );
+      final presence = io.io(url, DriverStateNotifier.socketOptions('jwt'));
+      addTearDown(() {
+        presence.dispose();
+        app.dispose();
+      });
+
+      expect(identical(app, presence), isFalse);
+      expect(identical(app.io, presence.io), isFalse);
+    });
+
+    test('disposing the presence socket leaves the app socket listeners intact', () {
+      final app = io.io(
+        url,
+        io.OptionBuilder().setTransports(['websocket']).disableAutoConnect().build(),
+      )..on('ride_offer', (_) {});
+      addTearDown(app.dispose);
+
+      io.io(url, DriverStateNotifier.socketOptions('jwt')).dispose();
+
+      expect(app.hasListeners('ride_offer'), isTrue);
     });
   });
 }

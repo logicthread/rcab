@@ -94,4 +94,27 @@ void main() {
     expect(find.byKey(const Key('home_marker')), findsNothing);
     expect(find.byKey(const Key('rating_screen')), findsOneWidget);
   });
+
+  // RCAB-E8.S14 (seen recording D04 on a small phone): with the soft keyboard
+  // open for the comment, the fixed Column overflowed by ~230 px and pushed
+  // Submit off-screen, so the driver could not submit without first closing
+  // the keyboard.
+  testWidgets('small phone with the keyboard open: no overflow, Submit reachable', (tester) async {
+    tester.view.physicalSize = const Size(720, 1280); // 360 x 640 dp
+    tester.view.devicePixelRatio = 2;
+    tester.view.viewInsets = const FakeViewPadding(bottom: 560); // 280 dp keyboard
+    addTearDown(tester.view.reset);
+
+    final svc = await _pump(tester);
+    expect(tester.takeException(), isNull);
+
+    await tester.tap(find.byKey(const Key('rating_star_5')));
+    await tester.pump();
+    await tester.ensureVisible(find.byKey(const Key('rating_submit_button')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('rating_submit_button')));
+    await tester.pumpAndSettle();
+
+    expect(svc.calls.single.stars, 5);
+  });
 }

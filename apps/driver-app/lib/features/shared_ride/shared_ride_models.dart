@@ -40,6 +40,17 @@ class SharedRideStop {
   }
 }
 
+/// "Passenger 1", "Passenger 2", … numbered by first appearance in the
+/// itinerary. The stop list and the confirm button used to print the raw
+/// passenger UUID (RCAB-E8.S14).
+Map<String, String> passengerLabels(Iterable<SharedRideStop> stops) {
+  final labels = <String, String>{};
+  for (final s in stops) {
+    labels.putIfAbsent(s.passengerId, () => 'Passenger ${labels.length + 1}');
+  }
+  return labels;
+}
+
 class StopState {
   const StopState({required this.stop, required this.status, this.confirmedAt});
 

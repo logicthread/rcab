@@ -21,17 +21,14 @@ Vehicle _$VehicleFromJson(Map<String, dynamic> json) {
 /// @nodoc
 mixin _$Vehicle {
   String get id => throw _privateConstructorUsedError;
-  @JsonKey(name: 'driver_id')
   String get driverId => throw _privateConstructorUsedError;
   String get type => throw _privateConstructorUsedError;
-  @JsonKey(name: 'reg_no')
   String get regNo => throw _privateConstructorUsedError;
   String? get make => throw _privateConstructorUsedError;
   String? get model => throw _privateConstructorUsedError;
   String? get color => throw _privateConstructorUsedError;
   int get seats => throw _privateConstructorUsedError;
   bool get active => throw _privateConstructorUsedError;
-  @JsonKey(name: 'created_at')
   String get createdAt => throw _privateConstructorUsedError;
 
   /// Serializes this Vehicle to a JSON map.
@@ -50,15 +47,15 @@ abstract class $VehicleCopyWith<$Res> {
   @useResult
   $Res call(
       {String id,
-      @JsonKey(name: 'driver_id') String driverId,
+      String driverId,
       String type,
-      @JsonKey(name: 'reg_no') String regNo,
+      String regNo,
       String? make,
       String? model,
       String? color,
       int seats,
       bool active,
-      @JsonKey(name: 'created_at') String createdAt});
+      String createdAt});
 }
 
 /// @nodoc
@@ -141,15 +138,15 @@ abstract class _$$VehicleImplCopyWith<$Res> implements $VehicleCopyWith<$Res> {
   @useResult
   $Res call(
       {String id,
-      @JsonKey(name: 'driver_id') String driverId,
+      String driverId,
       String type,
-      @JsonKey(name: 'reg_no') String regNo,
+      String regNo,
       String? make,
       String? model,
       String? color,
       int seats,
       bool active,
-      @JsonKey(name: 'created_at') String createdAt});
+      String createdAt});
 }
 
 /// @nodoc
@@ -226,15 +223,15 @@ class __$$VehicleImplCopyWithImpl<$Res>
 class _$VehicleImpl implements _Vehicle {
   const _$VehicleImpl(
       {required this.id,
-      @JsonKey(name: 'driver_id') required this.driverId,
+      required this.driverId,
       required this.type,
-      @JsonKey(name: 'reg_no') required this.regNo,
+      required this.regNo,
       required this.make,
       required this.model,
       required this.color,
       required this.seats,
       required this.active,
-      @JsonKey(name: 'created_at') required this.createdAt});
+      required this.createdAt});
 
   factory _$VehicleImpl.fromJson(Map<String, dynamic> json) =>
       _$$VehicleImplFromJson(json);
@@ -242,12 +239,10 @@ class _$VehicleImpl implements _Vehicle {
   @override
   final String id;
   @override
-  @JsonKey(name: 'driver_id')
   final String driverId;
   @override
   final String type;
   @override
-  @JsonKey(name: 'reg_no')
   final String regNo;
   @override
   final String? make;
@@ -260,7 +255,6 @@ class _$VehicleImpl implements _Vehicle {
   @override
   final bool active;
   @override
-  @JsonKey(name: 'created_at')
   final String createdAt;
 
   @override
@@ -310,29 +304,26 @@ class _$VehicleImpl implements _Vehicle {
 
 abstract class _Vehicle implements Vehicle {
   const factory _Vehicle(
-          {required final String id,
-          @JsonKey(name: 'driver_id') required final String driverId,
-          required final String type,
-          @JsonKey(name: 'reg_no') required final String regNo,
-          required final String? make,
-          required final String? model,
-          required final String? color,
-          required final int seats,
-          required final bool active,
-          @JsonKey(name: 'created_at') required final String createdAt}) =
-      _$VehicleImpl;
+      {required final String id,
+      required final String driverId,
+      required final String type,
+      required final String regNo,
+      required final String? make,
+      required final String? model,
+      required final String? color,
+      required final int seats,
+      required final bool active,
+      required final String createdAt}) = _$VehicleImpl;
 
   factory _Vehicle.fromJson(Map<String, dynamic> json) = _$VehicleImpl.fromJson;
 
   @override
   String get id;
   @override
-  @JsonKey(name: 'driver_id')
   String get driverId;
   @override
   String get type;
   @override
-  @JsonKey(name: 'reg_no')
   String get regNo;
   @override
   String? get make;
@@ -345,7 +336,6 @@ abstract class _Vehicle implements Vehicle {
   @override
   bool get active;
   @override
-  @JsonKey(name: 'created_at')
   String get createdAt;
 
   /// Create a copy of Vehicle

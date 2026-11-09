@@ -1,12 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/driver/driver_state.dart';
+import '../../core/driver/driver_state_notifier.dart';
 import '../../di/providers.dart';
+import 'driver_notice.dart';
 import 'oem_onboarding_sheet.dart';
 import 'service_kill_banner.dart';
 
@@ -25,6 +26,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    // A notice set before this screen mounted (we were routed here).
+    WidgetsBinding.instance.addPostFrameCallback((_) => _showNotice(ref.read(driverNoticeProvider)));
+  }
+
+  void _showNotice(String? notice) {
+    if (notice == null || !mounted) return;
+    ref.read(driverNoticeProvider.notifier).state = null;
+    _snack(notice, key: const Key('driver_notice'));
   }
 
   @override
@@ -71,42 +80,19 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   Future<void> _goOnline() async {
     final notifier = ref.read(driverStateProvider.notifier);
 
-    if (notifier.currentVehicleId == null) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            key: Key('no_vehicle_snackbar'),
-            content: Text('Please select a vehicle before going online'),
-          ),
-        );
-      }
+    // Permission + a real fix first: never go online without a position.
+    final located = await ref.read(driverLocatorProvider).locate();
+    final pos = located.position;
+    if (pos == null) {
+      _snack(located.error!, key: const Key('location_snackbar'));
       return;
     }
 
-    Position pos;
-    try {
-      pos = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high,
-      );
-    } catch (_) {
-      pos = Position.fromMap({
-        'latitude': 0.0,
-        'longitude': 0.0,
-        'timestamp': DateTime.now().millisecondsSinceEpoch,
-        'accuracy': 0.0,
-        'altitude': 0.0,
-        'heading': 0.0,
-        'speed': 0.0,
-        'speedAccuracy': 0.0,
-        'altitudeAccuracy': 0.0,
-        'headingAccuracy': 0.0,
-      });
-    }
-
     final error = await notifier.goOnline(lat: pos.latitude, lng: pos.longitude);
-    if (error != null && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(error)),
+    if (error != null) {
+      _snack(
+        error,
+        key: error == DriverStateNotifier.noVehicleMessage ? const Key('no_vehicle_snackbar') : null,
       );
       return;
     }
@@ -115,10 +101,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     if (mounted) await showOemOnboardingIfNeeded(context);
   }
 
+  void _snack(String message, {Key? key}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(key: key, content: Text(message)),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final driverState = ref.watch(driverStateProvider);
     final isOnline = driverState is DriverOnline;
+    ref.listen<String?>(driverNoticeProvider, (_, next) => _showNotice(next));
 
     return Scaffold(
       key: const Key('home_screen'),

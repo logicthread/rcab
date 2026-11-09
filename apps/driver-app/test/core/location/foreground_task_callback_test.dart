@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'dart:isolate';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:driver_app/core/config/policy.dart';
 import 'package:driver_app/core/location/foreground_service.dart';
 
 Position _pos(double lat, double lng) => Position.fromMap({
@@ -96,6 +98,89 @@ void main() {
       handler.onDestroy(now, port.sendPort);
 
       expect(handler.lastEmitted, isNull);
+    });
+  });
+
+  // Regression (RCAB-E8.S14): a parked driver sent nothing after the first fix,
+  // so the server's auto-offline sweep (drivers.staleAfterMs = 60 s) dropped them.
+  group('LocationTaskHandler — stationary heartbeat', () {
+    Future<List<Object?>> run(LocationTaskHandler h, DateTime at) async {
+      final port = ReceivePort();
+      final received = <Object?>[];
+      final sub = port.listen(received.add);
+      await h.onRepeatEvent(at, port.sendPort);
+      await Future<void>.delayed(Duration.zero);
+      await sub.cancel();
+      port.close();
+      return received;
+    }
+
+    test('re-sends an unchanged position once the heartbeat is due', () async {
+      final t0 = DateTime(2026, 11, 9, 12);
+      final handler = LocationTaskHandler()..getPosition = () async => _pos(26.19, 91.82);
+
+      expect(await run(handler, t0), hasLength(1));
+      expect(await run(handler, t0.add(const Duration(seconds: 5))), isEmpty);
+      expect(
+        await run(handler, t0.add(LocationTaskHandler.heartbeat)),
+        hasLength(1),
+      );
+    });
+
+    test('heartbeat stays well inside the server stale window (60 s)', () {
+      expect(LocationTaskHandler.heartbeat.inSeconds, lessThanOrEqualTo(30));
+    });
+  });
+
+  // Regression (RCAB-E8.S14): the task awaited getCurrentPosition with no
+  // limit; in the service engine it could stay pending forever after the first
+  // fix, so nothing more was streamed and the driver was swept offline.
+  group('boundedFix', () {
+    const short = Duration(milliseconds: 20);
+
+    test('returns the current fix when it resolves in time', () async {
+      final p = await boundedFix(
+        current: () async => _pos(26.19, 91.82),
+        lastKnown: () async => _pos(0, 0),
+        timeout: short,
+      );
+      expect(p!.latitude, closeTo(26.19, 1e-9));
+    });
+
+    test('falls back to the last known position when the fix never resolves', () async {
+      final never = Completer<Position>();
+      final p = await boundedFix(
+        current: () => never.future,
+        lastKnown: () async => _pos(26.18, 91.81),
+        timeout: short,
+      );
+      expect(p!.latitude, closeTo(26.18, 1e-9));
+    });
+
+    test('falls back when the fix throws, and yields null when nothing is known', () async {
+      final p = await boundedFix(
+        current: () async => throw StateError('no provider'),
+        lastKnown: () async => null,
+        timeout: short,
+      );
+      expect(p, isNull);
+    });
+
+    test('a null fix emits nothing and keeps the handler alive', () async {
+      final handler = LocationTaskHandler()..getPosition = () async => null;
+      final port = ReceivePort();
+      final received = <Object?>[];
+      final sub = port.listen(received.add);
+      await handler.onRepeatEvent(DateTime(2026), port.sendPort);
+      await Future<void>.delayed(Duration.zero);
+      await sub.cancel();
+      port.close();
+      expect(received, isEmpty);
+      expect(handler.lastEmitted, isNull);
+    });
+
+    test('the bound fits inside one task interval', () {
+      expect(DriverPolicy.locationFixTimeoutMs, lessThan(DriverPolicy.locationIntervalMs));
     });
   });
 }

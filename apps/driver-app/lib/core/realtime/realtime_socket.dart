@@ -27,6 +27,18 @@ abstract class IRealtimeSocket implements StopConfirmSender, OfferResponseSender
   /// server on every (re)connect and in answer to [requestAssignmentSnapshot].
   Stream<Map<String, dynamic>> get driverAssignment;
 
+  /// Solo ride status changes for rides followed with [subscribeRide]:
+  /// server `ride_state_changed` events (`{rideId, state, by}`) plus the
+  /// subscribe snapshot normalised to the same shape.
+  Stream<Map<String, dynamic>> get rideStateChanged;
+
+  /// Follow a solo ride (`ride:subscribe`, re-sent on every (re)connect) so a
+  /// passenger cancel or a server-side transition reaches the ride screen live.
+  void subscribeRide(String rideId);
+
+  /// Stop re-subscribing [rideId] on reconnect.
+  void unsubscribeRide(String rideId);
+
   /// Ask the server for the committed assignment (`driver:sync`). Used after
   /// listeners attach (cold start) and when an accept ack went missing.
   void requestAssignmentSnapshot();
@@ -57,6 +69,8 @@ class RealtimeSocket implements IRealtimeSocket {
   final _driverStateCtrl = StreamController<Map<String, dynamic>>.broadcast();
   final _offerOutcomeCtrl = StreamController<Map<String, dynamic>>.broadcast();
   final _driverAssignmentCtrl = StreamController<Map<String, dynamic>>.broadcast();
+  final _rideStateCtrl = StreamController<Map<String, dynamic>>.broadcast();
+  final Set<String> _rideSubs = <String>{};
 
   @override
   Stream<Map<String, dynamic>> get rideOffer => _rideOfferCtrl.stream;
@@ -76,6 +90,8 @@ class RealtimeSocket implements IRealtimeSocket {
   Stream<Map<String, dynamic>> get rideOfferOutcome => _offerOutcomeCtrl.stream;
   @override
   Stream<Map<String, dynamic>> get driverAssignment => _driverAssignmentCtrl.stream;
+  @override
+  Stream<Map<String, dynamic>> get rideStateChanged => _rideStateCtrl.stream;
 
   Future<void>? _connecting;
 
@@ -137,6 +153,16 @@ class RealtimeSocket implements IRealtimeSocket {
         final map = _asMap(raw);
         if (map != null) _add(_driverAssignmentCtrl, map);
       })
+      ..on('ride_state_changed', (raw) {
+        final map = _asMap(raw);
+        if (map != null) _add(_rideStateCtrl, map);
+      })
+      // Rooms do not survive a reconnect: follow every tracked ride again.
+      ..onConnect((_) {
+        for (final id in _rideSubs) {
+          _emitRideSubscribe(id);
+        }
+      })
       ..connect();
   }
 
@@ -160,6 +186,24 @@ class RealtimeSocket implements IRealtimeSocket {
         if (json != null) _add(_offerOutcomeCtrl, json);
       },
     );
+  }
+
+  @override
+  void subscribeRide(String rideId) {
+    if (_rideSubs.add(rideId) && (_socket?.connected ?? false)) _emitRideSubscribe(rideId);
+  }
+
+  @override
+  void unsubscribeRide(String rideId) => _rideSubs.remove(rideId);
+
+  void _emitRideSubscribe(String rideId) {
+    _socket?.emitWithAck('ride:subscribe', {'rideId': rideId}, ack: (dynamic data) {
+      final ack = _asMap(data);
+      final snap = ack == null ? null : _asMap(ack['snapshot']);
+      if (ack?['ok'] == true && snap != null && snap['status'] is String) {
+        _add(_rideStateCtrl, {'rideId': rideId, 'state': snap['status'], 'by': 'snapshot'});
+      }
+    });
   }
 
   @override
@@ -203,6 +247,7 @@ class RealtimeSocket implements IRealtimeSocket {
       _driverStateCtrl.close(),
       _offerOutcomeCtrl.close(),
       _driverAssignmentCtrl.close(),
+      _rideStateCtrl.close(),
     ]);
   }
 

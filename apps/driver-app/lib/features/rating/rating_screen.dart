@@ -49,65 +49,74 @@ class _RatingScreenState extends ConsumerState<RatingScreen> {
     return Scaffold(
       key: const Key('rating_screen'),
       appBar: AppBar(title: const Text('Rate this ride')),
+      // Scrolls when the soft keyboard leaves too little room: the fixed
+      // Column overflowed on a small phone and pushed Submit off-screen
+      // (RCAB-E8.S14). With room to spare, Submit still sits at the bottom.
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text('Ride ${widget.rideId}', style: theme.textTheme.bodySmall),
-              const SizedBox(height: 16),
-              Text('How was your trip?', style: theme.textTheme.titleMedium),
-              const SizedBox(height: 12),
-              Row(
-                key: const Key('rating_stars'),
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  for (var i = 1; i <= 5; i++)
-                    IconButton(
-                      key: Key('rating_star_$i'),
-                      iconSize: 40,
-                      onPressed: state.busy || state.submitted ? null : () => notifier.setStars(i),
-                      icon: Icon(i <= state.stars ? Icons.star : Icons.star_border),
+        child: LayoutBuilder(
+          builder: (context, viewport) => SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(minHeight: (viewport.maxHeight - 48).clamp(0, double.infinity)),
+              child: IntrinsicHeight(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text('Ride ${widget.rideId}', style: theme.textTheme.bodySmall),
+                    const SizedBox(height: 16),
+                    Text('How was your trip?', style: theme.textTheme.titleMedium),
+                    const SizedBox(height: 12),
+                    Row(
+                      key: const Key('rating_stars'),
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        for (var i = 1; i <= 5; i++)
+                          IconButton(
+                            key: Key('rating_star_$i'),
+                            iconSize: 40,
+                            onPressed: state.busy || state.submitted ? null : () => notifier.setStars(i),
+                            icon: Icon(i <= state.stars ? Icons.star : Icons.star_border),
+                          ),
+                      ],
                     ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                key: const Key('rating_text'),
-                controller: _textController,
-                enabled: !state.busy && !state.submitted,
-                maxLength: 1000,
-                maxLines: 3,
-                decoration: const InputDecoration(
-                  labelText: 'Add a comment (optional)',
-                  border: OutlineInputBorder(),
+                    const SizedBox(height: 16),
+                    TextField(
+                      key: const Key('rating_text'),
+                      controller: _textController,
+                      enabled: !state.busy && !state.submitted,
+                      maxLength: 1000,
+                      maxLines: 3,
+                      decoration: const InputDecoration(
+                        labelText: 'Add a comment (optional)',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const Spacer(),
+                    if (state.busy)
+                      const Center(
+                        key: Key('rating_busy'),
+                        child: Padding(padding: EdgeInsets.all(16), child: CircularProgressIndicator()),
+                      )
+                    else ...[
+                      SizedBox(
+                        height: 56,
+                        child: FilledButton(
+                          key: const Key('rating_submit_button'),
+                          onPressed: state.canSubmit ? () => notifier.submit(_textController.text) : null,
+                          child: const Text('Submit', style: TextStyle(fontSize: 18)),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      TextButton(
+                        key: const Key('rating_skip_button'),
+                        onPressed: state.submitted ? null : _goHome,
+                        child: const Text('Skip'),
+                      ),
+                    ],
+                  ],
                 ),
               ),
-              const Spacer(),
-              if (state.busy)
-                const Center(
-                  key: Key('rating_busy'),
-                  child: Padding(padding: EdgeInsets.all(16), child: CircularProgressIndicator()),
-                )
-              else ...[
-                SizedBox(
-                  height: 56,
-                  child: FilledButton(
-                    key: const Key('rating_submit_button'),
-                    onPressed:
-                        state.canSubmit ? () => notifier.submit(_textController.text) : null,
-                    child: const Text('Submit', style: TextStyle(fontSize: 18)),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                TextButton(
-                  key: const Key('rating_skip_button'),
-                  onPressed: state.submitted ? null : _goHome,
-                  child: const Text('Skip'),
-                ),
-              ],
-            ],
+            ),
           ),
         ),
       ),

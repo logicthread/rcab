@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import 'offer_models.dart';
 import 'offer_provider.dart';
@@ -37,7 +38,20 @@ class _OfferScreenState extends ConsumerState<OfferScreen> {
       key: const Key('offer_screen'),
       body: SafeArea(
         child: offer == null
-            ? const Center(child: Text('Waiting for an offer…'))
+            ? Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text('Waiting for an offer…'),
+                    const SizedBox(height: 16),
+                    TextButton(
+                      key: const Key('offer_back_home'),
+                      onPressed: () => GoRouter.maybeOf(context)?.go('/home'),
+                      child: const Text('Back to home'),
+                    ),
+                  ],
+                ),
+              )
             : _OfferBody(state: state, offer: offer),
       ),
     );
@@ -99,7 +113,12 @@ class _OfferBody extends ConsumerWidget {
                 Expanded(
                   child: OutlinedButton(
                     key: const Key('offer_decline_button'),
-                    onPressed: notifier.decline,
+                    // Declining used to leave the driver on a blank "Waiting
+                    // for an offer…" screen with no way back (RCAB-E8.S14).
+                    onPressed: () {
+                      notifier.decline();
+                      GoRouter.maybeOf(context)?.go('/home');
+                    },
                     child: const Padding(
                       padding: EdgeInsets.symmetric(vertical: 14),
                       child: Text('Decline'),

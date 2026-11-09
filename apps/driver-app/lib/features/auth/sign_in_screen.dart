@@ -21,6 +21,10 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
   bool _isLoading = false;
   String? _errorMessage;
 
+  /// Off until a Send OTP is rejected; then each edit re-validates, so the
+  /// error clears as soon as the number is corrected (RCAB-E8.S14).
+  AutovalidateMode _autovalidate = AutovalidateMode.disabled;
+
   bool get _isCodeStep => _verificationId != null;
 
   @override
@@ -31,7 +35,10 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
   }
 
   Future<void> _sendOtp() async {
-    if (!_formKey.currentState!.validate()) return;
+    if (!_formKey.currentState!.validate()) {
+      setState(() => _autovalidate = AutovalidateMode.onUserInteraction);
+      return;
+    }
     setState(() {
       _isLoading = true;
       _errorMessage = null;
@@ -120,6 +127,7 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
         padding: const EdgeInsets.all(24),
         child: Form(
           key: _formKey,
+          autovalidateMode: _autovalidate,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [

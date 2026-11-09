@@ -76,6 +76,22 @@ void main() {
     verifyNever(() => mockDio.post(any(), data: any(named: 'data')));
   });
 
+  // RCAB-E8.S14: after a rejected submit, fixed fields kept showing their red
+  // "… required" error until the next submit.
+  testWidgets('a field error clears as soon as the driver fills the field', (tester) async {
+    final mockDio = MockDio();
+    await tester.pumpWidget(_buildScreen(mockDio));
+
+    await tester.tap(find.byKey(const Key('submit_button')));
+    await tester.pump();
+    expect(find.text('Registration number required'), findsOneWidget);
+
+    await tester.enterText(find.byKey(const Key('reg_no_field')), 'AS01DB0003');
+    await tester.pump();
+    expect(find.text('Registration number required'), findsNothing);
+    expect(find.text('Make required'), findsOneWidget); // untouched fields keep theirs
+  });
+
   testWidgets('submit calls POST /v1/vehicles with correct payload', (tester) async {
     final mockDio = MockDio();
     when(() => mockDio.post(
@@ -126,7 +142,9 @@ void main() {
         )).thenThrow(DioException(
           requestOptions: RequestOptions(path: '/v1/vehicles'),
           response: Response(
-            data: {'code': 'vehicle_reg_exists'},
+            data: {
+              'error': {'code': 'vehicle_reg_exists', 'message': 'reg exists', 'request_id': 'r-1'},
+            },
             requestOptions: RequestOptions(path: '/v1/vehicles'),
             statusCode: 409,
           ),
@@ -144,5 +162,40 @@ void main() {
       find.text('You already have a vehicle with that registration number.'),
       findsOneWidget,
     );
+  });
+  // RCAB-E8.S14: any other failure used to print Dio's internal description
+  // ("Error: This exception was thrown because the response has a status code
+  // of 400 …"). The driver now sees the server's own message.
+  testWidgets('other API errors show the server message, not the Dio description', (tester) async {
+    final mockDio = MockDio();
+    when(() => mockDio.post(
+          any(),
+          data: any(named: 'data'),
+          options: any(named: 'options'),
+          cancelToken: any(named: 'cancelToken'),
+          onSendProgress: any(named: 'onSendProgress'),
+          onReceiveProgress: any(named: 'onReceiveProgress'),
+        )).thenThrow(DioException(
+          requestOptions: RequestOptions(path: '/v1/vehicles'),
+          message: 'This exception was thrown because the response has a status code of 400',
+          response: Response(
+            data: {
+              'error': {'code': 'validation_failed', 'message': 'seats must not be less than 1', 'request_id': 'r-2'},
+            },
+            requestOptions: RequestOptions(path: '/v1/vehicles'),
+            statusCode: 400,
+          ),
+          type: DioExceptionType.badResponse,
+        ));
+
+    await tester.pumpWidget(_buildScreen(mockDio));
+    await _fillForm(tester);
+
+    await tester.tap(find.byKey(const Key('submit_button')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(find.text('seats must not be less than 1'), findsOneWidget);
+    expect(find.textContaining('This exception was thrown'), findsNothing);
   });
 }
