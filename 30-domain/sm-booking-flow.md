@@ -33,6 +33,8 @@ stateDiagram-v2
     canceled --> [*]
 ```
 
+> **As-built note (2026-11-09, RCAB-E8.S14).** This diagram is a conceptual booking flow: none of `created`, `matching`, `matched`, `failed`, `pooling` or `scheduled_pending` is a stored status. What exists: a solo `rides` row starts `requested` (a scheduled ride is the same status parked at `dispatch_generation = 0` until its wake), a shared request opens or joins a `shared_rides` pool, and "failed" is `no_driver` (solo) or `aborted` (pool). A scheduled ride whose window lapses is **retried** (new dispatch generation) until 30 min after pickup, not failed after "4 minutes". See `docs/onboarding/state-machines.md` sections 1-3 and 11 (the web client's booking stage machine).
+
 ## Notes
 
 - `quoted` is not persisted. It is the OSRM-routed estimate the API returned and the client retained.

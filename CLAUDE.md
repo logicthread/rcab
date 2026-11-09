@@ -77,7 +77,7 @@ Workspace: pnpm 10 (Node ≥20) + Turborepo. Driver app (`apps/driver-app/`) is 
 
 Integration tests use real containers via Testcontainers (no mocks of infra). e2e: Playwright for web; Flutter `integration_test` for driver. Load: k6 in a sidecar. See `90-quality/testing-strategy.md` once you load it via a reading-path.
 
-`pnpm verify` is the gate a story must pass before `/close-story` or `/ship-story`: `pnpm lint && pnpm --filter @rcab/api run test:cov && pnpm test:int` (coverage floor enforced by the api vitest config, per RCAB-E1.S14). `RCAB_SKIP_INT=1 pnpm test:int` skips the container suites when Docker is unavailable — never use it to declare a story green.
+`pnpm verify` is the gate a story must pass before `/close-story` or `/ship-story`: `pnpm lint && pnpm policy:doc:check && pnpm --filter @rcab/api run test:cov && pnpm test:int` (coverage floor enforced by the api vitest config, per RCAB-E1.S14; `policy:doc:check` fails if `docs/POLICY.md` drifted from the policy schema). `RCAB_SKIP_INT=1 pnpm test:int` skips the container suites when Docker is unavailable — never use it to declare a story green.
 
 ## Codebase map (the code, not the vault)
 
@@ -107,7 +107,7 @@ pnpm build                 # turbo build (all packages)
 pnpm lint                  # turbo lint — ESLint + next lint + eslint (or use /lint for tsc + dart too)
 pnpm test                  # turbo test — vitest unit across packages
 pnpm test:int              # turbo test:int — Testcontainers integration (uncached)
-pnpm verify                # the gate: lint + api coverage + integration
+pnpm verify                # the gate: lint + policy:doc:check + api coverage + integration
 pnpm test:e2e              # turbo test:e2e — Playwright (or use /playwright-run)
 
 # API package, targeted:

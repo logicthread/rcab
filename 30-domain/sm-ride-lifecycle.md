@@ -12,6 +12,14 @@ audience: both
 
 *From acceptance to completion or cancellation.*
 
+> **As-built status (2026-11-09, RCAB-E8.S14).** The diagram and rule table immediately below are the *original design*
+> and differ from the shipped solo machine: states are `requested`, `accepted`, `en_route`, `arrived`, `in_progress`,
+> `completed`, `cancelled` (one status, discriminated by `cancelled_by`), `no_driver`, `no_show`; there is no fee in
+> Phase-0; `dispatching` exists in the CHECK constraint but is never written. The "As-built" sections further down and
+> `docs/onboarding/state-machines.md` (section 1, with the enforcing file for every transition, who may trigger it and
+> the events emitted) are authoritative. Scheduled rides add a parked phase (`dispatch_generation = 0`) and a retry loop
+> that ends in `no_driver` only past a cutoff after pickup (section 2 of that document).
+
 ```mermaid
 stateDiagram-v2
     [*] --> accepted: driver accepts offer
@@ -72,6 +80,7 @@ The diagram above shows separate `canceled_driver` / `canceled_client` terminal 
 - A client **cannot** cancel once `in_progress` (→ HTTP 409); the trip ends via the driver's `end_ride`.
 - The no-show 5-min wait is a **server-side elapsed check** on `arrived_at` (not a background job); reported too early → HTTP 409 `no_show_too_early`.
 - **No fee ships in Phase-0** — cancellation is free in every case; the diagram's "fee applies" annotations are future, deferred to a later phase that introduces and activates the fee mechanism (HITL decision 2026-05-31). The columns shipped are `cancelled_at` / `cancelled_by` / `cancel_reason` (no fee column).
+- A solo ride whose dispatch exhausts every wave becomes `no_driver` (`RidesRepository.markNoDriver`, system-initiated, hard-fail timer `DISPATCH_HARD_FAIL_MS` = 60 s default). A scheduled ride is re-armed under a new dispatch generation instead, and ends as `no_driver` only once `now > scheduled_for + scheduled.retryCutoffAfterPickupMs` (30 min default).
 - On cancel, [[module-rides]] emits `RIDE_CANCELLED_EVENT` so [[module-dispatch]] unwinds any in-flight dispatch (claim, offers, wave/hard-fail timers); a bound driver's `current_ride_id` is cleared and the terminal `ride_state_changed` is broadcast to room `ride:<id>`.
 
 ## See also

@@ -36,7 +36,9 @@ None. `DATABASE_URL` overrides the default
    normal, not a failure).
 
 4. **Expected tables** (public schema): `app_user`, `client`, `driver`, `vehicle`,
-   `auth_refresh_token`, `rides`, `shared_rides`, `ride_stops`, `ratings`, `_rcab_migrations`
+   `auth_refresh_token`, `rides`, `shared_rides`, `pool_member`, `ride_stops`, `ratings`,
+   `dispatch_offer`, `driver_active_assignment`, `outbox`, `idempotency_record`,
+   `migration_conflict`, `_rcab_migrations`
    (+ PostGIS views `geography_columns`, `geometry_columns`, `spatial_ref_sys`).
 
 ## When to use
