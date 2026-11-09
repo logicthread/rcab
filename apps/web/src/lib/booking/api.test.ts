@@ -5,6 +5,7 @@ import {
   IDEMPOTENCY_IN_PROGRESS_RETRY_MS,
   fetchRide,
   createNormalRide,
+  createScheduledRide,
   createSharedRide,
   fetchQuote,
 } from './api';
@@ -98,6 +99,19 @@ describe('booking api auth handling (F18b)', () => {
     );
     await fetchRide('r1');
     expect(bearer(vi.mocked(fetch).mock.calls[1][1])).toBe('Bearer fresh');
+  });
+
+  it('createScheduledRide posts type=scheduled with the quote token, scheduledFor and the idempotency key', async () => {
+    vi.mocked(fetch).mockResolvedValue(json(201, { rideId: 'r1' }));
+    await createScheduledRide(place, place, 'qt', '2026-11-10T09:30:00.000Z', 'idem-s');
+    const [url, init] = vi.mocked(fetch).mock.calls[0];
+    expect(String(url)).toMatch(/\/v1\/rides$/);
+    expect(JSON.parse(init!.body as string)).toMatchObject({
+      type: 'scheduled',
+      quoteToken: 'qt',
+      scheduledFor: '2026-11-10T09:30:00.000Z',
+    });
+    expect((init!.headers as Record<string, string>)['Idempotency-Key']).toBe('idem-s');
   });
 
   it('passes the AbortSignal through to fetch for quotes', async () => {

@@ -12,7 +12,7 @@ ride lifecycle, sessions, rate limits, realtime cadence, the outbox loop, and th
   (one deployment), then run `pnpm policy:doc`. "Code-fixed" knobs have no env var: change them in the schema.
 - **Clients:** `apps/web/src/config/policy.ts` and `apps/driver-app/lib/core/config/policy.dart`.
 
-67 server knobs (64 env-overridable) in 13 categories, 10 cross-field rules, 8 web and 10 driver-app knobs.
+67 server knobs (64 env-overridable) in 13 categories, 10 cross-field rules, 11 web and 10 driver-app knobs.
 
 ## Contents
 
@@ -222,6 +222,9 @@ rule the client cannot read at runtime and must be kept in step with the table a
 | `auth.tokenRefreshMarginMs` | `30000` | ms | client | Refresh the access token this long before its exp so a request never leaves with a lapsing token. | RCAB-E8.S7 sessions remediation: 30 s skew. |
 | `booking.idempotencyInProgressRetryMs` | `1000` | ms | client | Pause before the single replay of a create the API reports as still in progress (409). | RCAB-E8.S7 idempotency remediation: one replay after 1 s. |
 | `booking.ratingCommentMaxLength` | `1000` | chars | server-mirror | Max rating comment length (server DTO @MaxLength(1000) re-validates). | RCAB-E4.S9 rating prompts. |
+| `booking.scheduleMinLeadMs` | `900000` | ms | server-mirror | Earliest pickup the "Later" picker offers, from now (server scheduled.minLeadMs re-validates). | RCAB-E8.S14 web scheduled booking: mirrors scheduled.minLeadMs (15 min). |
+| `booking.scheduleMaxLeadMs` | `86400000` | ms | server-mirror | Latest pickup the "Later" picker offers, from now (server scheduled.maxLeadMs re-validates). | RCAB-E8.S14 web scheduled booking: mirrors scheduled.maxLeadMs (24 h). |
+| `booking.scheduleWakeLeadMs` | `600000` | ms | server-mirror | How long before pickup the server starts looking for a driver; until then the tracking banner says "Scheduled for ...". | RCAB-E8.S14 web scheduled booking: mirrors scheduled.wakeLeadMs (T-10 min). |
 | `realtime.subscribeMaxTries` | `5` | attempts | client | Total ride/pool subscribe attempts on an `unavailable` ack (1 initial + retries). | Stage-C web fix (retry subscribe on unavailable ack). |
 | `realtime.subscribeBackoffMs` | `[1000, 2000, 4000, 8000]` | ms list | client | Delay before each subscribe retry; the last entry repeats. | Stage-C web fix: 1 s, 2 s, 4 s, 8 s. |
 | `realtime.reconnectDelayMaxMs` | `5000` | ms | client | Socket.IO reconnection backoff ceiling. | Code default (lib/booking/ws.ts). |

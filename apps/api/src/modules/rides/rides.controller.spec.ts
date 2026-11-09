@@ -552,6 +552,17 @@ describe('RidesController.create — scheduled path (RCAB-E6.S2)', () => {
 
   });
 
+  it('echoes scheduledFor in the create response (normal rides never carry it)', async () => {
+    const when = inWindow();
+    const row = soloRideRow({ type: 'scheduled', scheduledFor: new Date(when) });
+    const { ctrl } = makeController({
+      verify: vi.fn().mockReturnValue(claims),
+      ridesCreate: vi.fn().mockResolvedValue({ row, created: true }),
+    });
+    const res = await ctrl.create(clientReq as never, scheduledDto(when), 'idem-1');
+    expect(res).toMatchObject({ rideId: 'ride-9', status: 'requested', scheduledFor: when });
+  });
+
   it('a replay does not re-schedule the wake', async () => {
     const when = inWindow();
     const { ctrl, scheduled } = makeController({
@@ -689,6 +700,18 @@ describe('RidesController.getRide', () => {
     await expect(ctrl.getRide(strangerReq as never, 'ride-9')).rejects.toBeInstanceOf(
       ForbiddenException,
     );
+  });
+
+  it('exposes scheduledFor for a scheduled ride and null for a normal one', async () => {
+    const when = new Date('2026-11-10T09:30:00.000Z');
+    const clientReq = { user: { sub: 'c-1', role: 'client' } as JwtPayload };
+    const scheduledRow = soloRideRow({ type: 'scheduled', scheduledFor: when });
+    const a = makeController({ ridesFindById: vi.fn().mockResolvedValue(scheduledRow) });
+    expect((await a.ctrl.getRide(clientReq as never, 'ride-9')).scheduledFor).toBe(
+      '2026-11-10T09:30:00.000Z',
+    );
+    const b = makeController({ ridesFindById: vi.fn().mockResolvedValue(soloRideRow({})) });
+    expect((await b.ctrl.getRide(clientReq as never, 'ride-9')).scheduledFor).toBeNull();
   });
 
   it('exposes the cancellation trail (cancelledBy / cancelReason / cancelledAt)', async () => {

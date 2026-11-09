@@ -58,6 +58,9 @@ export interface BookingState {
   searchRetry: { retryUntil: string | null } | null;
   // Whether the rider has rated (or skipped) this completed ride — RCAB-E4.S9.
   rated: boolean;
+  // Private rides only: requested pickup instant (ISO-8601) when the rider chose "Later"
+  // (null = "Now"). Kept after booking so the tracking banner can say "Scheduled for ...".
+  scheduledFor: string | null;
 
   setRideType: (next: RideType) => void;
   setActiveField: (field: PointField) => void;
@@ -84,7 +87,8 @@ export interface BookingState {
   ) => void;
   applyPoolUpdate: (sharedRideId: string, seatCount: number, poolStatus: PoolStatus) => void;
   setRequestError: (message: string) => void;
-  setSoloRequested: (rideId: string, status: string) => void;
+  setScheduledFor: (iso: string | null) => void;
+  setSoloRequested: (rideId: string, status: string, scheduledFor?: string | null) => void;
   /** `retryUntil`: from a `ride:snapshot` of a searching scheduled ride (undefined = no information). */
   applyRideState: (state: string, retryUntil?: string | null) => void;
   /** `ride_dispatch_retry` for the active ride; ignored once the ride is no longer searching. */
@@ -113,6 +117,7 @@ const INITIAL_STATE = {
   driver: null as DriverPosition | null,
   searchRetry: null as { retryUntil: string | null } | null,
   rated: false,
+  scheduledFor: null as string | null,
 };
 
 // The API emits a fixed lifecycle vocabulary; anything unexpected falls back to
@@ -150,7 +155,13 @@ export const useBookingStore = create<BookingState>((set, get) => ({
 
   setRideType(next) {
     if (next === get().rideType) return;
-    set({ rideType: next, ...clearQuote(get().quoteEpoch) });
+    // "Later" only exists for private rides; a quote is per ride type.
+    set({ rideType: next, scheduledFor: null, ...clearQuote(get().quoteEpoch) });
+  },
+
+  setScheduledFor(iso) {
+    // The quote is priced by route only, so choosing a time never invalidates it.
+    set({ scheduledFor: iso });
   },
 
   setActiveField(field) {
@@ -231,8 +242,9 @@ export const useBookingStore = create<BookingState>((set, get) => ({
     set({ stage: 'error', requestError: message });
   },
 
-  setSoloRequested(rideId, status) {
+  setSoloRequested(rideId, status, scheduledFor) {
     set({
+      scheduledFor: scheduledFor ?? null,
       rideId,
       rideStatus: normalizeStatus(status),
       driver: null,

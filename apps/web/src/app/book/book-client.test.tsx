@@ -48,6 +48,7 @@ vi.mock('../../lib/booking/api', async () => {
     fetchQuote: vi.fn(),
     fetchRide: vi.fn(),
     createNormalRide: vi.fn(),
+    createScheduledRide: vi.fn(),
     createSharedRide: vi.fn(),
     cancelRide: vi.fn(),
     submitRating: vi.fn(),
@@ -59,6 +60,7 @@ import * as api from '../../lib/booking/api';
 
 const fetchQuote = vi.mocked(api.fetchQuote);
 const createNormalRide = vi.mocked(api.createNormalRide);
+const createScheduledRide = vi.mocked(api.createScheduledRide);
 const createSharedRide = vi.mocked(api.createSharedRide);
 
 interface Deferred<T> {
@@ -365,6 +367,12 @@ describe('BookPage pool realtime wiring (F10)', () => {
     });
     expect(useBookingStore.getState().seatCount).toBe(2);
     expect(useBookingStore.getState().poolStatus).toBe('closed_full');
+    // Rider-facing copy, not the raw enum.
+    const status = await screen.findByTestId('pool-status');
+    expect(status.getAttribute('data-pool-status')).toBe('closed_full');
+    expect(status.textContent).toContain('2 seats taken');
+    expect(status.textContent).toContain('Pool is full');
+    expect(status.textContent).not.toContain('closed_full');
   });
 });
 
@@ -553,5 +561,82 @@ describe('BookPage scheduled searching state (RCAB-E8.S13)', () => {
     await waitFor(() =>
       expect(screen.getByTestId('tracking-status')).toHaveTextContent('Ride cancelled'),
     );
+  });
+});
+
+describe('BookPage scheduled booking (RCAB-E8.S14)', () => {
+  const rideResp = (scheduledFor?: string) => ({
+    rideId: 'rs1',
+    passengerId: 'u1',
+    status: 'requested',
+    fare: { amount: 5000, currency: 'INR' as const },
+    ...(scheduledFor ? { scheduledFor } : {}),
+  });
+
+  it('"Later" books a scheduled ride with the chosen time and shows the Scheduled banner', async () => {
+    fetchQuote.mockResolvedValue(quote('q-s'));
+    render(<BookClient />);
+    fireEvent.click(screen.getByRole('radio', { name: 'Private' }));
+    pickPreset(0);
+    await waitFor(() => expect(screen.getByTestId('submit-private')).toBeEnabled());
+    expect(screen.getByTestId('submit-private')).toHaveTextContent('Book');
+
+    fireEvent.click(screen.getByTestId('schedule-later'));
+    expect(screen.getByTestId('submit-private')).toHaveTextContent('Schedule ride');
+    const when = useBookingStore.getState().scheduledFor!;
+    createScheduledRide.mockResolvedValueOnce(rideResp(when));
+
+    fireEvent.click(screen.getByTestId('submit-private'));
+    await waitFor(() => expect(createScheduledRide).toHaveBeenCalledTimes(1));
+    expect(createNormalRide).not.toHaveBeenCalled();
+    const call = createScheduledRide.mock.calls[0];
+    expect(call[2]).toBe('q-s');
+    expect(call[3]).toBe(when);
+    expect(await screen.findByTestId('tracking-status')).toHaveTextContent(/^Scheduled for /);
+    expect(window.localStorage.getItem('rcab_active_ride')).toBe('rs1');
+  });
+
+  it('a time outside the window is rejected locally without calling the API', async () => {
+    fetchQuote.mockResolvedValue(quote('q-s'));
+    render(<BookClient />);
+    fireEvent.click(screen.getByRole('radio', { name: 'Private' }));
+    pickPreset(0);
+    await waitFor(() => expect(screen.getByTestId('submit-private')).toBeEnabled());
+    fireEvent.click(screen.getByTestId('schedule-later'));
+    act(() => useBookingStore.getState().setScheduledFor(new Date(Date.now() + 5 * 60_000).toISOString()));
+
+    fireEvent.click(screen.getByTestId('submit-private'));
+    expect(await screen.findAllByText(/between 15 minutes and 24 hours/)).not.toHaveLength(0);
+    expect(createScheduledRide).not.toHaveBeenCalled();
+  });
+
+  it('"Now" still books an immediate ride; the picker does not exist for shared', async () => {
+    fetchQuote.mockResolvedValue(quote('q-n'));
+    createNormalRide.mockResolvedValueOnce(rideResp());
+    render(<BookClient />);
+    expect(screen.queryByTestId('schedule-picker')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('radio', { name: 'Private' }));
+    pickPreset(0);
+    await waitFor(() => expect(screen.getByTestId('submit-private')).toBeEnabled());
+    fireEvent.click(screen.getByTestId('submit-private'));
+    await waitFor(() => expect(createNormalRide).toHaveBeenCalledTimes(1));
+    expect(createScheduledRide).not.toHaveBeenCalled();
+  });
+
+  it('a reload restores a scheduled ride with its Scheduled banner', async () => {
+    const when = new Date(Date.now() + 3 * 3600_000).toISOString();
+    window.localStorage.setItem('rcab_active_ride', 'rs1');
+    vi.mocked(api.fetchRide).mockResolvedValueOnce({
+      rideId: 'rs1',
+      passengerId: 'u1',
+      driverId: null,
+      status: 'requested',
+      fare: { amount: 5000, currency: 'INR' },
+      origin: { lat: 26.17, lng: 91.75 },
+      dropoff: { lat: 26.16, lng: 91.79 },
+      scheduledFor: when,
+    });
+    render(<BookClient />);
+    expect(await screen.findByTestId('tracking-status')).toHaveTextContent(/^Scheduled for /);
   });
 });

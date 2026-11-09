@@ -81,6 +81,8 @@ export interface SoloRideResponse {
   passengerId: string;
   status: string;
   fare: Money;
+  /** Scheduled rides only: the requested pickup instant (ISO-8601). Absent for a normal ride. */
+  scheduledFor?: string;
 }
 
 export interface QuoteResponse {
@@ -108,6 +110,8 @@ export interface RideDetailResponse {
   dropoff: { lat: number; lng: number };
   cancelledBy: string | null;
   cancelReason: string | null;
+  /** Scheduled rides: the requested pickup instant (ISO-8601); null for a normal ride. */
+  scheduledFor: string | null;
   timestamps: {
     acceptedAt: string | null;
     enRouteAt: string | null;
@@ -795,6 +799,7 @@ function soloResponse(row: RideRow): SoloRideResponse {
     passengerId: row.passengerId,
     status: row.status,
     fare: { amount: row.fareCents, currency: 'INR' },
+    ...(row.scheduledFor ? { scheduledFor: row.scheduledFor.toISOString() } : {}),
   };
 }
 
@@ -809,6 +814,7 @@ function rideDetail(row: RideRow): RideDetailResponse {
     dropoff: { lat: row.destLat, lng: row.destLng },
     cancelledBy: row.cancelledBy,
     cancelReason: row.cancelReason,
+    scheduledFor: row.scheduledFor?.toISOString() ?? null,
     timestamps: {
       acceptedAt: row.acceptedAt?.toISOString() ?? null,
       enRouteAt: row.enRouteAt?.toISOString() ?? null,

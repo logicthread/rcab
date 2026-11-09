@@ -21,6 +21,7 @@
     "test:load": "k6 run infra/load/probe.js",
     "test:load:workload": "k6 run infra/load/workload.js",
     "load:prepare": "node infra/load/prepare-dev.mjs",
+    "demo:record:web": "node apps/web/e2e/demo/record.mjs",
     "verify": "pnpm lint && pnpm policy:doc:check && pnpm --filter @rcab/api run test:cov && pnpm test:int",
     "prod:up": "bash scripts/prod-up.sh",
     "prod:down": "RCAB_VERSION=${RCAB_VERSION:-prodtest} docker compose -f infra/docker/docker-compose.prod.yml -f infra/docker/docker-compose.prod-test.yml down -v",
