@@ -190,5 +190,5 @@ Prerequisites kept **off** the lost host: the repository, the compose `.env`/`ap
 - **Offsite is optional and off by default.** With local-only backups a disk failure loses the backups. Enable it before the pilot carries real data.
 - **RTO is unmeasured** on production-sized data on a fresh host.
 - **The age identity location** is the owner's: nothing in the repo can enforce that it is backed up separately.
-- The migration runner (`apps/api/src/migrate.ts`) still has no global lock and records history in a separate statement from the migration (guide R13); the drill applies pending migrations the same way and therefore does not prove concurrent-migrator safety. Not changed here to avoid touching api source.
+- The migration runner (`apps/api/src/migrate.ts`) now serialises concurrent runs with a session-level Postgres advisory lock (`pg_advisory_lock`), but it still records history in a separate statement from the migration body (not one transaction; guide R13). A crash between the two can re-run a non-idempotent migration, so write migrations to be re-runnable or wrap them in `BEGIN/COMMIT` yourself. The restore drill applies pending migrations the same way and does not exercise two concurrent migrators.
 - The backup healthcheck/alerting is not wired: check `.last_success` / `.last_offsite_failure`, or add an alert (follow-up for S2).

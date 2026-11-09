@@ -14,10 +14,10 @@ audience: both
 
 ## Tooling
 
-- **Drizzle Kit** for generation; **Drizzle migrate** for application.
-- Migration files live in `apps/api/migrations/NNNN_short_name.sql`.
-- Migrations run via a dedicated `migrator` container (`node dist/migrate.js`) before the API container starts in docker-compose.
-- Drizzle schema definitions live in `apps/api/src/db/schema.ts` (used for type-safe queries, not for migration generation in Phase-0).
+- Migrations are **hand-authored SQL** in `apps/api/migrations/NNNN_short_name.sql` (currently `0001` to `0017`). They are not generated: Drizzle Kit is used only for Drizzle Studio (`apps/api/drizzle.config.ts`).
+- A small custom runner, `apps/api/src/migrate.ts`, applies the files in lexical order, records each in the `_rcab_migrations` table, and holds a session-level Postgres advisory lock for the whole run so two migrators cannot interleave. The migration body and its history row are two statements, not one transaction, so keep every migration idempotent (below).
+- In production a one-shot `migrator` service (`node dist/migrate.js`, in `docker-compose.prod.yml`) runs before `api` starts; `scripts/deploy/deploy.sh` runs it explicitly and aborts the release if it fails.
+- Drizzle table definitions live in `apps/api/src/db/schema.ts` and are used for type-safe queries. They must be edited together with the SQL migration; nothing checks that they agree except the integration tests.
 
 ## Rules
 
@@ -33,7 +33,13 @@ audience: both
 
 ## Local dev
 
-`docker-compose -f docker-compose.dev.yml up postgres && pnpm migrate up`
+Migrations are **not** applied when the dev stack starts or a container restarts:
+
+```bash
+docker compose --env-file .env.dev -f infra/docker/docker-compose.dev.yml exec api npx tsx src/migrate.ts   # or /db-migrate
+```
+
+Integration tests apply the same files to a throwaway Testcontainers Postgres through `runMigrations()` in `@rcab/test-fixtures`.
 
 ## See also
 - [[schema-postgres]] · [[ci-cd]] · [[backups]]

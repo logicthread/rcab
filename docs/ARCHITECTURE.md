@@ -30,7 +30,7 @@ docker-compose**. No Kubernetes, no managed cloud services. Deliberate.
   host :3002                                   │        API  :3000         │
                                                │   NestJS 10 (HTTP + WS)   │
   Driver app (Flutter) ──HTTP + Socket.IO──►   │                           │
-                                               │  ┌── 12 feature modules ──┐│
+                                               │  ┌── 14 feature modules ──┐│
                                                └──┼────────────┬──────────┼┘
                                      Postgres 16 ◄┘   Redis 7 ◄┘   OSRM ◄──┘ HTTP
                                         :5432           :6379       :5000
@@ -56,7 +56,7 @@ laptop LAN IP, not `localhost`.
 
 ---
 
-## 3. API surface — all 22 routes
+## 3. API surface — all routes
 
 All under `/v1` except `/` and `/metrics`. Auth = first-party JWT `Authorization: Bearer`
 via `AuthGuard`, except the public health/auth-entry routes. `POST /v1/auth/refresh` is
@@ -70,6 +70,7 @@ Access JWTs are HS256 with `iss=rcab`, `aud=rcab-api`, `typ=access`. `JWT_SECRET
 | `GET /` | health | public | alias of readiness |
 | `GET /v1/health/live` | health | public | liveness probe |
 | `GET /v1/health/ready` | health | public | readiness (checks pg/redis/osrm) |
+| `GET /v1/health/version` | health | public | running build identity `{version, builtAt}` (commit SHA in release images, `dev` locally; RCAB-E8.S11) |
 | `GET /metrics` | health | public | Prometheus metrics |
 | `POST /v1/auth/firebase-exchange` | auth | public | Firebase ID token → rcab JWT pair + refresh cookie |
 | `POST /v1/auth/refresh` | auth | cookie+CSRF | single-use rotation of the refresh cookie; replay revokes the session family |
@@ -128,7 +129,7 @@ Gateway: `apps/api/src/modules/realtime/realtime.gateway.ts`. Rooms: `user:<id>`
 
 ## 5. Data model — Postgres (Drizzle, `apps/api/src/db/schema.ts`)
 
-**10 tables** (incl. `idempotency_record`, shared-create claims). FKs shown with →. (Stage C added `dispatch_offer`, `driver_active_assignment`, `outbox`, `pool_member` and `migration_conflict` (migrations 0014-0017) — offers, assignment and pool membership are authoritative in Postgres, not Redis. No `ride_events`/`jwt_revocations`
+**15 tables** in `schema.ts` (the tables below, plus `idempotency_record` and the Stage C tables `migration_conflict`, `dispatch_offer`, `driver_active_assignment`, `outbox`, `pool_member`). FKs shown with →. (Stage C added `dispatch_offer`, `driver_active_assignment`, `outbox`, `pool_member` and `migration_conflict` (migrations 0014-0017) — offers, assignment and pool membership are authoritative in Postgres, not Redis. No `ride_events`/`jwt_revocations`
 tables exist. Refresh-token revocation is the
 `auth_refresh_token.revoked_at` column, **not** a Redis set.)
 
@@ -148,8 +149,8 @@ tables exist. Refresh-token revocation is the
 completed, cancelled, no_driver, no_show`.
 
 ### Migrations
-Hand-authored SQL in `apps/api/migrations/` (`0001`…`0013`), applied in order by a
-custom runner `apps/api/src/migrate.ts` (tracks applied files in `_rcab_migrations`).
+Hand-authored SQL in `apps/api/migrations/` (`0001`…`0017`), applied in order by a
+custom runner `apps/api/src/migrate.ts` (tracks applied files in `_rcab_migrations`; serialised by a Postgres advisory lock).
 **Not auto-applied on `pnpm dev` / container restart** — run the runner explicitly:
 ```bash
 docker compose --env-file .env.dev -f infra/docker/docker-compose.dev.yml exec api npx tsx src/migrate.ts
@@ -176,12 +177,12 @@ Inspect with `/redis-inspect` (geo/queues/projections) and `/pool-inspect` (shar
 
 ## 7. Modules & flows
 
-**12 NestJS feature modules** (`apps/api/src/modules/`), plus infra modules
+**14 NestJS module directories** (`apps/api/src/modules/`: the 12 listed below plus `outbox` and `metrics`; `dispatch-runner.module.ts` lives in `dispatch/`), plus the global `PolicyModule` (`config/policy/`) and infra modules
 (`infra/`: drizzle, redis, firebase, google). See `40-backend/module-map.md` (kept in
 sync by `pnpm code:graph:check`) and `codegraph/graph.md` for the live DI graph.
 
 `auth · vehicles · drivers · realtime · pricing · rides · dispatch · ride-lifecycle ·
-matching · rating · health · scheduled`
+matching · rating · health · scheduled · outbox · metrics`
 
 ### Solo ride lifecycle (state machine — `rides.status`)
 ```
