@@ -129,6 +129,7 @@ audience: both
 | RCAB-E8.S11 | [[story-rcab-e8-s11-release-pipeline]] — Release pipeline: immutable images, verified deploy, rollback | ▶ |
 | RCAB-E8.S12 | [[story-rcab-e8-s12-business-metrics-load]] — Business metrics + realistic load scenarios | ▶ |
 | RCAB-E8.S13 | [[story-rcab-e8-s13-scheduled-cutoff-searching-ui]] — Scheduled retry cutoff + passenger searching state (+ optimistic shared pricing) | ▶ |
+| RCAB-E8.S14 | [[story-rcab-e8-s14-team-onboarding-pack]] — Team onboarding pack (walkthrough, state machines, role guides, demo videos) | ▶ |
 
 ## E9 — Pilot rollout → Demo 8 · "Real drivers, real city"
 *Closed pilot, observation, iteration to Phase-0 scale.* See [[epic-e9-pilot-rollout]].
