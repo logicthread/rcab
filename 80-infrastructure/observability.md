@@ -40,19 +40,21 @@ audience: both
 
 ## Alerts (Alertmanager → Slack)
 
-| Alert | Threshold |
-|---|---|
-| API 5xx rate | > 1% for 5 min |
-| API p99 latency | > 1.5 s for 10 min |
-| Postgres connection saturation | > 80% for 5 min |
-| Redis memory | > 80% for 10 min |
-| Disk free | < 20 GB |
-| Dispatch fail rate | > 5% for 15 min |
-| Cert expiry | < 30 days |
+Target alert set (design). **Implementation status (verified against `infra/observability/alert_rules.yml` + `alertmanager.yml`):** only the first two rules are defined; Alertmanager has a single `default` receiver with no Slack/email wiring, so nothing is delivered anywhere yet. Remaining rules and the Slack receiver are RCAB-E8.S2.
+
+| Alert | Threshold | Defined in code |
+|---|---|---|
+| API 5xx rate (`ApiHighErrorRate`, critical) | > 1% for 5 min | yes |
+| API p99 latency (`ApiHighP99Latency`, warning) | > 1.5 s for 10 min | yes (note: the load-test budget gate is p99 800 ms, see [[performance-budget]]; the alert is deliberately looser) |
+| Postgres connection saturation | > 80% for 5 min | no (E8.S2) |
+| Redis memory | > 80% for 10 min | no (E8.S2) |
+| Disk free | < 20 GB | no (E8.S2) |
+| Dispatch fail rate | > 5% for 15 min | no (E8.S2; metric `rcab_dispatch_outcome_total` exists) |
+| Cert expiry | < 30 days | no (E8.S2) |
 
 ## Uptime check
 
-- Uptime Kuma probes `/v1/health/ready` every 60 s and pings Slack on failure.
+- Uptime Kuma probes `/v1/health/ready` every 60 s. `scripts/setup-uptime-kuma.ts` creates the monitor; the Slack notification is not provisioned by the repo (configure it in the Kuma UI once the owner supplies a webhook).
 
 ## See also
 - [[performance-budget]] · [[docker-compose]] · [[vps-topology]]
