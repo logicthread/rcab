@@ -1,4 +1,4 @@
-import { getNumber, type ConfigReader } from '../../common/utils/env';
+import type { Policy } from '../../config/policy/policy';
 
 /**
  * Accept/escalation window for SCHEDULED rides (owner decision, RCAB-E8.S8).
@@ -14,8 +14,6 @@ import { getNumber, type ConfigReader } from '../../common/utils/env';
  *  - the window end (`hardFailMs`): for a scheduled ride this does NOT expire
  *    the ride, it RETRIES it (see `scheduled-retry.ts`).
  */
-export const SCHEDULED_DISPATCH_WINDOW_MS_DEFAULT = 4 * 60 * 1000; // 240 s
-
 export interface ScheduledDispatchWindow {
   /** Delay before wave 2 is offered (from wave 1). */
   waveOneMs: number;
@@ -24,23 +22,23 @@ export interface ScheduledDispatchWindow {
 }
 
 /**
- * Read and validate the scheduled window from config. Throws
- * `InvalidConfigError` (at boot, via the constructors that call this) on a
- * non-numeric, non-integer or non-positive value, or a wave-1 delay longer than
- * the window.
+ * The scheduled window from the validated policy (`scheduled.dispatchWindowMs`,
+ * `scheduled.dispatchWaveOneMs`; env `SCHEDULED_DISPATCH_WINDOW_MS` /
+ * `SCHEDULED_DISPATCH_WAVE_ONE_MS`). Bounds and the waveOne ≤ window rule are
+ * enforced once, at boot, by `buildPolicy`.
  */
-export function scheduledWindowFromConfig(config: ConfigReader): ScheduledDispatchWindow {
-  const hardFailMs = getNumber(
-    config,
-    'SCHEDULED_DISPATCH_WINDOW_MS',
-    SCHEDULED_DISPATCH_WINDOW_MS_DEFAULT,
-    { integer: true, min: 1 },
-  );
-  const waveOneMs = getNumber(
-    config,
-    'SCHEDULED_DISPATCH_WAVE_ONE_MS',
-    Math.floor(hardFailMs / 2),
-    { integer: true, min: 1, max: hardFailMs },
-  );
-  return { waveOneMs, hardFailMs };
+export function scheduledWindowFromPolicy(policy: Policy): ScheduledDispatchWindow {
+  return {
+    waveOneMs: policy.scheduled.dispatchWaveOneMs,
+    hardFailMs: policy.scheduled.dispatchWindowMs,
+  };
+}
+
+/**
+ * The moment after which an unanswered scheduled ride stops being retried and
+ * ends as `no_driver`: `scheduled_for` + `scheduled.retryCutoffAfterPickupMs`
+ * (RCAB-E8.S13). Pure, so the retry transaction and the realtime snapshot agree.
+ */
+export function scheduledRetryUntil(scheduledFor: Date, cutoffAfterPickupMs: number): Date {
+  return new Date(scheduledFor.getTime() + cutoffAfterPickupMs);
 }

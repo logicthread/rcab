@@ -26,13 +26,17 @@ Completing every story in this epic ⇒ Demo 7 passes.
 |---|---|---|
 | RCAB-E8.S1 | Grafana dashboards filled with real query expressions | · |
 | RCAB-E8.S2 | Alertmanager rules wired to Slack | · |
-| RCAB-E8.S3 | Backup container + monthly restore drill | · |
+| RCAB-E8.S3 | [[story-rcab-e8-s3-backup-restore-drill]] — Backup container + restore drill | ▶ |
 | RCAB-E8.S4 | Security checklist sweep — every item green | · |
 | RCAB-E8.S5 | k6 load test: confirm Phase-0 perf budget on target VPS class | · |
 | RCAB-E8.S6 | TLS + HSTS + CSP audit | · |
 | RCAB-E8.S7 | [[story-rcab-e8-s7-review-remediation-stage-ab]] — Review remediation Stage A+B (runtime, config, sessions, booking, idempotency) | ▶ |
 | RCAB-E8.S8 | [[story-rcab-e8-s8-review-remediation-stage-c]] — Review remediation Stage C (offer auth, driver exclusivity, durable dispatch, pool transactions) | ▶ |
 | RCAB-E8.S9 | [[story-rcab-e8-s9-shared-fare-readjustment-policy]] — Shared fare readjustment policy (replaces the fixed-at-join stand-in) | · |
+| RCAB-E8.S10 | [[story-rcab-e8-s10-central-policy-config]] — Centralize business policy configuration (one typed, validated table + generated overview) | ▶ |
+| RCAB-E8.S11 | [[story-rcab-e8-s11-release-pipeline]] — Release pipeline: immutable images, verified deploy, rollback | ▶ |
+| RCAB-E8.S12 | [[story-rcab-e8-s12-business-metrics-load]] — Business metrics + realistic load scenarios | ▶ |
+| RCAB-E8.S13 | [[story-rcab-e8-s13-scheduled-cutoff-searching-ui]] — Scheduled retry cutoff + passenger searching state (+ optimistic shared pricing) | ▶ |
 
 ## Demo 7 headline (verbatim from [[delivery-roadmap]])
 

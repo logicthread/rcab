@@ -3,6 +3,7 @@ import { sql } from 'drizzle-orm';
 import { DRIZZLE_DB, type DbExecutor, type DrizzleDb } from '../../infra/db/drizzle.module';
 import type { SharedRideMember } from '../../db/schema';
 import { memberFromDb } from './pool-membership.repository';
+import { getPolicy } from '../../config/policy/policy';
 
 export type { SharedRideMember } from '../../db/schema';
 
@@ -117,17 +118,19 @@ export class SharedRideRepository {
     destLat: number,
     destLng: number,
   ): Promise<SharedRideRow[]> {
+    // Spatial pre-filter radius: policy matching.prefilterRadiusM (1500 m).
+    const radiusM = getPolicy().matching.prefilterRadiusM;
     const result = await this.db.execute<CandidateDbRow>(sql`
       ${POOL_SELECT}
       WHERE  ST_DWithin(
                s.origin_centroid,
                ST_SetSRID(ST_MakePoint(${originLng}, ${originLat}), 4326)::geography,
-               1500
+               ${radiusM}::float8
              )
         AND  ST_DWithin(
                s.dest_centroid,
                ST_SetSRID(ST_MakePoint(${destLng}, ${destLat}), 4326)::geography,
-               1500
+               ${radiusM}::float8
              )
         AND  s.pool_state = 'open'
         AND  s.seat_count < s.max_seats

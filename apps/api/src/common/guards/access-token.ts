@@ -1,4 +1,5 @@
 import type { JwtService } from '@nestjs/jwt';
+import { getPolicy } from '../../config/policy/policy';
 
 /**
  * rcab access-token claims (F11). Every access token carries a fixed issuer,
@@ -9,7 +10,8 @@ import type { JwtService } from '@nestjs/jwt';
 export const JWT_ISSUER = 'rcab';
 export const JWT_AUDIENCE = 'rcab-api';
 export const ACCESS_TOKEN_TYPE = 'access';
-export const ACCESS_TOKEN_TTL_SECONDS = 900;
+/** Policy `sessions.accessTokenTtlS` (default 900 s, env ACCESS_TOKEN_TTL_S). */
+export const ACCESS_TOKEN_TTL_SECONDS: number = getPolicy().sessions.accessTokenTtlS;
 
 export interface AccessTokenClaims {
   sub: string;

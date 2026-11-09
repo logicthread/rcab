@@ -1,4 +1,4 @@
-import { Injectable, Inject, ForbiddenException, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
+import { Injectable, Inject, ForbiddenException, NotFoundException, BadRequestException, Logger, Optional } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { Cron } from '@nestjs/schedule';
@@ -7,8 +7,10 @@ import { DRIZZLE_DB, type DrizzleDb } from '../../infra/db/drizzle.module';
 import { REDIS } from '../../infra/redis/redis.module';
 import { driver, vehicle } from '../../db/schema';
 import { RealtimeBus } from '../realtime/realtime.bus';
+import { POLICY, getPolicy, type Policy } from '../../config/policy/policy';
 
-const AUTO_OFFLINE_THRESHOLD_MS = 60_000;
+/** Seconds cron for the sweep; `drivers.autoOfflineSweepMs` is validated to whole seconds dividing 60. */
+const AUTO_OFFLINE_SWEEP_CRON = `*/${getPolicy().drivers.autoOfflineSweepMs / 1000} * * * * *`;
 const GEO_KEY = 'active_drivers';
 
 @Injectable()
@@ -19,6 +21,7 @@ export class DriversService {
     @Inject(DRIZZLE_DB) private db: DrizzleDb,
     @Inject(REDIS) private redis: Redis,
     private bus: RealtimeBus,
+    @Optional() @Inject(POLICY) private readonly policy: Policy = getPolicy(),
   ) {}
 
   // ── E3.S3: set current vehicle ────────────────────────────────────────────
@@ -95,9 +98,9 @@ export class DriversService {
     return { ok: true };
   }
 
-  // ── E3.S4: auto-offline heartbeat (every 15 s) ────────────────────────────
+  // ── E3.S4: auto-offline heartbeat (policy drivers.*: every 15 s, 60 s stale) ─
 
-  @Cron('*/15 * * * * *')
+  @Cron(AUTO_OFFLINE_SWEEP_CRON)
   async autoOfflineSweep(): Promise<void> {
     const keys = await this.redis.keys('driver:state:*');
     if (keys.length === 0) return;
@@ -107,7 +110,7 @@ export class DriversService {
       const lastSeenStr = await this.redis.hget(key, 'last_seen');
       if (!lastSeenStr) continue;
       const age = nowMs - Number(lastSeenStr);
-      if (age < AUTO_OFFLINE_THRESHOLD_MS) continue;
+      if (age < this.policy.drivers.staleAfterMs) continue;
 
       // Extract driver_id from key "driver:state:<id>"
       const driverId = key.slice('driver:state:'.length);

@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { MIN_QUERY_LENGTH, searchPlaces, type NominatimSuggestion } from '../../lib/geo/nominatim';
 import type { Place } from '../../lib/booking/types';
+import { WEB_POLICY } from '../../config/policy';
 
 interface Props {
   label: string;
@@ -15,7 +16,7 @@ interface Props {
 }
 
 // Debounce keeps us within the Nominatim ≤1 req/s usage policy while typing.
-const DEBOUNCE_MS = 400;
+const DEBOUNCE_MS = WEB_POLICY.search.addressDebounceMs;
 
 export function AddressSearch({
   label,

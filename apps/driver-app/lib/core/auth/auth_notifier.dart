@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'auth_state.dart';
 import 'native_auth_contract.dart';
 import 'token_store.dart';
+import '../config/policy.dart';
 
 class AuthNotifier extends StateNotifier<AuthState> {
   AuthNotifier(
@@ -73,8 +74,8 @@ class AuthNotifier extends StateNotifier<AuthState> {
           NativeAuthContract.logoutPath,
           data: {'refresh_token': refresh},
           options: Options(
-            sendTimeout: const Duration(seconds: 5),
-            receiveTimeout: const Duration(seconds: 5),
+            sendTimeout: DriverPolicy.logoutTimeout,
+            receiveTimeout: DriverPolicy.logoutTimeout,
           ),
         );
       } catch (_) {

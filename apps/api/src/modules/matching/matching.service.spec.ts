@@ -1,3 +1,4 @@
+import { buildPolicy } from '../../config/policy/policy';
 import { describe, it, expect, vi } from 'vitest';
 import { MatchingService, type SharedRideRequest } from './matching.service';
 import { PoolOpenRejectedError, type JoinPoolResult } from './pool-lifecycle.service';
@@ -103,7 +104,7 @@ function makeService(
     lifecycle as never,
     members as never,
     {} as never,
-    config as never,
+    buildPolicy(config),
   );
   return { svc, repo, scorer, lifecycle, members };
 }

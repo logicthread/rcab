@@ -316,6 +316,34 @@ describe.skipIf(skip)('ride:subscribe — solo snapshot', () => {
   });
 });
 
+describe.skipIf(skip)('ride:subscribe — scheduled searching snapshot (RCAB-E8.S13)', () => {
+  it('carries retryUntil = scheduled_for + the policy cutoff while searching, null for a normal ride and after no_driver', async () => {
+    const gateway = moduleRef.get(RealtimeGateway);
+    const passenger = await seedClient(pool);
+    const snapshotOf = async (rideId: string) =>
+      (
+        (await gateway.handleRideSubscribe({ rideId }, fakeSocket(passenger).socket)) as {
+          snapshot: RideSnapshot;
+        }
+      ).snapshot;
+
+    const normal = await seedSoloRide(pool, passenger);
+    expect((await snapshotOf(normal)).retryUntil).toBeNull();
+
+    const rideId = await seedSoloRide(pool, passenger);
+    const pickup = new Date(Date.now() + 5 * 60_000);
+    await pool.query(`UPDATE rides SET type = 'scheduled', scheduled_for = $2 WHERE id = $1`, [rideId, pickup]);
+    expect((await snapshotOf(rideId)).retryUntil).toBe(new Date(pickup.getTime() + 30 * 60_000).toISOString());
+
+    // not woken yet (generation 0): nothing is searching, so no cutoff is shown
+    await pool.query(`UPDATE rides SET dispatch_generation = 0 WHERE id = $1`, [rideId]);
+    expect((await snapshotOf(rideId)).retryUntil).toBeNull();
+
+    await pool.query(`UPDATE rides SET dispatch_generation = 2, status = 'no_driver' WHERE id = $1`, [rideId]);
+    expect(await snapshotOf(rideId)).toMatchObject({ status: 'no_driver', terminal: true, retryUntil: null });
+  });
+});
+
 describe.skipIf(skip)(
   'shared offer protocol + driver assignment snapshot (T31 server side)',
   () => {

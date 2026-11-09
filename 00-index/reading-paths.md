@@ -128,6 +128,20 @@ Work on or verify the repository-review fixes (auth sessions, config, idempotenc
 - [[module-auth]] · [[module-rides]]
 - [[rest-endpoints]] · [[security-checklist]]
 
+### `path:recovery-ops`
+Backups, restore drill, Redis loss, migration_conflict resolution, release/rollback.
+- `docs/operations/recovery-runbook.md` · `scripts/recovery/` · `scripts/deploy/README.md`
+- [[backups]]
+- [[story-rcab-e8-s3-backup-restore-drill]] · [[story-rcab-e8-s11-release-pipeline]]
+- [[hitl-touchpoints]] (real VPS deploy and restore are HITL)
+
+### `path:change-business-rule`
+Change or inspect a business rule / config value (fare, offer TTL, wave timers, scheduled window, pool timeout, no-show wait, token lifetimes, rate limits).
+- [[policy-config]] (mechanism; the values themselves are in `docs/POLICY.md`)
+- [[story-rcab-e8-s10-central-policy-config]]
+- The feature note behind the knob, e.g. [[features-top-k-dispatch]] · [[features-scheduled-booking]] · [[features-shared-rides]]
+- [[hitl-touchpoints]] (product-visible values are owner decisions)
+
 ### `path:add-new-entity`
 Add a new domain entity to the vault and code.
 - [[data-model]] · [[conventions]]

@@ -230,6 +230,53 @@ describe('useBookingStore', () => {
     expect(useBookingStore.getState().rideStatus).toBeNull();
   });
 
+  it('applyDispatchRetry marks a searching ride; keeps a known cutoff if the next event omits it', () => {
+    const st = () => useBookingStore.getState();
+    st().setSoloRequested('ride-solo-1', 'requested');
+    expect(st().searchRetry).toBeNull();
+    st().applyDispatchRetry('ride-solo-1', '2026-11-08T10:30:00.000Z');
+    expect(st().searchRetry).toEqual({ retryUntil: '2026-11-08T10:30:00.000Z' });
+    st().applyDispatchRetry('ride-solo-1');
+    expect(st().searchRetry).toEqual({ retryUntil: '2026-11-08T10:30:00.000Z' });
+  });
+
+  it('applyDispatchRetry without a cutoff yields a null retryUntil (nothing invented)', () => {
+    const st = () => useBookingStore.getState();
+    st().setSoloRequested('ride-solo-1', 'requested');
+    st().applyDispatchRetry('ride-solo-1');
+    expect(st().searchRetry).toEqual({ retryUntil: null });
+  });
+
+  it('applyDispatchRetry ignores another ride, a no-longer-searching ride and a missing ride', () => {
+    const st = () => useBookingStore.getState();
+    st().applyDispatchRetry('ride-solo-1', 'x');
+    expect(st().searchRetry).toBeNull();
+    st().setSoloRequested('ride-solo-1', 'requested');
+    st().applyDispatchRetry('ride-OTHER', 'x');
+    expect(st().searchRetry).toBeNull();
+    st().applyRideState('accepted');
+    st().applyDispatchRetry('ride-solo-1', 'x');
+    expect(st().searchRetry).toBeNull();
+  });
+
+  it('applyRideState takes the cutoff from a searching snapshot and clears the overlay on any other status', () => {
+    const st = () => useBookingStore.getState();
+    st().setSoloRequested('ride-solo-1', 'requested');
+    st().applyRideState('requested', '2026-11-08T10:30:00.000Z');
+    expect(st().searchRetry).toEqual({ retryUntil: '2026-11-08T10:30:00.000Z' });
+    st().applyRideState('dispatching');
+    expect(st().searchRetry).toEqual({ retryUntil: '2026-11-08T10:30:00.000Z' });
+    st().applyRideState('no_driver');
+    expect(st().rideStatus).toBe('no_driver');
+    expect(st().searchRetry).toBeNull();
+  });
+
+  it('applyRideState accepts the dispatching status', () => {
+    useBookingStore.getState().setSoloRequested('ride-solo-1', 'requested');
+    useBookingStore.getState().applyRideState('dispatching');
+    expect(useBookingStore.getState().rideStatus).toBe('dispatching');
+  });
+
   it('applyDriverLocation updates the marker for the active ride', () => {
     useBookingStore.getState().setSoloRequested('ride-solo-1', 'accepted');
     useBookingStore.getState().applyDriverLocation('ride-solo-1', 26.14, 91.73, 90);

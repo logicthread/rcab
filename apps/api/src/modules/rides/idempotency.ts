@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { getPolicy } from '../../config/policy/policy';
 import {
   BadRequestException,
   ConflictException,
@@ -126,7 +127,7 @@ export function idempotencyKeyConflict(): UnprocessableEntityException {
  * worst-case allocation time (OSRM scoring + pool transaction), so a slow but
  * live first request is not raced.
  */
-export const PENDING_RECLAIM_AFTER_MS = 60_000;
+export const PENDING_RECLAIM_AFTER_MS: number = getPolicy().idempotency.pendingReclaimMs;
 
 export function idempotencyRequestInProgress(): ConflictException {
   return new ConflictException({

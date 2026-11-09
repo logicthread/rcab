@@ -1,8 +1,8 @@
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import { getNumber } from '../../common/utils/env';
+import { POLICY, type Policy } from '../../config/policy/policy';
 import { InjectQueue } from '@nestjs/bullmq';
 import { OnEvent } from '@nestjs/event-emitter';
+import { sql } from 'drizzle-orm';
 import { Queue, type Job } from 'bullmq';
 import type Redis from 'ioredis';
 import { REDIS } from '../../infra/redis/redis.module';
@@ -35,8 +35,15 @@ import {
 } from './assignment.repository';
 import { DriverAssignmentProjection } from './driver-assignment.projection';
 import { withTxRetry } from './tx-retry';
-import { rearmScheduledRide } from '../scheduled/scheduled-retry';
-import { scheduledWindowFromConfig, type ScheduledDispatchWindow } from '../scheduled/scheduled-window';
+import {
+  observeDispatchLatency,
+  recordDispatchOutcome,
+  recordRideTransition,
+  type TripKindLabel,
+} from '../../metrics';
+import { OutboxTopic, outboxDedupeKey } from '../outbox/outbox.types';
+import { rearmScheduledRide, type ScheduledRetryOptions } from '../scheduled/scheduled-retry';
+import { scheduledWindowFromPolicy, type ScheduledDispatchWindow } from '../scheduled/scheduled-window';
 import {
   wave2JobId as waveTwoJobId,
   hardFailJobId,
@@ -57,11 +64,6 @@ import {
 export const DISPATCH_QUEUE = 'dispatch';
 export const WAVE_TIMEOUT_JOB = 'dispatch:wave-timeout';
 export const HARD_FAIL_JOB = 'dispatch:hard-fail';
-
-/** Live offer lifetime. The authoritative deadline is `dispatch_offer.expires_at`. */
-export const OFFER_TTL_MS = 12_000;
-/** Geo-index over-fetch so ineligible / already-offered drivers do not starve a wave. */
-const CANDIDATE_HEADROOM = 4;
 
 export interface WaveTimeoutJob {
   rideId: string;
@@ -97,14 +99,22 @@ interface DispatchParams {
   r2Meters: number;
   waveOneTimeoutMs: number;
   hardFailMs: number;
+  /** Live offer lifetime. The authoritative deadline is `dispatch_offer.expires_at`. */
+  offerTtlMs: number;
+  /** Geo-index over-fetch so ineligible / already-offered drivers do not starve a wave. */
+  candidateHeadroom: number;
   /** Window for scheduled rides (RCAB-E8.S8): 4 min by default, see scheduled-window.ts. */
   scheduled: ScheduledDispatchWindow;
+  /** Scheduled retry cutoff (RCAB-E8.S13), see scheduled-retry.ts. */
+  scheduledRetry: ScheduledRetryOptions;
 }
 
 /** What the accept transaction decided, plus what to tell people after commit. */
 interface AcceptOutcome {
   result: AcceptOfferResult;
   revoked: RevokedOffer[];
+  /** When the accepted offer was created (DB clock); absent on a rejection. */
+  offeredAt?: Date;
 }
 
 function rejected(reason: AcceptOfferFailure): AcceptOutcome {
@@ -127,23 +137,24 @@ export class DispatchService {
     @InjectQueue(DISPATCH_QUEUE) private readonly queue: Queue,
     @Inject(REDIS) private readonly redis: Redis,
     @Inject(DRIZZLE_DB) private readonly db: DrizzleDb,
-    @Inject(ConfigService) config: ConfigService,
+    @Inject(POLICY) policy: Policy,
     private readonly poolProjection: PoolProjectionService,
     // R09: Postgres snapshots for the post-commit outcome / pool broadcasts.
     // Optional so a harness without realtime still builds the service.
     @Optional() private readonly snapshots?: RealtimeSnapshotService,
   ) {
+    const d = policy.dispatch;
     this.params = {
-      k1: getNumber(config, 'DISPATCH_K1', 5, { integer: true, min: 1 }),
-      k2: getNumber(config, 'DISPATCH_K2', 10, { integer: true, min: 1 }),
-      r1Meters: getNumber(config, 'DISPATCH_R1_METERS', 2_000, { min: 1 }),
-      r2Meters: getNumber(config, 'DISPATCH_R2_METERS', 4_000, { min: 1 }),
-      waveOneTimeoutMs: getNumber(config, 'DISPATCH_WAVE_ONE_TIMEOUT_MS', 30_000, {
-        integer: true,
-        min: 1,
-      }),
-      hardFailMs: getNumber(config, 'DISPATCH_HARD_FAIL_MS', 60_000, { integer: true, min: 1 }),
-      scheduled: scheduledWindowFromConfig(config),
+      k1: d.k1,
+      k2: d.k2,
+      r1Meters: d.r1Meters,
+      r2Meters: d.r2Meters,
+      waveOneTimeoutMs: d.waveOneTimeoutMs,
+      hardFailMs: d.hardFailMs,
+      offerTtlMs: d.offerTtlMs,
+      candidateHeadroom: d.candidateHeadroom,
+      scheduled: scheduledWindowFromPolicy(policy),
+      scheduledRetry: { cutoffAfterPickupMs: policy.scheduled.retryCutoffAfterPickupMs },
     };
   }
 
@@ -193,6 +204,7 @@ export class DispatchService {
 
     const { result } = outcome;
     if (result.ok) {
+      this.recordAccepted(result, outcome.offeredAt);
       await this.afterAccepted(driverId, offerId, result, outcome.revoked);
     } else if (result.reason !== 'conflict') {
       // A lost lock race leaves the offer live: the ack says retry, no revoke.
@@ -293,7 +305,26 @@ export class DispatchService {
     }
     await this.offers.markAccepted(tx, offerId);
     const revoked = await this.offers.revokeLiveForTrip(tx, trip, offerId);
-    return { result: { ok: true, trip, generation: offer.generation, replay: false }, revoked };
+    return {
+      result: { ok: true, trip, generation: offer.generation, replay: false },
+      revoked,
+      offeredAt: offer.offeredAt,
+    };
+  }
+
+  /**
+   * Business metrics for a COMMITTED accept (strictly after the transaction;
+   * a replay of an earlier commit is not counted again).
+   */
+  private recordAccepted(
+    result: Extract<AcceptOfferResult, { ok: true }>,
+    offeredAt: Date | undefined,
+  ): void {
+    if (result.replay) return;
+    const kind: TripKindLabel = result.trip.kind === 'solo' ? 'solo' : 'pool';
+    recordDispatchOutcome('assigned', kind);
+    if (result.trip.kind === 'solo') recordRideTransition('requested', 'accepted');
+    if (offeredAt) observeDispatchLatency('offer_to_accept', kind, (Date.now() - offeredAt.getTime()) / 1000);
   }
 
   private async afterAccepted(
@@ -444,11 +475,13 @@ export class DispatchService {
     }
     const trip: TripRef = { kind: 'solo', rideId: ride.id };
     const { k, radiusMeters } = this.waveParams(waveNumber);
-    const candidates = await this.selectCandidates(trip, generation, ride.originLat, ride.originLng, {
-      k,
-      radiusMeters,
-      seatsNeeded: 1,
-    });
+    const { drivers: candidates, priorOffers } = await this.selectCandidates(
+      trip,
+      generation,
+      ride.originLat,
+      ride.originLng,
+      { k, radiusMeters, seatsNeeded: 1 },
+    );
     if (candidates.length === 0) {
       this.log.warn(
         { rideId: ride.id, waveNumber, radiusMeters },
@@ -456,19 +489,21 @@ export class DispatchService {
       );
     }
 
+    let created = 0;
     for (const driverId of candidates) {
       const offer = await this.offers.createOffer(this.db, {
         trip,
         driverId,
         generation,
         waveNumber,
-        ttlMs: OFFER_TTL_MS,
+        ttlMs: this.params.offerTtlMs,
       });
       if (!offer) continue;
+      created++;
       const payload: SoloRideOfferPayload = {
         offerId: offer.offerId,
         rideId: ride.id,
-        ttlMs: OFFER_TTL_MS,
+        ttlMs: this.params.offerTtlMs,
         expiresAt: offer.expiresAt.toISOString(),
         pickup: { lat: ride.originLat, lng: ride.originLng },
         dropoff: { lat: ride.destLat, lng: ride.destLng },
@@ -478,6 +513,9 @@ export class DispatchService {
       this.safely('ride_offer', () => this.bus.toDriver(driverId, 'ride_offer', payload));
     }
 
+    if (waveNumber === 1 && priorOffers === 0 && created > 0) {
+      await this.observeIntentToFirstOffer(trip, generation, 'solo');
+    }
     if (waveNumber === 1) {
       await this.scheduleTimers(ride.id, 'solo', generation, ride.type === 'scheduled');
     }
@@ -516,7 +554,7 @@ export class DispatchService {
       );
     } else {
       const { k, radiusMeters } = this.waveParams(waveNumber);
-      const candidates = await this.selectCandidates(
+      const { drivers: candidates, priorOffers } = await this.selectCandidates(
         trip,
         generation,
         pool.originLat,
@@ -529,25 +567,30 @@ export class DispatchService {
           'no fresh candidates this wave',
         );
       }
+      let created = 0;
       for (const driverId of candidates) {
         const offer = await this.offers.createOffer(this.db, {
           trip,
           driverId,
           generation,
           waveNumber,
-          ttlMs: OFFER_TTL_MS,
+          ttlMs: this.params.offerTtlMs,
         });
         if (!offer) continue;
+        created++;
         const payload: SharedRideOfferPayload = {
           offerId: offer.offerId,
           sharedRideId: pool.rideId,
-          ttlMs: OFFER_TTL_MS,
+          ttlMs: this.params.offerTtlMs,
           expiresAt: offer.expiresAt.toISOString(),
           stops,
           passengerCount: pool.seatCount,
           waveNumber,
         };
         this.safely('ride_offer', () => this.bus.toDriver(driverId, 'ride_offer', payload));
+      }
+      if (waveNumber === 1 && priorOffers === 0 && created > 0) {
+        await this.observeIntentToFirstOffer(trip, generation, 'pool');
       }
     }
 
@@ -619,6 +662,7 @@ export class DispatchService {
       return { generation: g, revoked: await this.offers.revokeLiveForTrip(tx, trip) };
     });
     if (!aborted) return;
+    recordDispatchOutcome('pool_aborted', 'pool');
     this.log.warn({ rideId }, 'dispatch hard-fail → aborting pool');
     this.notifyRevoked(trip, aborted.revoked, 'revoked');
     await this.removeTimers(rideId, aborted.generation);
@@ -635,18 +679,63 @@ export class DispatchService {
    * commit. The passenger hears about it on the first re-arm only.
    */
   private async retryScheduledRide(rideId: string, generation: number | undefined): Promise<void> {
-    const retried = await rearmScheduledRide(this.db, rideId, generation);
+    const retried = await rearmScheduledRide(this.db, rideId, generation, this.params.scheduledRetry);
     if (!retried) return;
+    if (retried.outcome === 'no_driver') {
+      // Past the retry cutoff: the ride ended as no_driver in the same
+      // transaction. Same passenger-facing tail as a normal ride's no_driver.
+      await this.afterScheduledNoDriver(rideId, retried.passengerId, retried.revokedOffers, retried.generation);
+      return;
+    }
     this.notifyRevoked({ kind: 'solo', rideId }, retried.revokedOffers, 'revoked');
     if (retried.firstRetry) {
       this.safely('ride_dispatch_retry', () =>
         this.bus.toUser(retried.passengerId, 'ride_dispatch_retry', {
           rideId,
           retryCount: retried.retryCount,
+          retryUntil: retried.retryUntil.toISOString(),
         }),
       );
     }
     await this.removeTimers(rideId, retried.previousGeneration);
+  }
+
+  /**
+   * Post-commit tail of a scheduled ride that ended `no_driver` at its retry
+   * cutoff. Mirrors the normal hard-fail tail above (same events, same payloads):
+   * revoke the live offers on the drivers' side, tell the passenger and the ride
+   * room, drop the timers.
+   */
+  private async afterScheduledNoDriver(
+    rideId: string,
+    passengerId: string,
+    revokedOffers: RevokedOffer[],
+    generation: number,
+  ): Promise<void> {
+    this.notifyRevoked({ kind: 'solo', rideId }, revokedOffers, 'revoked');
+    this.safely('ride_no_driver', () => this.bus.toUser(passengerId, 'ride_no_driver', { rideId }));
+    this.safely('ride_state_changed', () =>
+      this.bus.toRide(rideId, 'ride_state_changed', {
+        rideId,
+        state: 'no_driver',
+        by: 'system',
+        version: rideStatusVersion('no_driver'),
+      }),
+    );
+    await this.removeTimers(rideId, generation);
+  }
+
+  /**
+   * Notify + clean up after the reconciler ended a scheduled ride past its retry
+   * cutoff (the DB transition already committed in `rearmScheduledRide`).
+   */
+  async onScheduledNoDriver(ended: {
+    rideId: string;
+    passengerId: string;
+    generation: number;
+    revokedOffers: RevokedOffer[];
+  }): Promise<void> {
+    await this.afterScheduledNoDriver(ended.rideId, ended.passengerId, ended.revokedOffers, ended.generation);
   }
 
   /**
@@ -734,7 +823,7 @@ export class DispatchService {
     originLat: number,
     originLng: number,
     opts: { k: number; radiusMeters: number; seatsNeeded: number },
-  ): Promise<string[]> {
+  ): Promise<{ drivers: string[]; priorOffers: number }> {
     const offered = new Set(await this.offers.offeredDriverIds(this.db, trip, generation));
     const raw = (await this.redis.georadius(
       'active_drivers',
@@ -744,11 +833,38 @@ export class DispatchService {
       'm',
       'ASC',
       'COUNT',
-      opts.k * CANDIDATE_HEADROOM + offered.size,
+      opts.k * this.params.candidateHeadroom + offered.size,
     )) as string[];
     const fresh = raw.filter((id) => !offered.has(id));
     const eligible = await this.offers.eligibleCandidates(this.db, fresh, opts.seatsNeeded);
-    return eligible.slice(0, opts.k);
+    return { drivers: eligible.slice(0, opts.k), priorOffers: offered.size };
+  }
+
+  /**
+   * `dispatch latency, intent to first offer`: the durable dispatch intent
+   * (outbox row of this generation) to the first offer of the generation having
+   * committed, on the DB clock. Includes relay and queue delay by design. A
+   * generation with no intent row (a scheduled ride's first wake) is skipped.
+   * Observability must never fail dispatch, so every error is swallowed.
+   */
+  private async observeIntentToFirstOffer(
+    trip: TripRef,
+    generation: number,
+    kind: TripKindLabel,
+  ): Promise<void> {
+    try {
+      const key =
+        trip.kind === 'solo'
+          ? outboxDedupeKey(OutboxTopic.RideDispatchRequested, trip.rideId, generation)
+          : outboxDedupeKey(OutboxTopic.PoolDispatchRequested, trip.sharedRideId, generation);
+      const res = await this.db.execute<{ age_s: string }>(sql`
+        SELECT extract(epoch FROM clock_timestamp() - created_at) AS age_s
+          FROM outbox WHERE dedupe_key = ${key}`);
+      const age = res.rows[0]?.age_s;
+      if (age !== undefined) observeDispatchLatency('intent_to_first_offer', kind, Number(age));
+    } catch (err) {
+      this.log.debug({ err }, 'dispatch latency observation skipped');
+    }
   }
 
   /** A delivery failure after commit is logged, never surfaced as a failed command. */

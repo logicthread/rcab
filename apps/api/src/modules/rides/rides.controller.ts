@@ -46,11 +46,19 @@ import { RideStateMachine } from './ride-state-machine.service';
 import { RealtimeBus } from '../realtime/realtime.bus';
 import { OutboxRelay } from '../outbox/outbox.relay';
 import { ScheduledDispatchService } from '../scheduled/scheduled.service';
+import { getPolicy } from '../../config/policy/policy';
 
-// Scheduled bookings must fall in a 15 min – 24 h future window (RCAB-E6.S2 /
-// [[features-scheduled-booking]]).
-const SCHEDULED_MIN_LEAD_MS = 15 * 60 * 1000;
-const SCHEDULED_MAX_LEAD_MS = 24 * 60 * 60 * 1000;
+/** "15 minutes" / "24 hours" — whole hours when exact, else minutes. */
+function formatLead(ms: number): string {
+  const unit = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
+  if (ms % 3_600_000 === 0) return unit(ms / 3_600_000, 'hour');
+  return unit(Math.round(ms / 60_000), 'minute');
+}
+
+// Scheduled bookings must fall in the policy window (scheduled.minLeadMs –
+// scheduled.maxLeadMs: 15 min – 24 h, RCAB-E6.S2 / [[features-scheduled-booking]]).
+const SCHEDULED_MIN_LEAD_MS = getPolicy().scheduled.minLeadMs;
+const SCHEDULED_MAX_LEAD_MS = getPolicy().scheduled.maxLeadMs;
 
 export interface CreateRideResponse {
   sharedRideId: string;
@@ -124,7 +132,8 @@ export interface RideStopsResponse {
   }>;
 }
 
-const SHARED_QUOTE_SEATS = 2;
+/** Seat count a shared quote assumes before matching (policy pricing.sharedQuoteSeats). */
+const SHARED_QUOTE_SEATS = getPolicy().pricing.sharedQuoteSeats;
 
 @Controller('v1/rides')
 @UseGuards(AuthGuard)
@@ -360,8 +369,9 @@ export class RidesController {
         destLng: dto.destLng,
       },
       {
-        // Priced inside the seat transaction from the locked pool state; a
-        // routing failure fails the booking (503), never a seat without a fare.
+        // Priced optimistically from an unlocked pool snapshot, OUTSIDE the seat
+        // transaction (re-validated under the lock); a routing failure fails the
+        // booking (503), never a seat without a fare.
         quote: (ctx) => this.pricing.quoteSeatInItinerary(ctx),
         idempotency: scope ? { scope, response: toResponse } : undefined,
       },
@@ -496,7 +506,7 @@ export class RidesController {
     ) {
       throw new BadRequestException({
         code: 'scheduled_for_out_of_window',
-        message: 'scheduledFor must be between 15 minutes and 24 hours from now',
+        message: `scheduledFor must be between ${formatLead(SCHEDULED_MIN_LEAD_MS)} and ${formatLead(SCHEDULED_MAX_LEAD_MS)} from now`,
       });
     }
 

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../../core/config/policy.dart';
 
 /// Displays a yellow warning banner when the foreground service was killed
 /// by the OS within the last 24 hours.
@@ -8,7 +9,7 @@ class ServiceKillBanner extends StatefulWidget {
   const ServiceKillBanner({super.key});
 
   static const String prefKey = 'last_service_kill_at';
-  static const int _windowMs = 86400000; // 24 h
+  static const int _windowMs = DriverPolicy.serviceKillBannerWindowMs; // 24 h
 
   @override
   State<ServiceKillBanner> createState() => _ServiceKillBannerState();

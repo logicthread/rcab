@@ -81,6 +81,14 @@ export interface RideSnapshot {
   pickup: { lat: number; lng: number };
   dropoff: { lat: number; lng: number };
   fareCents: number;
+  /**
+   * Scheduled rides only, while still looking for a driver (woken, `requested`):
+   * ISO instant after which the server stops retrying and ends the ride as
+   * `no_driver` (`scheduled_for` + `scheduled.retryCutoffAfterPickupMs`).
+   * `null` for every other ride / state. Same value as the `retryUntil` of the
+   * `ride_dispatch_retry` event.
+   */
+  retryUntil: string | null;
 }
 
 // ── pool ─────────────────────────────────────────────────────────────────────

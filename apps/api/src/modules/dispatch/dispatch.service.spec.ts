@@ -1,3 +1,4 @@
+import { buildPolicy } from '../../config/policy/policy';
 import { describe, it, expect, vi } from 'vitest';
 
 const { rearm } = vi.hoisted(() => ({ rearm: vi.fn() }));
@@ -16,6 +17,7 @@ import {
   type WaveTimeoutJob,
 } from './dispatch.service';
 import type { Job } from 'bullmq';
+import { register } from 'prom-client';
 import type { SharedRideMember, SharedRideRow } from '../matching/shared-ride.repository';
 import type { RideRow } from '../rides/rides.repository';
 import type { OfferRow } from './offer.repository';
@@ -328,7 +330,7 @@ function makeService(config: Record<string, unknown> = {}) {
     queue as never,
     redis as never,
     db as never,
-    { get: vi.fn((k: string) => config[k]) } as never,
+    buildPolicy({ get: (k: string) => config[k] }),
     poolProjection as never,
     snapshots as never,
   );
@@ -866,6 +868,8 @@ describe('DispatchService.onRideCancelled / releaseDispatch', () => {
 describe('DispatchService: scheduled window (RCAB-E8.S8)', () => {
   const job = (data: HardFailJob) => ({ data }) as Job<HardFailJob>;
   const retryResult = (o: Record<string, unknown> = {}) => ({
+    outcome: 'rearmed' as const,
+    retryUntil: new Date('2026-11-08T10:30:00.000Z'),
     rideId: RIDE,
     passengerId: 'c-1',
     previousGeneration: 1,
@@ -919,10 +923,14 @@ describe('DispatchService: scheduled window (RCAB-E8.S8)', () => {
     const m = makeService();
     m.ridesRepo.findById.mockResolvedValue(soloRide({ id: RIDE, type: 'scheduled' }));
     await m.svc.handleHardFail(job({ rideId: RIDE, kind: 'solo', generation: 1 }));
-    expect(rearm).toHaveBeenCalledWith(m.db, RIDE, 1);
+    expect(rearm).toHaveBeenCalledWith(m.db, RIDE, 1, { cutoffAfterPickupMs: 1_800_000 });
     expect(m.ridesRepo.markNoDriver).not.toHaveBeenCalled();
     expect(m.bus.toUser).toHaveBeenCalledTimes(1);
-    expect(m.bus.toUser).toHaveBeenCalledWith('c-1', 'ride_dispatch_retry', { rideId: RIDE, retryCount: 1 });
+    expect(m.bus.toUser).toHaveBeenCalledWith('c-1', 'ride_dispatch_retry', {
+      rideId: RIDE,
+      retryCount: 1,
+      retryUntil: '2026-11-08T10:30:00.000Z',
+    });
     expect(m.bus.toUser).not.toHaveBeenCalledWith('c-1', 'ride_no_driver', expect.anything());
     expect(m.bus.toDriver).toHaveBeenCalledWith(DRIVER, 'ride_offer_revoked', expect.objectContaining({ offerId: OFFER }));
     expect(m.queue.remove).toHaveBeenCalledWith(hardFailJobId(RIDE, 1));
@@ -939,6 +947,52 @@ describe('DispatchService: scheduled window (RCAB-E8.S8)', () => {
     await m.svc.handleHardFail(job({ rideId: RIDE, kind: 'solo', generation: 1 }));
     expect(m.bus.toUser).not.toHaveBeenCalled();
     expect(m.ridesRepo.markNoDriver).not.toHaveBeenCalled();
+  });
+
+  it('passes the policy retry cutoff to the re-arm transaction', async () => {
+    rearm.mockReset().mockResolvedValue(null);
+    const m = makeService({ SCHEDULED_RETRY_CUTOFF_AFTER_PICKUP_MS: '600000' });
+    m.ridesRepo.findById.mockResolvedValue(soloRide({ id: RIDE, type: 'scheduled' }));
+    await m.svc.handleHardFail(job({ rideId: RIDE, kind: 'solo', generation: 1 }));
+    expect(rearm).toHaveBeenCalledWith(m.db, RIDE, 1, { cutoffAfterPickupMs: 600_000 });
+  });
+
+  it('past the retry cutoff the scheduled ride ends as no_driver with the normal terminal notifications', async () => {
+    rearm.mockReset().mockResolvedValue({
+      outcome: 'no_driver',
+      rideId: RIDE,
+      passengerId: 'c-1',
+      generation: 4,
+      retryUntil: new Date('2026-11-08T10:30:00.000Z'),
+      revokedOffers: [{ offerId: OFFER, driverId: DRIVER }],
+    });
+    const m = makeService();
+    m.ridesRepo.findById.mockResolvedValue(soloRide({ id: RIDE, type: 'scheduled' }));
+    await m.svc.handleHardFail(job({ rideId: RIDE, kind: 'solo', generation: 4 }));
+    // Same passenger-facing events as a normal ride's hard-fail no_driver.
+    expect(m.bus.toUser).toHaveBeenCalledWith('c-1', 'ride_no_driver', { rideId: RIDE });
+    expect(m.bus.toUser).not.toHaveBeenCalledWith('c-1', 'ride_dispatch_retry', expect.anything());
+    expect(m.bus.toRide).toHaveBeenCalledWith(
+      RIDE,
+      'ride_state_changed',
+      expect.objectContaining({ state: 'no_driver', by: 'system' }),
+    );
+    expect(m.bus.toDriver).toHaveBeenCalledWith(DRIVER, 'ride_offer_revoked', expect.objectContaining({ offerId: OFFER }));
+    expect(m.queue.remove).toHaveBeenCalledWith(hardFailJobId(RIDE, 4));
+    expect(m.ridesRepo.markNoDriver).not.toHaveBeenCalled();
+  });
+
+  it('onScheduledNoDriver (reconciler path) sends the same terminal notifications', async () => {
+    const m = makeService();
+    await m.svc.onScheduledNoDriver({
+      rideId: RIDE,
+      passengerId: 'c-1',
+      generation: 2,
+      revokedOffers: [],
+    });
+    expect(m.bus.toUser).toHaveBeenCalledWith('c-1', 'ride_no_driver', { rideId: RIDE });
+    expect(m.bus.toRide).toHaveBeenCalledWith(RIDE, 'ride_state_changed', expect.objectContaining({ state: 'no_driver' }));
+    expect(m.queue.remove).toHaveBeenCalledWith(hardFailJobId(RIDE, 2));
   });
 
   it('a normal ride still goes to no_driver (never re-armed)', async () => {
@@ -1105,3 +1159,151 @@ describe('DispatchService — explicit offer outcomes (ride_offer_outcome)', () 
     });
   });
 });
+
+// ── Business metrics (RCAB-E8.S12) ───────────────────────────────────────────
+
+async function metricTotal(name: string, labels: Record<string, string>, suffix = ''): Promise<number> {
+  const m = (await register.getMetricsAsJSON()).find((x) => x.name === name);
+  const want = `${name}${suffix}`;
+  return (m?.values as Array<{ value: number; labels: Record<string, string>; metricName?: string }> | undefined ?? [])
+    .filter((v) => (v.metricName ?? name) === want)
+    .filter((v) => Object.entries(labels).every(([k, val]) => v.labels[k] === val))
+    .reduce((sum, v) => sum + v.value, 0);
+}
+
+describe('DispatchService — business metrics', () => {
+  const assigned = (kind: string) => metricTotal('rcab_dispatch_outcome_total', { outcome: 'assigned', kind });
+  const accepted = () => metricTotal('rcab_ride_state_transition_total', { from: 'requested', to: 'accepted' });
+  const offerToAccept = (kind: string) =>
+    metricTotal('rcab_dispatch_latency_seconds', { stage: 'offer_to_accept', kind }, '_count');
+  const firstOffer = (kind: string, suffix = '_count') =>
+    metricTotal('rcab_dispatch_latency_seconds', { stage: 'intent_to_first_offer', kind }, suffix);
+
+  it('a committed solo accept counts the assignment, the ride transition and offer-to-accept once', async () => {
+    const m = makeService();
+    m.offers.lockForUpdate.mockResolvedValue(offerRow({ offeredAt: new Date(Date.now() - 1500) }));
+    const [a0, t0, l0] = [await assigned('solo'), await accepted(), await offerToAccept('solo')];
+    const sum0 = await metricTotal('rcab_dispatch_latency_seconds', { stage: 'offer_to_accept', kind: 'solo' }, '_sum');
+
+    await m.svc.acceptOffer({ offerId: OFFER, driverId: DRIVER });
+
+    expect(await assigned('solo')).toBe(a0 + 1);
+    expect(await accepted()).toBe(t0 + 1);
+    expect(await offerToAccept('solo')).toBe(l0 + 1);
+    const sum1 = await metricTotal('rcab_dispatch_latency_seconds', { stage: 'offer_to_accept', kind: 'solo' }, '_sum');
+    expect(sum1 - sum0).toBeGreaterThanOrEqual(1.5);
+    expect(sum1 - sum0).toBeLessThan(10);
+  });
+
+  it('a replayed accept and a refused accept count nothing', async () => {
+    const replay = makeService();
+    replay.offers.lockForUpdate.mockResolvedValue(offerRow({ state: 'accepted' }));
+    replay.assignments.findByTrip.mockResolvedValue({
+      driverId: DRIVER,
+      trip: { kind: 'solo', rideId: RIDE },
+      offerId: OFFER,
+      generation: 1,
+      assignedAt: new Date(),
+    });
+    const refused = makeService();
+    refused.assignments.driverEligibility.mockResolvedValue('driver_ineligible');
+    const [a0, t0, l0] = [await assigned('solo'), await accepted(), await offerToAccept('solo')];
+
+    expect(await replay.svc.acceptOffer({ offerId: OFFER, driverId: DRIVER })).toMatchObject({ ok: true, replay: true });
+    expect(await refused.svc.acceptOffer({ offerId: OFFER, driverId: DRIVER })).toMatchObject({ ok: false });
+
+    expect(await assigned('solo')).toBe(a0);
+    expect(await accepted()).toBe(t0);
+    expect(await offerToAccept('solo')).toBe(l0);
+  });
+
+  it('a shared accept is a pool assignment, not a ride transition', async () => {
+    const m = makeService();
+    m.offers.findForDriver.mockResolvedValue(offerRow({ trip: { kind: 'shared', sharedRideId: POOL } }));
+    m.offers.lockForUpdate.mockResolvedValue(offerRow({ trip: { kind: 'shared', sharedRideId: POOL } }));
+    const [a0, t0] = [await assigned('pool'), await accepted()];
+    expect(await m.svc.acceptOffer({ offerId: OFFER, driverId: DRIVER })).toMatchObject({ ok: true, replay: false });
+    expect(await assigned('pool')).toBe(a0 + 1);
+    expect(await accepted()).toBe(t0);
+  });
+
+  describe('intent to first offer', () => {
+    const withIntent = (m: ReturnType<typeof makeService>, rows: unknown[]) => {
+      (m.db as unknown as { execute: unknown }).execute = vi.fn().mockResolvedValue({ rows });
+    };
+
+    it('observes the DB-clock age of the generation\'s outbox intent when wave 1 offers for the first time', async () => {
+      const m = makeService();
+      m.redis.georadius.mockResolvedValue([DRIVER]);
+      withIntent(m, [{ age_s: '0.42' }]);
+      const [c0, s0] = [await firstOffer('solo'), await firstOffer('solo', '_sum')];
+
+      await m.svc.runSoloWave(soloRide({ id: RIDE }), 1, 1);
+
+      expect(await firstOffer('solo')).toBe(c0 + 1);
+      expect((await firstOffer('solo', '_sum')) - s0).toBeCloseTo(0.42, 6);
+      const sql = JSON.stringify((m.db as unknown as { execute: { mock: { calls: unknown[][] } } }).execute.mock.calls[0][0]);
+      expect(sql).toContain('ride.dispatch.requested:' + RIDE + ':g1');
+    });
+
+    it('a redelivered wave 1, a wave 2, a wave with no offer and a generation without an intent row observe nothing', async () => {
+      const c0 = await firstOffer('solo');
+
+      const redelivered = makeService();
+      redelivered.redis.georadius.mockResolvedValue([DRIVER]);
+      redelivered.offers.offeredDriverIds.mockResolvedValue([OTHER]); // an earlier attempt already offered
+      withIntent(redelivered, [{ age_s: '9' }]);
+      await redelivered.svc.runSoloWave(soloRide({ id: RIDE }), 1, 1);
+
+      const wave2 = makeService();
+      wave2.redis.georadius.mockResolvedValue([DRIVER]);
+      withIntent(wave2, [{ age_s: '9' }]);
+      await wave2.svc.runSoloWave(soloRide({ id: RIDE }), 2, 1);
+
+      const nobody = makeService();
+      withIntent(nobody, [{ age_s: '9' }]);
+      await nobody.svc.runSoloWave(soloRide({ id: RIDE }), 1, 1);
+
+      const noIntent = makeService(); // a scheduled ride's first wake has no dispatch intent
+      noIntent.redis.georadius.mockResolvedValue([DRIVER]);
+      withIntent(noIntent, []);
+      await noIntent.svc.runSoloWave(soloRide({ id: RIDE }), 1, 1);
+
+      expect(await firstOffer('solo')).toBe(c0);
+    });
+
+    it('a failing latency lookup never fails dispatch (offers sent, timers armed)', async () => {
+      const m = makeService();
+      m.redis.georadius.mockResolvedValue([DRIVER]);
+      (m.db as unknown as { execute: unknown }).execute = vi.fn().mockRejectedValue(new Error('pg down'));
+      await expect(m.svc.runSoloWave(soloRide({ id: RIDE }), 1, 1)).resolves.toBeUndefined();
+      expect(m.bus.toDriver).toHaveBeenCalledWith(DRIVER, 'ride_offer', expect.anything());
+      expect(m.queue.add).toHaveBeenCalledTimes(2);
+    });
+
+    it('pool wave 1 observes against the pool.dispatch.requested intent', async () => {
+      const m = makeService();
+      m.redis.georadius.mockResolvedValue([DRIVER]);
+      withIntent(m, [{ age_s: '1.5' }]);
+      const c0 = await firstOffer('pool');
+      await m.svc.runPoolWave(pool({ rideId: POOL, seatCount: 2 }), 1, 1);
+      expect(await firstOffer('pool')).toBe(c0 + 1);
+      const sql = JSON.stringify((m.db as unknown as { execute: { mock: { calls: unknown[][] } } }).execute.mock.calls[0][0]);
+      expect(sql).toContain('pool.dispatch.requested:' + POOL + ':g1');
+    });
+  });
+
+  it('a pool hard-fail counts pool_aborted once; a claimed pool counts nothing', async () => {
+    const abort = makeService();
+    const claimed = makeService();
+    claimed.assignments.abortUnclaimedPool.mockResolvedValue(false);
+    const job = (data: HardFailJob) => ({ data }) as Job<HardFailJob>;
+    const before = await metricTotal('rcab_dispatch_outcome_total', { outcome: 'pool_aborted', kind: 'pool' });
+
+    await abort.svc.handleHardFail(job({ rideId: POOL, kind: 'pool' }));
+    await claimed.svc.handleHardFail(job({ rideId: POOL, kind: 'pool' }));
+
+    expect(await metricTotal('rcab_dispatch_outcome_total', { outcome: 'pool_aborted', kind: 'pool' })).toBe(before + 1);
+  });
+});
+

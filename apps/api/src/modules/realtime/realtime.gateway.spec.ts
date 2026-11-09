@@ -10,6 +10,7 @@ import { JwtService } from '@nestjs/jwt';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { RealtimeBus } from './realtime.bus';
 import type { Socket } from 'socket.io';
+import { wsConnections } from '../../metrics';
 
 const DRIVER_ID = 'driver-uuid-1';
 
@@ -323,6 +324,37 @@ describe('RealtimeGateway — handleConnection reconnect state replay', () => {
     await Promise.resolve();
 
     expect(client.emit).not.toHaveBeenCalledWith('driver_state', expect.anything());
+  });
+});
+
+describe('RealtimeGateway — rcab_ws_connections gauge', () => {
+  const current = async () => (await wsConnections.get()).values[0]?.value ?? 0;
+
+  it('counts an authenticated connect once and releases it on disconnect', async () => {
+    const jwt = buildJwt();
+    (jwt.verify as ReturnType<typeof vi.fn>).mockReturnValue({ sub: DRIVER_ID, role: 'driver', typ: 'access' });
+    const gateway = new RealtimeGateway(jwt, buildBus(), buildEvents(), buildRedis() as never, buildSnapshots() as never);
+    const before = await current();
+
+    const client = makeSocket();
+    (client.handshake as unknown as Record<string, unknown>).auth = { token: 'tok' };
+    gateway.handleConnection(client);
+    expect(await current()).toBe(before + 1);
+
+    gateway.handleDisconnect(client);
+    expect(await current()).toBe(before);
+  });
+
+  it('an unauthenticated socket (no token) is never counted, and its disconnect does not go negative', async () => {
+    const gateway = new RealtimeGateway(buildJwt(), buildBus(), buildEvents(), buildRedis() as never, buildSnapshots() as never);
+    const before = await current();
+    const client = makeSocket();
+    client.data = {}; // a real socket has no identity until its token verifies
+    (client.handshake as unknown as Record<string, unknown>).auth = {};
+    gateway.handleConnection(client);
+    expect(client.disconnect).toHaveBeenCalledWith(true);
+    gateway.handleDisconnect(client);
+    expect(await current()).toBe(before);
   });
 });
 

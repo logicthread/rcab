@@ -1,6 +1,8 @@
 import { io, type Socket } from 'socket.io-client';
+import { WEB_POLICY } from '../../config/policy';
 import type {
   DriverLocationEvent,
+  RideDispatchRetryEvent,
   PoolSnapshotEvent,
   PoolUpdateEvent,
   RideSnapshotEvent,
@@ -15,6 +17,8 @@ export const DRIVER_LOCATION_EVENT = 'driver_location';
 export const RIDE_STATE_CHANGED_EVENT = 'ride_state_changed';
 export const RIDE_SNAPSHOT_EVENT = 'ride:snapshot';
 export const RIDE_SUBSCRIBE_EVENT = 'ride:subscribe';
+/** Scheduled ride: window closed with no driver, the server keeps searching. */
+export const RIDE_DISPATCH_RETRY_EVENT = 'ride_dispatch_retry';
 /** Emitted to `ride:<poolId>` when the driver confirms a pool's final stop. */
 export const RIDE_COMPLETED_EVENT = 'ride:completed';
 
@@ -52,8 +56,8 @@ export interface VersionGate {
 }
 
 /** Total subscribe attempts on `unavailable` (1 initial + 4 retries). */
-const SUBSCRIBE_MAX_TRIES = 5;
-const SUBSCRIBE_BACKOFF_MS = [1_000, 2_000, 4_000, 8_000];
+const SUBSCRIBE_MAX_TRIES = WEB_POLICY.realtime.subscribeMaxTries;
+const SUBSCRIBE_BACKOFF_MS = WEB_POLICY.realtime.subscribeBackoffMs;
 
 export function createVersionGate(): VersionGate {
   let followed: string | null = null;
@@ -97,6 +101,11 @@ export interface BookingSocket {
   /** Solo ride status: `ride:snapshot` + newer `ride_state_changed` only. */
   onRideStateChanged(handler: (payload: RideStateChangedEvent) => void): () => void;
   /**
+   * Scheduled ride still searching (`ride_dispatch_retry`), for the followed
+   * ride only. Carries `retryUntil` when the server sends its cutoff.
+   */
+  onDispatchRetry(handler: (payload: RideDispatchRetryEvent) => void): () => void;
+  /**
    * Follow `pool:<id>`: the server checks membership, joins the socket and
    * returns a snapshot. Re-sent on EVERY (re)connect — rooms never survive a
    * reconnect and the create-time server join is not relied on (F10).
@@ -124,7 +133,7 @@ export function connectBookingSocket(getToken: TokenProvider): BookingSocket {
       );
     },
     reconnection: true,
-    reconnectionDelayMax: 5_000,
+    reconnectionDelayMax: WEB_POLICY.realtime.reconnectDelayMaxMs,
   });
 
   const poolGate = createVersionGate();
@@ -132,6 +141,7 @@ export function connectBookingSocket(getToken: TokenProvider): BookingSocket {
   const poolHandlers = new Set<Handler<PoolUpdateEvent>>();
   const poolSnapshotHandlers = new Set<Handler<PoolSnapshotEvent>>();
   const rideHandlers = new Set<Handler<RideStateChangedEvent>>();
+  const retryHandlers = new Set<Handler<RideDispatchRetryEvent>>();
 
   // Subscribe acks: `{ ok:false, reason:'unavailable' }` is a transient server
   // failure (Redis / DB hiccup) after which the socket would otherwise stay
@@ -199,6 +209,7 @@ export function connectBookingSocket(getToken: TokenProvider): BookingSocket {
       state: snap.status,
       by: 'snapshot',
       version: snap.version,
+      ...(snap.retryUntil !== undefined ? { retryUntil: snap.retryUntil } : {}),
     };
     for (const h of rideHandlers) h(asEvent);
   });
@@ -207,6 +218,12 @@ export function connectBookingSocket(getToken: TokenProvider): BookingSocket {
     const version = ev.version ?? rideStatusVersion(ev.state);
     if (!rideGate.event(ev.rideId, version)) return;
     for (const h of rideHandlers) h(ev);
+  });
+  // Unversioned by design (it is an informational overlay on `requested`); the
+  // store ignores it unless the ride is still searching. Foreign rides dropped.
+  socket.on(RIDE_DISPATCH_RETRY_EVENT, (ev: RideDispatchRetryEvent) => {
+    if (!ev || ev.rideId !== rideGate.current()) return;
+    for (const h of retryHandlers) h(ev);
   });
   // The pool's completion is announced on `ride:<poolId>` without a pool
   // version: reconcile from a fresh authoritative snapshot instead of guessing.
@@ -247,6 +264,9 @@ export function connectBookingSocket(getToken: TokenProvider): BookingSocket {
     onRideStateChanged(handler) {
       return add(rideHandlers, handler);
     },
+    onDispatchRetry(handler) {
+      return add(retryHandlers, handler);
+    },
     subscribePool(sharedRideId) {
       poolGate.follow(sharedRideId);
       if (socket.connected) subscribePoolNow();
@@ -262,6 +282,7 @@ export function connectBookingSocket(getToken: TokenProvider): BookingSocket {
       poolHandlers.clear();
       poolSnapshotHandlers.clear();
       rideHandlers.clear();
+      retryHandlers.clear();
       socket.removeAllListeners();
       socket.disconnect();
     },

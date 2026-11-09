@@ -56,6 +56,19 @@ WORKDIR /app
 
 COPY --from=deploy /deploy ./
 
+# Build identity (RCAB-E8.S11). Declared LAST so a new commit/timestamp only
+# invalidates the final cheap layers, never the dependency/compile stages.
+# The image is built once per commit and promoted by tag; GET /v1/health/version
+# returns these values so a deploy can assert what is actually running.
+ARG RCAB_VERSION=dev
+ARG RCAB_BUILT_AT=unknown
+ENV RCAB_VERSION=$RCAB_VERSION \
+    RCAB_BUILT_AT=$RCAB_BUILT_AT
+LABEL org.opencontainers.image.revision=$RCAB_VERSION \
+      org.opencontainers.image.created=$RCAB_BUILT_AT \
+      org.opencontainers.image.title="rcab-api" \
+      org.opencontainers.image.source="https://github.com/logicthread/rcab"
+
 USER rcab
 
 EXPOSE 3000

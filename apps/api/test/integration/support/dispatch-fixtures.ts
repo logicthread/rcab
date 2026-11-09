@@ -1,3 +1,4 @@
+import { buildPolicy } from '../../../src/config/policy/policy';
 // Shared Postgres fixtures for the Stage C offer / assignment integration
 // specs. Everything is seeded with raw SQL so the specs exercise slice A's
 // code without depending on the pool-creation or booking-creation paths.
@@ -86,7 +87,7 @@ export function buildDispatch(pgPool: Pool, redis: Redis, queue: Queue, bus: Bus
     queue,
     redis,
     db,
-    config as never,
+    buildPolicy(config),
     poolProjection,
     snapshots,
   );

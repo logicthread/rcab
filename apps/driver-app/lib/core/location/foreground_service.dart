@@ -2,6 +2,7 @@ import 'dart:isolate';
 import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:geolocator/geolocator.dart';
+import '../config/policy.dart';
 
 // Allows test injection of a mock position getter.
 typedef GetPositionFn = Future<Position> Function();
@@ -16,7 +17,7 @@ void startForegroundTask() {
 /// top-level [startForegroundTask] callback which creates this class.
 @visibleForTesting
 class LocationTaskHandler extends TaskHandler {
-  static const double minMeters = 10.0;
+  static const double minMeters = DriverPolicy.locationMinMoveMeters;
 
   Position? lastEmitted;
 
@@ -81,7 +82,7 @@ class ForegroundServiceManager {
         playSound: false,
       ),
       foregroundTaskOptions: const ForegroundTaskOptions(
-        interval: 5000,
+        interval: DriverPolicy.locationIntervalMs,
         autoRunOnBoot: true,
         allowWakeLock: true,
       ),

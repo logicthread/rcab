@@ -3,6 +3,7 @@ import type { Job } from 'bullmq';
 import { DispatchProcessor } from './dispatch.processor';
 import { HARD_FAIL_JOB, WAVE_TIMEOUT_JOB } from './dispatch.service';
 import { DISPATCH_START_JOB } from '../outbox/outbox.jobs';
+import { dispatchOutcome } from '../../metrics';
 
 function make() {
   const dispatch = {
@@ -51,3 +52,44 @@ describe('DispatchProcessor', () => {
     expect(dispatch.handleHardFail).not.toHaveBeenCalled();
   });
 });
+
+describe('DispatchProcessor — infra_failure outcome', () => {
+  const failed = (data: unknown, attemptsMade: number, attempts?: number) =>
+    ({ name: DISPATCH_START_JOB, data, attemptsMade, opts: { attempts } }) as unknown as Job;
+  const total = async (kind: string) => {
+    const m = (await dispatchOutcome.get()).values.filter(
+      (v) => v.labels.outcome === 'infra_failure' && v.labels.kind === kind,
+    );
+    return m.reduce((s, v) => s + v.value, 0);
+  };
+
+  it('counts a dispatch job that exhausted its attempts, once, by trip kind', async () => {
+    const { proc } = make();
+    const solo0 = await total('solo');
+    const pool0 = await total('pool');
+    proc.onFailed(failed({ kind: 'solo', tripId: 'r', generation: 1 }, 5, 5));
+    proc.onFailed(failed({ kind: 'pool', tripId: 'p', generation: 1 }, 5, 5));
+    expect(await total('solo')).toBe(solo0 + 1);
+    expect(await total('pool')).toBe(pool0 + 1);
+  });
+
+  it('does not count a failure BullMQ will retry (an attempt, not an outcome)', async () => {
+    const { proc } = make();
+    const before = await total('solo');
+    proc.onFailed(failed({ kind: 'solo', tripId: 'r', generation: 1 }, 2, 5));
+    expect(await total('solo')).toBe(before);
+  });
+
+  it('a timer job has no attempts option: its first failure is final', async () => {
+    const { proc } = make();
+    const before = await total('solo');
+    proc.onFailed(failed({ rideId: 'r', kind: 'solo' }, 1));
+    expect(await total('solo')).toBe(before + 1);
+  });
+
+  it('ignores an event without a job', () => {
+    const { proc } = make();
+    expect(() => proc.onFailed(undefined)).not.toThrow();
+  });
+});
+

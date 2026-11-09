@@ -8,6 +8,7 @@ import '../../core/realtime/offer_outcome.dart';
 import '../../di/providers.dart';
 import 'offer_models.dart';
 import 'offer_provider.dart';
+import '../../core/config/policy.dart';
 
 typedef NavigateFn = void Function(String location);
 
@@ -27,7 +28,7 @@ class OfferController {
     required this.container,
     GoRouter? router,
     NavigateFn? navigate,
-    this.tickInterval = const Duration(seconds: 1),
+    this.tickInterval = DriverPolicy.offerCountdownTick,
   })  : _navigate = navigate ?? ((loc) => router?.go(loc)),
         assert(router != null || navigate != null,
             'Provide either router or navigate callback');

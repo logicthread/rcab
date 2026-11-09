@@ -1,3 +1,4 @@
+import { buildPolicy } from '../../src/config/policy/policy';
 import Redis from 'ioredis';
 import { of } from 'rxjs';
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
@@ -45,7 +46,12 @@ describe.skipIf(skip)('RouteSimilarityService — integration (real Redis)', () 
     const config = {
       get: vi.fn((k: string) => (k === 'OSRM_URL' ? 'http://mock-osrm' : undefined)),
     };
-    svc = new RouteSimilarityService(redis as never, { get: httpGet } as never, config as never);
+    svc = new RouteSimilarityService(
+      redis as never,
+      { get: httpGet } as never,
+      config as never,
+      buildPolicy(config),
+    );
   });
 
   afterAll(async () => {

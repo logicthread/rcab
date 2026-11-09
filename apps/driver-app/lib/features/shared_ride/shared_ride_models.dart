@@ -1,3 +1,5 @@
+import '../../core/config/policy.dart';
+
 enum StopType { pickup, dropoff }
 
 enum StopStatus { pending, confirmed }
@@ -60,7 +62,7 @@ class SharedRideOffer {
     required this.stops,
     required this.passengerCount,
     this.offerId,
-    this.ttlMs = 12000,
+    this.ttlMs = DriverPolicy.offerTtlFallbackMs,
   });
 
   final String sharedRideId;
@@ -89,7 +91,7 @@ class SharedRideOffer {
       passengerCount:
           (json['passengerCount'] as int?) ?? _distinctPassengers(stops),
       offerId: json['offerId'] as String?,
-      ttlMs: (json['ttlMs'] as num?)?.toInt() ?? 12000,
+      ttlMs: (json['ttlMs'] as num?)?.toInt() ?? DriverPolicy.offerTtlFallbackMs,
     );
   }
 

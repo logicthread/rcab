@@ -1,3 +1,4 @@
+import { WEB_POLICY } from '../../config/policy';
 // Nominatim geocoding client (forward + reverse).
 //
 // Phase-0 uses the public OSM Nominatim instance. Its usage policy requires a
@@ -26,7 +27,7 @@ interface NominatimSearchRow {
   lon: string;
 }
 
-export const MIN_QUERY_LENGTH = 3;
+export const MIN_QUERY_LENGTH = WEB_POLICY.search.minQueryLength;
 
 export async function searchPlaces(
   query: string,

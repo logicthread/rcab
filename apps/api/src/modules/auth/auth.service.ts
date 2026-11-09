@@ -12,9 +12,9 @@ import { PG_POOL } from '../../infra/db/drizzle.module';
 import { FirebaseAdminService } from '../../infra/firebase/firebase-admin.service';
 import { GoogleVerifierService } from '../../infra/google/google-verifier.service';
 import { ACCESS_TOKEN_TTL_SECONDS, signAccessToken } from '../../common/guards/access-token';
+import { getPolicy } from '../../config/policy/policy';
 
 const PHONE_E164_RE = /^\+[1-9]\d{7,14}$/;
-const REFRESH_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const REFRESH_TOKEN_BYTES = 32;
 
 /**
@@ -25,7 +25,7 @@ const REFRESH_TOKEN_BYTES = 32;
  * stays valid. No sibling token is minted — one family never has two live
  * chains. Reuse after the window is replay and revokes the whole family.
  */
-export const REFRESH_REUSE_GRACE_SECONDS = 10;
+export const REFRESH_REUSE_GRACE_SECONDS: number = getPolicy().sessions.refreshReuseGraceS;
 
 /** app_user.status values that may not obtain or renew a session (F12). */
 export const BLOCKED_USER_STATUSES: readonly string[] = ['suspended', 'deleted'];
@@ -35,7 +35,7 @@ export type AuthMethod = 'phone' | 'google';
 export interface TokenResponse {
   access_token: string;
   token_type: 'bearer';
-  expires_in: typeof ACCESS_TOKEN_TTL_SECONDS;
+  expires_in: number;
   refresh_token: string;
   user: { id: string; role: string; phone_e164: string };
 }
@@ -104,7 +104,7 @@ export class AuthService {
     }
 
     const nowSec = Math.floor(Date.now() / 1000);
-    if (decoded.iat !== undefined && nowSec - decoded.iat > 3600) {
+    if (decoded.iat !== undefined && nowSec - decoded.iat > getPolicy().sessions.firebaseTokenMaxAgeS) {
       throw new UnauthorizedException({
         code: 'invalid_firebase_token',
         message: 'Token is too old',
@@ -255,7 +255,7 @@ export class AuthService {
     familyId: string,
   ): Promise<TokenResponse> {
     const refreshToken = generateRefreshToken();
-    const expiresAt = new Date(Date.now() + REFRESH_TTL_MS);
+    const expiresAt = new Date(Date.now() + getPolicy().sessions.refreshTokenTtlMs);
     await db.query(
       `INSERT INTO auth_refresh_token (token_hash, family_id, user_id, auth_method, expires_at)
        VALUES ($1, $2, $3, $4, $5)`,

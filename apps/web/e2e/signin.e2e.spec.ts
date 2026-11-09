@@ -28,9 +28,11 @@ test('sign-in renders cleanly and the API is reachable cross-origin (CORS)', asy
   );
   expect(recaptchaCrash, `unexpected page errors: ${pageErrors.join(' | ')}`).toEqual([]);
 
-  // 3. CORS: a preflighted POST from the page origin must not be blocked. A bad
-  //    token yields 400/401 — any HTTP status means CORS passed; a CORS failure
-  //    rejects the fetch (TypeError) instead.
+  // 3. CORS: a preflighted POST from the page origin must not be blocked. An
+  //    invalid token must come back 401 from the API itself: reaching the
+  //    handler proves CORS passed (a CORS failure rejects the fetch with a
+  //    TypeError), and pinning the status catches a proxy / 5xx masquerading
+  //    as "reachable".
   const cors = await page.evaluate(async (apiBase) => {
     try {
       const r = await fetch(`${apiBase}/v1/auth/firebase-exchange`, {
@@ -46,5 +48,5 @@ test('sign-in renders cleanly and the API is reachable cross-origin (CORS)', asy
   }, API_BASE);
 
   expect(cors.reached, 'cross-origin API call was blocked (CORS regression)').toBe(true);
-  expect(cors.status).toBeGreaterThan(0);
+  expect(cors.status, 'invalid id_token should be rejected by the API with 401').toBe(401);
 });

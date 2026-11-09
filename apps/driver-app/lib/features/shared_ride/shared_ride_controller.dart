@@ -9,6 +9,7 @@ import '../../core/realtime/realtime_socket.dart';
 import '../../di/providers.dart';
 import 'shared_ride_models.dart';
 import 'shared_ride_provider.dart';
+import '../../core/config/policy.dart';
 
 typedef NavigateFn = void Function(String location);
 
@@ -29,8 +30,8 @@ class SharedRideController {
     required this.container,
     GoRouter? router,
     NavigateFn? navigate,
-    this.tickInterval = const Duration(seconds: 1),
-    this.ackTimeout = const Duration(seconds: 8),
+    this.tickInterval = DriverPolicy.offerCountdownTick,
+    this.ackTimeout = DriverPolicy.sharedAcceptAckTimeout,
   })  : _navigate = navigate ?? ((loc) => router?.go(loc)),
         assert(router != null || navigate != null,
             'Provide either router or navigate callback');

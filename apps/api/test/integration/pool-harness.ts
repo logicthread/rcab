@@ -1,3 +1,4 @@
+import { buildPolicy } from '../../src/config/policy/policy';
 /**
  * Stage C (R08) pool test harness — NOT a spec. Builds the real pool stack
  * (PoolLifecycleService + repositories + projection + idempotency) on its OWN
@@ -68,10 +69,10 @@ export function buildPoolStack(
     idempotency,
     relay as never,
     bus as never,
-    config as never,
+    buildPolicy(config),
   );
   const matching = (scorer = { scoreRoutes: async () => 0.95 }) =>
-    new MatchingService(repo, scorer as never, lifecycle, members, db as never, config as never);
+    new MatchingService(repo, scorer as never, lifecycle, members, db as never, buildPolicy(config));
   return {
     pg,
     db,

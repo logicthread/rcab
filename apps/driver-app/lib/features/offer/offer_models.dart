@@ -1,3 +1,5 @@
+import '../../core/config/policy.dart';
+
 /// Transport seam: lets [OfferNotifier] emit a `ride_offer_response` without a
 /// real `socket_io_client` in tests. Implemented by `RealtimeSocket`. Lives in
 /// this import-free file so the realtime layer and the provider layer can both
@@ -63,7 +65,7 @@ class SoloRideOffer {
     return SoloRideOffer(
       offerId: offerId,
       rideId: rideId,
-      ttlMs: (json['ttlMs'] as num?)?.toInt() ?? 12000,
+      ttlMs: (json['ttlMs'] as num?)?.toInt() ?? DriverPolicy.offerTtlFallbackMs,
       pickupLat: pLat.toDouble(),
       pickupLng: pLng.toDouble(),
       dropoffLat: dLat.toDouble(),

@@ -194,6 +194,47 @@ describe('PoolMembershipRepository reads', () => {
     await expect(repo.lockPool(tx as never, 'nope')).resolves.toBeNull();
   });
 
+  it('snapshotPool reads the pool row THEN its members, with no FOR UPDATE (null when missing)', async () => {
+    const { tx } = makeTx({
+      selects: [
+        [
+          {
+            ride_id: 'pool-1',
+            pool_state: 'open',
+            seat_count: '1',
+            max_seats: '3',
+            dispatch_generation: '0',
+            state_version: '7',
+            claimed_by_driver_id: null,
+            origin_lat: '1',
+            origin_lng: '2',
+            dest_lat: '3',
+            dest_lng: '4',
+          },
+        ],
+        [
+          {
+            passenger_id: 'p-1',
+            origin_lat: '1',
+            origin_lng: '2',
+            dest_lat: '3',
+            dest_lng: '4',
+            joined_at: new Date('2026-11-06T10:00:00Z'),
+          },
+        ],
+        [],
+      ],
+    });
+    const snap = await repo.snapshotPool(tx as never, 'pool-1');
+    expect(snap?.pool).toMatchObject({ poolId: 'pool-1', stateVersion: 7, seatCount: 1 });
+    expect(snap?.members.map((m) => m.passenger_id)).toEqual(['p-1']);
+    expect(tx.execute).toHaveBeenCalledTimes(2);
+    const firstSql = JSON.stringify(tx.execute.mock.calls[0]);
+    expect(firstSql).not.toMatch(/FOR UPDATE/i);
+    await expect(repo.snapshotPool(tx as never, 'nope')).resolves.toBeNull();
+    expect(tx.execute).toHaveBeenCalledTimes(3); // no member read for a missing pool
+  });
+
   it('listMembers maps rows to the SharedRideMember shape', async () => {
     const { tx } = makeTx({
       selects: [

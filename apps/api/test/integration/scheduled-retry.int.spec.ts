@@ -1,3 +1,4 @@
+import { buildPolicy } from '../../src/config/policy/policy';
 import { Pool } from 'pg';
 import { Queue } from 'bullmq';
 import { drizzle } from 'drizzle-orm/node-postgres';
@@ -10,8 +11,12 @@ import { OutboxRepository } from '../../src/modules/outbox/outbox.repository';
 import { DispatchReconciler } from '../../src/modules/outbox/dispatch-reconciler.service';
 import { rearmScheduledRide } from '../../src/modules/scheduled/scheduled-retry';
 import { hardFailJobId, wave2JobId } from '../../src/modules/outbox/outbox.jobs';
+import { dispatchOutcome } from '../../src/metrics';
 
 const skip = process.env.RCAB_INT_SKIPPED === '1';
+
+/** The default policy cutoff (30 min after pickup), as the services receive it. */
+const OPTS = { cutoffAfterPickupMs: buildPolicy({ get: () => undefined }).scheduled.retryCutoffAfterPickupMs };
 
 function redisConn() {
   const u = new URL(process.env.TEST_REDIS_URL!);
@@ -61,7 +66,12 @@ describe.skipIf(skip)('scheduled ride retry (Postgres + BullMQ)', () => {
     return id;
   }
   /** A scheduled ride already woken at `generation`, last touched `ageS` seconds ago. */
-  async function wokenRide(generation = 1, ageS = 300, type: 'scheduled' | 'normal' = 'scheduled') {
+  async function wokenRide(
+    generation = 1,
+    ageS = 300,
+    type: 'scheduled' | 'normal' = 'scheduled',
+    pickupInMs = 3_600_000,
+  ) {
     const passenger = await newClient();
     const { row } = await ridesRepo.create({
       passengerId: passenger,
@@ -72,7 +82,7 @@ describe.skipIf(skip)('scheduled ride retry (Postgres + BullMQ)', () => {
       fareCents: 18500,
       idempotencyKey: `idem-${randomUUID()}`,
       ...(type === 'scheduled'
-        ? { type: 'scheduled' as const, scheduledFor: new Date(Date.now() + 3_600_000) }
+        ? { type: 'scheduled' as const, scheduledFor: new Date(Date.now() + pickupInMs) }
         : {}),
     });
     await pg.query(
@@ -116,7 +126,7 @@ describe.skipIf(skip)('scheduled ride retry (Postgres + BullMQ)', () => {
       dispatchQ as never,
       scheduledQ as never,
       matchingQ as never,
-      config as never,
+      buildPolicy(config),
     );
   });
 
@@ -132,13 +142,23 @@ describe.skipIf(skip)('scheduled ride retry (Postgres + BullMQ)', () => {
     await pg.end().catch(() => undefined);
   });
 
+  async function scheduledRetries(): Promise<number> {
+    return (await dispatchOutcome.get()).values
+      .filter((v) => v.labels.outcome === 'scheduled_retry' && v.labels.kind === 'solo')
+      .reduce((sum, v) => sum + v.value, 0);
+  }
+
   describe('rearmScheduledRide', () => {
     it('bumps the generation, revokes live offers and writes the new generation intent atomically; ride stays requested', async () => {
       const r = await wokenRide(1, 0);
       const driver = await offer(r.id, 1, 5, true);
+      const retries0 = await scheduledRetries();
 
-      const out = await rearmScheduledRide(db as never, r.id, 1);
+      const out = await rearmScheduledRide(db as never, r.id, 1, OPTS);
+      // One committed re-arm = one scheduled_retry outcome.
+      expect(await scheduledRetries()).toBe(retries0 + 1);
       expect(out).toMatchObject({
+        outcome: 'rearmed',
         previousGeneration: 1,
         generation: 2,
         retryCount: 1,
@@ -158,7 +178,7 @@ describe.skipIf(skip)('scheduled ride retry (Postgres + BullMQ)', () => {
       const r = await wokenRide(1, 0);
       const seen: Array<[number, boolean]> = [];
       for (let g = 1; g <= 6; g++) {
-        const out = await rearmScheduledRide(db as never, r.id, g);
+        const out = await rearmScheduledRide(db as never, r.id, g, OPTS);
         seen.push([out!.generation, out!.firstRetry]);
       }
       expect(seen).toEqual([
@@ -174,20 +194,100 @@ describe.skipIf(skip)('scheduled ride retry (Postgres + BullMQ)', () => {
 
     it('a duplicate timer for the same window re-arms once (generation guard)', async () => {
       const r = await wokenRide(1, 0);
+      const retries0 = await scheduledRetries();
       const results = await Promise.all([
-        rearmScheduledRide(db as never, r.id, 1),
-        rearmScheduledRide(db as never, r.id, 1),
-        rearmScheduledRide(db as never, r.id, 1),
+        rearmScheduledRide(db as never, r.id, 1, OPTS),
+        rearmScheduledRide(db as never, r.id, 1, OPTS),
+        rearmScheduledRide(db as never, r.id, 1, OPTS),
       ]);
       expect(results.filter(Boolean)).toHaveLength(1);
+      // Duplicate timers are deduplicated by the generation guard AND by the metric.
+      expect(await scheduledRetries()).toBe(retries0 + 1);
       expect((await ride(r.id)).dispatch_generation).toBe(2);
       expect(await intents(r.id)).toHaveLength(1);
     });
 
     it('a legacy job without a generation means "current"', async () => {
       const r = await wokenRide(3, 0);
-      const out = await rearmScheduledRide(db as never, r.id);
+      const out = await rearmScheduledRide(db as never, r.id, undefined, OPTS);
       expect(out?.generation).toBe(4);
+    });
+
+    it('re-arms while the retry cutoff has not passed, even well after the pickup time', async () => {
+      // pickup was 29 min ago; the default cutoff is 30 min after pickup
+      const r = await wokenRide(1, 0, 'scheduled', -29 * 60_000);
+      const out = await rearmScheduledRide(db as never, r.id, 1, OPTS);
+      expect(out).toMatchObject({ outcome: 'rearmed', generation: 2 });
+      expect(out!.outcome === 'rearmed' && out!.retryUntil.getTime()).toBeGreaterThan(Date.now());
+      expect(await ride(r.id)).toEqual({ status: 'requested', dispatch_generation: 2 });
+      expect(await intents(r.id)).toHaveLength(1);
+    });
+
+    it('past the cutoff the same transaction ends the ride as no_driver: no new generation, no intent, live offers revoked', async () => {
+      const r = await wokenRide(3, 0, 'scheduled', -31 * 60_000);
+      const driver = await offer(r.id, 3, 5, true);
+      const out = await rearmScheduledRide(db as never, r.id, 3, OPTS);
+      expect(out).toMatchObject({
+        outcome: 'no_driver',
+        rideId: r.id,
+        passengerId: r.passengerId,
+        generation: 3,
+      });
+      expect(out!.revokedOffers.map((o) => o.driverId)).toEqual([driver]);
+      expect(await ride(r.id)).toEqual({ status: 'no_driver', dispatch_generation: 3 });
+      expect(await intents(r.id)).toHaveLength(0);
+      const live = await pg.query(`SELECT 1 FROM dispatch_offer WHERE ride_id = $1 AND state = 'offered'`, [r.id]);
+      expect(live.rowCount).toBe(0);
+      // a duplicate timer for the same window is a no-op (the ride is terminal)
+      expect(await rearmScheduledRide(db as never, r.id, 3, OPTS)).toBeNull();
+    });
+
+    it('the cutoff is policy-tunable: a 5 min cutoff ends a ride 10 min past pickup, a 0 cutoff ends it at pickup', async () => {
+      const a = await wokenRide(1, 0, 'scheduled', -10 * 60_000);
+      expect(await rearmScheduledRide(db as never, a.id, 1, { cutoffAfterPickupMs: 5 * 60_000 })).toMatchObject({
+        outcome: 'no_driver',
+      });
+      const b = await wokenRide(1, 0, 'scheduled', 5 * 60_000);
+      expect(await rearmScheduledRide(db as never, b.id, 1, OPTS)).toMatchObject({ outcome: 'rearmed' });
+      const c = await wokenRide(1, 0, 'scheduled', -1_000);
+      expect(await rearmScheduledRide(db as never, c.id, 1, { cutoffAfterPickupMs: 0 })).toMatchObject({
+        outcome: 'no_driver',
+      });
+    });
+
+    it('race: a driver accept holding the row lock wins over the cutoff (ride stays accepted, nothing ended)', async () => {
+      const r = await wokenRide(1, 0, 'scheduled', -31 * 60_000);
+      const driver = await newDriver();
+      const holder = await pg.connect();
+      try {
+        await holder.query('BEGIN');
+        await holder.query(`SELECT 1 FROM rides WHERE id = $1 FOR UPDATE`, [r.id]);
+        const pending = rearmScheduledRide(db as never, r.id, 1, OPTS);
+        await new Promise((res) => setTimeout(res, 150));
+        await holder.query(`UPDATE rides SET status = 'accepted', driver_id = $2 WHERE id = $1`, [r.id, driver]);
+        await holder.query('COMMIT');
+        expect(await pending).toBeNull();
+      } finally {
+        holder.release();
+      }
+      expect((await ride(r.id)).status).toBe('accepted');
+    });
+
+    it('waits for a concurrent cancel and then ends nothing past the cutoff either', async () => {
+      const r = await wokenRide(1, 0, 'scheduled', -31 * 60_000);
+      const holder = await pg.connect();
+      try {
+        await holder.query('BEGIN');
+        await holder.query(`SELECT 1 FROM rides WHERE id = $1 FOR UPDATE`, [r.id]);
+        const pending = rearmScheduledRide(db as never, r.id, 1, OPTS);
+        await new Promise((res) => setTimeout(res, 150));
+        await holder.query(`UPDATE rides SET status = 'cancelled' WHERE id = $1`, [r.id]);
+        await holder.query('COMMIT');
+        expect(await pending).toBeNull();
+      } finally {
+        holder.release();
+      }
+      expect((await ride(r.id)).status).toBe('cancelled');
     });
 
     it.each([
@@ -213,7 +313,7 @@ describe.skipIf(skip)('scheduled ride retry (Postgres + BullMQ)', () => {
     ])('does nothing for %s', async (_n, make) => {
       const r = await make();
       const before = await ride(r.id);
-      expect(await rearmScheduledRide(db as never, r.id, before.dispatch_generation)).toBeNull();
+      expect(await rearmScheduledRide(db as never, r.id, before.dispatch_generation, OPTS)).toBeNull();
       expect(await ride(r.id)).toEqual(before);
       expect(await intents(r.id)).toHaveLength(0);
     });
@@ -224,7 +324,7 @@ describe.skipIf(skip)('scheduled ride retry (Postgres + BullMQ)', () => {
       try {
         await holder.query('BEGIN');
         await holder.query(`SELECT 1 FROM rides WHERE id = $1 FOR UPDATE`, [r.id]);
-        const pending = rearmScheduledRide(db as never, r.id, 1);
+        const pending = rearmScheduledRide(db as never, r.id, 1, OPTS);
         await new Promise((res) => setTimeout(res, 150));
         await holder.query(`UPDATE rides SET status = 'cancelled' WHERE id = $1`, [r.id]);
         await holder.query('COMMIT');
@@ -277,6 +377,28 @@ describe.skipIf(skip)('scheduled ride retry (Postgres + BullMQ)', () => {
       await reconciler.reconcile();
       expect((await ride(r.id)).dispatch_generation).toBe(1);
       expect(await intents(r.id)).toHaveLength(0);
+    });
+
+    it('past the retry cutoff the reconciler ends the ride as no_driver and notifies via DispatchService (not re-armed)', async () => {
+      const r = await wokenRide(1, 300, 'scheduled', -31 * 60_000);
+      await offer(r.id, 1, 250);
+      const dispatch = { onScheduledNoDriver: vi.fn().mockResolvedValue(undefined) };
+      const rec = new DispatchReconciler(
+        db as never,
+        new OutboxRepository(db as never),
+        dispatchQ as never,
+        scheduledQ as never,
+        matchingQ as never,
+        buildPolicy(config),
+        dispatch as never,
+      );
+      const report = await rec.reconcile();
+      expect(report.scheduledExpired).toBeGreaterThanOrEqual(1);
+      expect(await ride(r.id)).toEqual({ status: 'no_driver', dispatch_generation: 1 });
+      expect(await intents(r.id)).toHaveLength(0);
+      expect(dispatch.onScheduledNoDriver).toHaveBeenCalledWith(
+        expect.objectContaining({ rideId: r.id, passengerId: r.passengerId, generation: 1 }),
+      );
     });
 
     it('a NORMAL ride in the same state is never retried by the scheduled rule', async () => {

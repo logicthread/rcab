@@ -1,5 +1,7 @@
 {
-  "annotations": { "list": [] },
+  "annotations": {
+    "list": []
+  },
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
@@ -7,52 +9,355 @@
   "links": [],
   "panels": [
     {
-      "title": "Dispatch Latency",
+      "title": "Dispatch latency p50 / p95 by stage",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "targets": [
         {
-          "expr": "histogram_quantile(0.50, sum(rate(rcab_dispatch_latency_seconds_bucket[5m])) by (le))",
-          "legendFormat": "p50",
+          "expr": "histogram_quantile(0.5, sum(rate(rcab_dispatch_latency_seconds_bucket[5m])) by (le, stage))",
+          "legendFormat": "p50 {{stage}}",
           "refId": "A"
         },
         {
-          "expr": "histogram_quantile(0.95, sum(rate(rcab_dispatch_latency_seconds_bucket[5m])) by (le))",
-          "legendFormat": "p95",
+          "expr": "histogram_quantile(0.95, sum(rate(rcab_dispatch_latency_seconds_bucket[5m])) by (le, stage))",
+          "legendFormat": "p95 {{stage}}",
           "refId": "B"
         }
       ],
       "fieldConfig": {
-        "defaults": { "unit": "s", "custom": { "drawStyle": "line", "fillOpacity": 10 } },
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          }
+        },
         "overrides": []
-      }
+      },
+      "description": "intent_to_first_offer = outbox intent to first offer committed (budget: perfBudget.dispatchP95Ms in docs/POLICY.md); offer_to_accept = offer created to accept committed."
     },
     {
-      "title": "Dispatch Outcomes",
+      "title": "Dispatch outcomes",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "targets": [
         {
-          "expr": "sum(rate(rcab_dispatch_outcome_total[5m])) by (outcome)",
-          "legendFormat": "{{outcome}}",
+          "expr": "sum(rate(rcab_dispatch_outcome_total[5m])) by (outcome, kind)",
+          "legendFormat": "{{outcome}} {{kind}}",
           "refId": "A"
         }
       ],
       "fieldConfig": {
-        "defaults": { "unit": "ops", "custom": { "drawStyle": "bars", "fillOpacity": 50 } },
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 50
+          }
+        },
         "overrides": []
       }
+    },
+    {
+      "title": "Active and busy drivers",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "expr": "rcab_active_drivers",
+          "legendFormat": "online (geo index)",
+          "refId": "A"
+        },
+        {
+          "expr": "rcab_busy_drivers",
+          "legendFormat": "busy (active trip)",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "title": "Shared match rate (rolling window)",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "expr": "rcab_shared_match_rate",
+          "legendFormat": "match rate",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "description": "Riders who shared a ride / riders in pools closed in the window. Absent when no pool closed."
+    },
+    {
+      "title": "Ride state transitions",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 16
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(rcab_ride_state_transition_total[5m])) by (from, to)",
+          "legendFormat": "{{from}} -> {{to}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 50
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "title": "Pool joins and closures",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 16
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(rcab_pool_joins_total[5m])) by (result)",
+          "legendFormat": "join {{result}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(rcab_pool_closures_total[5m])) by (reason)",
+          "legendFormat": "close {{reason}}",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 50
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "title": "Outbox backlog",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 24
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "expr": "rcab_outbox_pending",
+          "legendFormat": "pending",
+          "refId": "A"
+        },
+        {
+          "expr": "rcab_outbox_exhausted",
+          "legendFormat": "exhausted",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "description": "Required-work health. Exhausted rows need the reconciler or an operator."
+    },
+    {
+      "title": "Outbox oldest due row age",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 24
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "expr": "rcab_outbox_oldest_pending_age_seconds",
+          "legendFormat": "oldest due",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "title": "Outbox publish results",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 32
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(rcab_outbox_publish_total[5m])) by (result)",
+          "legendFormat": "{{result}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 50
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "title": "HTTP p95 by route template",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 32
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, route))",
+          "legendFormat": "{{route}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "description": "route is the Nest route template (/v1/rides/:id); requests that matched no route are grouped as 'unmatched'."
     }
   ],
   "schemaVersion": 39,
-  "tags": ["rcab", "dispatch"],
-  "templating": { "list": [] },
-  "time": { "from": "now-1h", "to": "now" },
+  "tags": [
+    "rcab",
+    "dispatch"
+  ],
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
   "timepicker": {},
   "timezone": "browser",
   "title": "Dispatch",
   "uid": "rcab-dispatch",
-  "version": 1
+  "version": 2
 }

@@ -1,6 +1,5 @@
 import type { CookieOptions } from 'express';
-
-const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+import { getPolicy } from '../../config/policy/policy';
 
 export const REFRESH_COOKIE_NAME = 'refresh_token';
 
@@ -10,7 +9,8 @@ export function refreshCookieOptions(): CookieOptions {
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'lax',
     path: '/v1/auth',
-    maxAge: THIRTY_DAYS_MS,
+    // Same lifetime as the DB row: policy sessions.refreshTokenTtlMs (30 days).
+    maxAge: getPolicy().sessions.refreshTokenTtlMs,
   };
 }
 

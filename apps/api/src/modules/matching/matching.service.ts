@@ -1,7 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'node:crypto';
-import { getNumber } from '../../common/utils/env';
+import { POLICY, type Policy } from '../../config/policy/policy';
 import { DRIZZLE_DB, type DrizzleDb } from '../../infra/db/drizzle.module';
 import type { SeatFareQuoter, SeatQuote } from '../pricing/pricing.types';
 import { RouteSimilarityService, type RouteInput } from './route-similarity.service';
@@ -44,7 +43,9 @@ export type MatchResult =
 
 export interface FindOrCreateOptions {
   /**
-   * Prices the seat INSIDE the seat transaction from the locked pool state
+   * Prices the seat OPTIMISTICALLY, outside any transaction / pool lock, from an
+   * unlocked pool snapshot that the seat transaction then re-validates
+   * (`matching.joinPriceRetries`; RCAB-E8.S13) — may be called more than once.
    * (SHARED_FARE_POLICY = fixed_at_join). Persisted as `agreed_fare_cents`.
    * Must throw when the fare cannot be determined: the seat is then not
    * committed and the error propagates (no seat without a price).
@@ -85,11 +86,11 @@ export class MatchingService {
     private readonly lifecycle: PoolLifecycleService,
     private readonly members: PoolMembershipRepository,
     @Inject(DRIZZLE_DB) private readonly db: DrizzleDb,
-    @Inject(ConfigService) config: ConfigService,
+    @Inject(POLICY) policy: Policy,
   ) {
-    this.similarityThreshold = getNumber(config, 'MATCHING_SIMILARITY_THRESHOLD', 0.7, { min: 0, max: 1 });
-    this.detourBudgetM       = getNumber(config, 'MATCHING_DETOUR_BUDGET_M', 800, { min: 0 });
-    this.maxSeats            = getNumber(config, 'MATCHING_MAX_SEATS', 3, { integer: true, min: 1 });
+    this.similarityThreshold = policy.matching.similarityThreshold;
+    this.detourBudgetM = policy.matching.detourBudgetM;
+    this.maxSeats = policy.matching.maxSeats;
   }
 
   /**
