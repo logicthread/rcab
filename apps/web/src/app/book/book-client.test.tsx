@@ -445,6 +445,22 @@ describe('BookPage idempotency error recovery', () => {
   });
 });
 
+describe('BookPage reload restore', () => {
+  it('a saved ride that is already no_show is not resumed and its marker is cleared', async () => {
+    window.localStorage.setItem('rcab_active_ride', 'r-ns');
+    vi.mocked(api.fetchRide).mockResolvedValue({
+      rideId: 'r-ns',
+      status: 'no_show',
+      origin: { lat: 26.14, lng: 91.73 },
+      dropoff: { lat: 26.17, lng: 91.78 },
+    } as never);
+    render(<BookClient />);
+    await waitFor(() => expect(window.localStorage.getItem('rcab_active_ride')).toBeNull());
+    expect(screen.queryByTestId('tracking-panel')).toBeNull();
+    expect(useBookingStore.getState().rideId).toBeNull();
+  });
+});
+
 describe('BookPage sign out (F12)', () => {
   it('Sign out calls signOut and clears booking state + the persisted active ride', async () => {
     const signOut = vi.fn().mockResolvedValue(undefined);

@@ -32,6 +32,10 @@ import { SoloFallbackBanner } from './solo-fallback-banner';
 import { RideTrackingPanel } from './ride-tracking-panel';
 
 const ACTIVE_RIDE_KEY = 'rcab_active_ride';
+// Terminal solo statuses: the persisted active-ride marker is dropped (and a reload
+// does not resume tracking) once the ride reaches any of them. `no_show` is a terminal
+// state the driver can put a ride into after the wait, so it must be here too.
+const TERMINAL_RIDE_STATUSES: readonly string[] = ['completed', 'no_driver', 'cancelled', 'no_show'];
 
 // Leaflet touches `window`, so the map is client-only (no SSR).
 const MapPicker = dynamic(() => import('./map-picker').then((m) => m.MapPicker), {
@@ -245,7 +249,7 @@ function BookPage() {
     fetchRide(saved)
       .then((r) => {
         if (cancelled) return;
-        if (['completed', 'no_driver', 'cancelled'].includes(r.status)) {
+        if (TERMINAL_RIDE_STATUSES.includes(r.status)) {
           window.localStorage.removeItem(ACTIVE_RIDE_KEY);
           return;
         }
@@ -271,7 +275,7 @@ function BookPage() {
   useEffect(() => {
     if (
       rideStatus &&
-      ['completed', 'no_driver', 'cancelled'].includes(rideStatus) &&
+      TERMINAL_RIDE_STATUSES.includes(rideStatus) &&
       typeof window !== 'undefined'
     ) {
       window.localStorage.removeItem(ACTIVE_RIDE_KEY);
