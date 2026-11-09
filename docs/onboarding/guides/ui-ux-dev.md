@@ -116,7 +116,7 @@ dependency-free because `scripts/policy-doc.ts` imports it; add a `WEB_POLICY_ME
 knob or `pnpm policy:doc` fails.
 
 Auth detail worth knowing: the access JWT lives only in memory (Zustand), never in `localStorage`.
-The refresh token is an HttpOnly cookie (`rcab_refresh`) rotated single-use by
+The refresh token is an HttpOnly cookie (`refresh_token`) rotated single-use by
 `POST /v1/auth/refresh`. `refreshAccessToken` is single-flight; `signOut` bumps `sessionGen` so a
 refresh already in flight cannot resurrect the old session (video W10).
 

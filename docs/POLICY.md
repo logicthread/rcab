@@ -12,7 +12,7 @@ ride lifecycle, sessions, rate limits, realtime cadence, the outbox loop, and th
   (one deployment), then run `pnpm policy:doc`. "Code-fixed" knobs have no env var: change them in the schema.
 - **Clients:** `apps/web/src/config/policy.ts` and `apps/driver-app/lib/core/config/policy.dart`.
 
-67 server knobs (64 env-overridable) in 13 categories, 10 cross-field rules, 8 web and 9 driver-app knobs.
+67 server knobs (64 env-overridable) in 13 categories, 10 cross-field rules, 8 web and 10 driver-app knobs.
 
 ## Contents
 
@@ -239,6 +239,7 @@ rule the client cannot read at runtime and must be kept in step with the table a
 | `sharedAcceptAckTimeout` | `Duration(seconds: 8)` | duration | client | How long a shared-ride accept waits for its ack before asking the server for a snapshot. | Stage-C driver-app fix (undecided accept ack) 8 s. |
 | `noShowWait` | `Duration(minutes: 5)` | duration | server-mirror | After arrival, how long before the no-show button unlocks (the server re-validates). | RCAB-E4.S8 rides.noShowWaitMs 5 min. |
 | `locationIntervalMs` | `5000` | ms | client | Foreground location task cadence (one-shot fix every interval while online). | RCAB-E3.S4 foreground service 5 s. |
+| `locationHeartbeatMs` | `20000` | ms | client | Re-send an unchanged position after this long so a stationary online driver is not swept offline (must stay well under the server's drivers.staleAfterMs, 60 s). | RCAB-E8.S14 parked-driver heartbeat 20 s (3 sends per stale window). |
 | `locationMinMoveMeters` | `10.0` | m | client | Minimum movement before a new location fix is sent to the server. | RCAB-E3.S5 location streaming 10 m. |
 | `logoutTimeout` | `Duration(seconds: 5)` | duration | client | Send / receive timeout of the best-effort logout call. | RCAB-E8.S7 native logout 5 s. |
 | `otpAutoRetrievalTimeout` | `Duration(seconds: 60)` | duration | client | Firebase phone-verification auto-retrieval timeout. | RCAB-E3.S2 Firebase OTP 60 s. |

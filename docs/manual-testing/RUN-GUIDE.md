@@ -106,7 +106,7 @@ extracting (`docker compose … logs osrm-extract`); stale pg volume → `pnpm d
 2. Enter a **Firebase test phone number** (configured in the Firebase console), solve the
    invisible reCAPTCHA, **Send OTP**.
 3. Enter the fixed test code → **Verify** → you land on `/book` as a signed-in client.
-4. DevTools → Application → Cookies → confirm `rcab_refresh` is `HttpOnly`, `SameSite`.
+4. DevTools → Application → Cookies → confirm `refresh_token` is `HttpOnly`, `SameSite=Lax`, path `/v1/auth`.
 5. Inspect the user row:
    ```bash
    docker compose --env-file .env.dev -f infra/docker/docker-compose.dev.yml exec -T postgres \
@@ -219,8 +219,8 @@ dispatches like a normal ride; cancel is free before wake.
    ```bash
    docker compose … exec -T redis redis-cli KEYS 'bull:scheduled-dispatch:*'
    ```
-3. **Wake:** when `scheduledFor − 10 min` arrives, the job fires → emits `ride.requested`
-   → normal dispatch (identical to Demo 3). To demo fast, set `scheduledFor` ~16 min out
+3. **Wake:** when `scheduledFor − 10 min` arrives, the job fires → `DispatchStartService.wakeScheduled`
+   starts normal dispatch (identical to Demo 3, with a 4-minute accept window and automatic retry). To demo fast, set `scheduledFor` ~16 min out
    (wake in ~6 min) or override `SCHEDULED_WAKE_LEAD_MS` low in `.env.dev` and restart api.
 4. **Cancel before wake** (`POST /v1/rides/:id/cancel`) → ride `cancelled` **and** the
    delayed job is dropped (free). After wake, normal cancel rules apply.
@@ -256,7 +256,7 @@ docker compose … exec -T redis redis-cli HSET driver:state:':DID' availability
 
 ```bash
 /smoke-check          # per-service health table
-/redis-inspect        # driver geo, BullMQ queues, JWT revocation
+/redis-inspect        # driver geo, BullMQ queues, pool projections (refresh-token revocation is in Postgres)
 /pool-inspect         # shared-ride pools (E5+)
 /osrm-check           # routing graph loaded + a test route
 /code-graph deps RidesModule        # what a module depends on (no source grep)

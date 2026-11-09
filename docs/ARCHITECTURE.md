@@ -186,9 +186,10 @@ matching · rating · health · scheduled · outbox · metrics`
 
 ### Solo ride lifecycle (state machine — `rides.status`)
 ```
-requested → dispatching → accepted → en_route → arrived → in_progress → completed
+requested → accepted → en_route → arrived → in_progress → completed
      └──────────────► no_driver            (any pre-complete) └► cancelled / no_show
 ```
+(`dispatching` is allowed by the `rides.status` CHECK but no code writes it: a ride stays `requested` for its whole search.)
 - **Dispatch** (`dispatch` module, Postgres outbox + BullMQ timers): the booking commit
   writes an `outbox` (`ride.dispatch.requested`) in the same transaction;
   `OutboxRelay` → `DispatchStartService` → `dispatchSolo` → geo top-K on `active_drivers`
@@ -200,7 +201,7 @@ requested → dispatching → accepted → en_route → arrived → in_progress 
   (assigned/lost/expired/revoked/rejected). No accept → wave-2 (K2/R2) → hard-fail →
   `no_driver` + notify passenger. `DispatchReconciler` re-arms anything committed but
   never started; the in-memory `ride.requested` event no longer exists.
-- **Lifecycle** (`ride-lifecycle` / `RideStateMachine`): driver drives the forward
+- **Lifecycle** (`rides` module, `RideStateMachine`; shared-trip stop confirmation is `ride-lifecycle`): driver drives the forward
   transitions via `POST /v1/rides/:id/state` (SELECT … FOR UPDATE guarded). Cancel /
   no-show via `POST /v1/rides/:id/cancel` (role-aware; no fee in Phase-0).
 
@@ -220,8 +221,9 @@ on `scheduled-dispatch` (fires 10 min before pickup) **instead of** dispatching 
 wake the same outbox-driven solo dispatch path runs (`dispatchSolo` guards
 `status='requested'`, so a cancelled ride is safely skipped), but with a **4-minute**
 accept window (`SCHEDULED_DISPATCH_WINDOW_MS=240000`). An unanswered scheduled ride is
-re-armed with a new generation (no cap) and the passenger is told once
-(`ride_dispatch_retry`). Cancel before wake drops the delayed job.
+re-armed with a new generation (no retry-count cap, but bounded in time: once
+`scheduled_for + SCHEDULED_RETRY_CUTOFF_AFTER_PICKUP_MS`, 30 min, the first window to close ends the
+ride as `no_driver`) and the passenger is told once (`ride_dispatch_retry`). Cancel before wake drops the delayed job.
 
 ---
 
@@ -231,7 +233,7 @@ re-armed with a new generation (no cap) and the passenger is told once
 app → Firebase signInWithPhoneNumber → ID token
 app → POST /v1/auth/firebase-exchange {id_token}
      API verifies via firebase-admin → upserts app_user → mints:
-        access JWT (Bearer, ~15 min)  +  refresh token (HttpOnly cookie `rcab_refresh`)
+        access JWT (Bearer, ~15 min)  +  refresh token (HttpOnly cookie `refresh_token`, `SameSite=Lax`, path `/v1/auth`; the JSON body carries no refresh token)
 ... access expires ...
 app → POST /v1/auth/refresh (cookie auto-sent, Origin/CSRF-checked) → new access JWT
 logout → refresh token marked revoked (Postgres `auth_refresh_token.revoked_at`)

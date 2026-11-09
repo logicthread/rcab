@@ -10,13 +10,15 @@ audience: both
 
 # WebSocket events
 
-*Transport: Socket.IO with Redis adapter. Auth: JWT in handshake.*
+*Transport: Socket.IO (websocket only) with Redis adapter. Auth: JWT in handshake.*
+
+> **Code-verified catalogue:** `docs/onboarding/functionality/realtime-protocol.md` (rooms, every event and payload, version rules) is checked against `realtime.protocol.ts` and the gateway. Rows below marked **not built** are design intent with no emitter or handler in the code.
 
 ## Connection
 
 ```
-GET /socket.io  (Sec-WebSocket-Protocol: rcab)
-Handshake auth: { token: <rcab_jwt> }
+GET /socket.io  (transport: websocket)
+Handshake auth: { token: <rcab_access_jwt> }   (or an Authorization: Bearer header)
 ```
 
 On connect, server places the socket in personal + role rooms:
@@ -36,30 +38,30 @@ On connect, server places the socket in personal + role rooms:
 | `ride_offer_accepted` | `{ offerId, rideId }` | Solo (E4.S4): the winning driver's transactional accept succeeded (Stage C: also see `ride_offer_outcome`) — the driver app routes to the active ride. |
 | `ride_offer_revoked` | `{ offerId, rideId?, reason }` | Someone else accepted / client canceled. Solo (E4.S4) `reason` ∈ `taken` / `unavailable`. |
 | `ride_state_changed` | `{ rideId, state, by }` | Solo ride lifecycle transition (RCAB-E4.S6/S8). Emitted to room `ride:<id>` by `RideStateMachine` after each `POST /v1/rides/:id/state` *or* `POST /v1/rides/:id/cancel` commit. `state` ∈ `accepted`/`en_route`/`arrived`/`in_progress`/`completed` plus terminal `cancelled`/`no_show` (RCAB-E4.S8); `by` ∈ `driver`/`client` (the acting party — a client cancel carries `by: 'client'`). |
-| `passenger_added` | `{ ride_id, request, new_route_polyline }` | Shared-ride: new joiner slotted |
+| `passenger_added` (**not built**) | `{ ride_id, request, new_route_polyline }` | Shared-ride: new joiner slotted |
 | `force_offline` | `{ reason }` | Ops or server-side eviction |
 
 ### Client
 | Event | Payload | When |
 |---|---|---|
-| `request_status` | `{ request_id, status, ... }` | Booking-flow state changes |
-| `driver_assigned` | `{ ride_id, driver: {...}, vehicle: {...}, eta_s }` | Match made |
+| `request_status` (**not built**) | `{ request_id, status, ... }` | Booking-flow state changes |
+| `driver_assigned` (**not built**; the client learns of the assignment from `ride_state_changed accepted`) | `{ ride_id, driver: {...}, vehicle: {...}, eta_s }` | Match made |
 | `driver_location` | `{ rideId, lat, lng, heading }` | RCAB-E4.S7. Live driver position, emitted to room `ride:<id>` **only while the driver is bound to that ride** (`driver:state.current_ride_id` set), rate-limited to **1 Hz per ride**. camelCase, matching `ride_state_changed`. |
 | `ride_state_changed` | `{ rideId, state, by }` | Ride lifecycle (RCAB-E4.S6). The same event + room (`ride:<id>`) as the driver side; the booking client joins `ride:<id>` at request time so it follows the ride live. **RCAB-E4.S7** also emits `state: 'accepted'` at solo-claim time (from `DispatchService`) so the rider's tracking view activates the instant a driver accepts, and the driver's first location packet auto-emits `state: 'en_route'` (implicit `start_en_route`). **RCAB-E4.S8** adds the terminal `state: 'cancelled'` / `'no_show'` (with `by` = the acting party) — the rider's tracking view shows the terminal banner and stops following. |
-| `pool:update` | `{ sharedRideId, seatCount, poolStatus }` | Shared-ride pool transitions (RCAB-E5.S6). `poolStatus` ∈ `open` / `closed_full` / `closed_timeout`. Targeted at room `pool:<shared_ride_id>`. Emitted by `PoolLifecycleService` after `openPool`, `slotRequest`, and `closePool('closed_timeout' \| 'closed_full')`. |
+| `pool:update` | `{ sharedRideId, seatCount, poolStatus }` | Shared-ride pool transitions (RCAB-E5.S6). `poolStatus` ∈ `open` / `closed_full` / `closed_timeout` / `closed_started` / `aborted` / `completed`; the payload also carries `version`, `maxSeats`, `terminal`, `driverId`. Targeted at room `pool:<shared_ride_id>`. Emitted by `PoolLifecycleService` after `openPool`, `slotRequest`, and `closePool('closed_timeout' \| 'closed_full')`. |
 
 ## Client → Server events
 
 | Event | Payload | Notes |
 |---|---|---|
 | `driver:location` | `{ lat, lng, heading, speed }` | sent at the foreground-service cadence while online; the server applies two independent gates (see Throttling). |
-| `ride:subscribe` | `{ rideId }` | RCAB-E4.S7. Client (or driver) asks to (re)join `ride:<id>`. The gateway emits a domain event; `module-rides` validates the caller is the ride's passenger or bound driver (`RidesRepository.findById`) then `RealtimeBus.joinRide`. Re-emitted on every (re)connect — covers the create-time join race + full page reloads. |
+| `ride:subscribe` | `{ rideId }` | **Since R09 the gateway itself authorizes against Postgres, joins `ride:<id>` and answers with a `ride:snapshot` + ack; the domain-event path below is superseded (dead code).** RCAB-E4.S7. Client (or driver) asks to (re)join `ride:<id>`. The gateway emits a domain event; `module-rides` validates the caller is the ride's passenger or bound driver (`RidesRepository.findById`) then `RealtimeBus.joinRide`. Re-emitted on every (re)connect — covers the create-time join race + full page reloads. |
 | `ride_offer_response` | `{ offerId, sharedRideId?, accept }` | E5.S4. Stage C: the server ignores any client `sharedRideId` and derives the trip from the stored `dispatch_offer` row; the accept is validated in one Postgres transaction. The sender gets a `ride_offer_response` ack and every outcome is emitted as `ride_offer_outcome` (`assigned` / `lost` / `expired` / `revoked` / `rejected`). `accept=false` marks the offer declined.
 
 **Subscriptions and snapshots (Stage D, R09):** clients send `pool:subscribe` / `ride:subscribe` (authorized against Postgres membership/ownership) and receive a Postgres snapshot (`pool:snapshot`, `ride:snapshot`); drivers get `driver:assignment` and `driver:sync` on connect. Incremental events carry a `version` (pool = `shared_rides.state_version`, ride = status rank) so clients drop stale or duplicate events. Scheduled rides additionally emit `ride_dispatch_retry` once when an unanswered scheduled ride is re-armed. |
 | `stop:pickup_confirmed` | `{ rideId, sequenceIndex }` | RCAB-E5.S7. Driver-only. Validated against `shared_rides.claimed_by_driver_id`. Must target the next pending stop with `type='pickup'`. Server updates `ride_stops.confirmed_at`, transitions `shared_rides.pool_state` to `closed_started` on the first pickup, and echoes the same event name back to the driver socket with `{ rideId, sequenceIndex, passengerId, type, confirmedAt, rideCompleted }`. |
 | `stop:drop_confirmed` | `{ rideId, sequenceIndex }` | RCAB-E5.S7. Same validation as `stop:pickup_confirmed` but for `type='dropoff'`. When the last pending stop is confirmed: `shared_rides.pool_state='completed'` + `completed_at` set, `driver:state:<driverId>.current_ride_id` cleared, and `ride:completed { rideId, completedAt }` broadcast to room `ride:<rideId>`. |
-| `ping` | `{}` | for liveness; server replies `pong` |
+| `ping` (**not built**) | `{}` | for liveness; server replies `pong` |
 
 ## Throttling and back-pressure
 
