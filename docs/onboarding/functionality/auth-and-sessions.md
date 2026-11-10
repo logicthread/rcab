@@ -24,12 +24,24 @@ Back to [README](../README.md) · system context in [01-system-overview](../01-s
 
 | Surface | Behaviour |
 |---|---|
-| Web `/signin` | Two steps: phone number in E.164 (`+91XXXXXXXXXX`) then 6-digit code. An invisible reCAPTCHA protects the send. On success the user lands on `/book`. Errors appear in a `role="alert"` line. Already signed in: redirected to `/book`. Videos W02, W01 |
+| Web `/signin` | "Continue with Google" (Google Identity Services), rendered from `GET /v1/auth/config`; the phone-then-code form (invisible reCAPTCHA) appears only if `phone` is enabled. On success the user lands on `/book`. Errors appear in a `role="alert"` line. Already signed in: redirected to `/book`. Videos W02, W01 |
 | Web reload | The access token lives **in memory only** (Zustand). On reload `withAuth` calls `POST /v1/auth/refresh` with the cookie; no cookie or a rejected refresh sends the user to `/signin`. Video W09 |
 | Web sign out | Local state is cleared first, then the server revokes the refresh token and clears the cookie. A refresh is done first if the access token is expired, because logout itself needs a valid bearer. Video W10 |
-| Driver app sign-in | Phone + SMS code screen (`lib/features/auth/sign_in_screen.dart`). Tokens go to `flutter_secure_storage`. A rejected refresh signs the driver out. Video D01 |
+| Driver app sign-in | "Continue with Google" screen driven by `/v1/auth/config` (`lib/features/auth/sign_in_screen.dart`); a signed-in account whose role is not `driver` lands on "Not registered as a driver yet" (`not_a_driver_screen.dart`: shows the email, Sign out, Retry), see Provisioning a driver below. Tokens go to `flutter_secure_storage`. A rejected refresh signs the driver out. Video D01 |
 
 Scene IDs: web [W01, W02, W09, W10](../videos/web/INDEX.md), driver app [D01](../videos/driver/INDEX.md).
+
+## Provisioning a driver
+
+A Google sign-in always registers a `client`, so a driver account is enabled by an operator after the person has signed in once with Google:
+
+```bash
+scripts/provision-driver.sh driver@example.com --vehicle-reg AS01AB1234 --dry-run   # preview
+scripts/provision-driver.sh driver@example.com --vehicle-reg AS01AB1234             # dev compose postgres
+scripts/provision-driver.sh driver@example.com --database-url postgres://...        # any other database
+```
+
+It matches `app_user.email` case-insensitively, refuses an unknown, ambiguous (several accounts share the email) or non-active account, sets `role='driver'`, inserts the `driver` row, removes the unused `client` row (kept when the user has rides as a passenger) and optionally creates a starter vehicle. It is idempotent. The role reaches the user at the **next token refresh**: `POST /v1/auth/native/refresh` (and the web refresh) read `app_user.role` from the database, so the driver taps **Retry** on the "Not registered as a driver yet" screen, or waits up to 15 minutes for the access token to expire; an access token already issued keeps the old `role` claim until then. Follow-up (not built): an admin endpoint to do this without database access.
 
 ## API endpoints
 

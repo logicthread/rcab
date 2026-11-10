@@ -130,7 +130,7 @@ Use that `access_token` as `Authorization: Bearer …` for the API-only checks b
 
 **Proves:** driver signs in, registers a vehicle, goes online, streams location → Redis geo.
 
-1. Launch the driver app (§1.4). Sign in with Google using the account of a **driver** (driver accounts are provisioned out of band; Google sign-in alone creates only `client` users, so seed the driver's `google_sub` as in §8).
+1. Launch the driver app (§1.4). Sign in with Google. A first sign-in registers a `client`, so the app shows **Not registered as a driver yet** (with the email, Sign out and Retry). Enable the account: `scripts/provision-driver.sh <your-google-email> --vehicle-reg AS01DEMO1` (preview with `--dry-run`; see §8), then tap **Retry** (the refresh re-reads the role from the database) and the app moves to Home.
 2. Register a vehicle (type, reg no, seats) → `POST /v1/vehicles`.
 3. Toggle **Online** → `POST /v1/drivers/online` (foreground service notification appears).
 4. The app streams `driver:location` over WS. Verify presence:
@@ -233,6 +233,13 @@ completion; pre-wake cancel removes the job (verify the `bull:scheduled-dispatch
 ---
 
 ## 8. Manual data setup (since seeding is a stub)
+
+**Provision a real Google account as a driver** (the normal path; the person signs in once first):
+```bash
+scripts/provision-driver.sh you@gmail.com --vehicle-reg AS01DEMO1 --dry-run   # preview
+scripts/provision-driver.sh you@gmail.com --vehicle-reg AS01DEMO1
+```
+It finds `app_user` by email, sets `role='driver'`, inserts the `driver` row, removes the unused `client` row and creates a starter vehicle. Idempotent; refuses unknown, ambiguous or non-active accounts; `--database-url postgres://...` targets a database other than the dev compose. The new role reaches the app at its next token refresh (Retry on the not-a-driver screen). To go online with a fixture instead, see the SQL below.
 
 To place a driver in the geo index for inspection (note: completing an *accept* still needs
 a real authed driver app — this is for seeing dispatch fan-out and presence):

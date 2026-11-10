@@ -39,8 +39,8 @@ pnpm dev:smoke               # polls api / until postgres + redis are connected 
 ```
 
 `dev:up` copies `.env.dev.example` to `.env.dev` on first run. Variables you may need to edit there:
-`POSTGRES_*`, `OSM_PBF_URL` (OSRM map extract), `FIREBASE_PROJECT_ID`, `FIREBASE_SERVICE_ACCOUNT_JSON`,
-`FIREBASE_PHONE_TEST_TOKEN` (pre-minted ID token for curl-only checks), `JWT_SECRET`, `NEXT_PUBLIC_API_URL`.
+`POSTGRES_*`, `OSM_PBF_URL` (OSRM map extract), `GOOGLE_CLIENT_IDS` (sign-in is Google-only until launch),
+`FIREBASE_PROJECT_ID` / `FIREBASE_SERVICE_ACCOUNT_JSON` / `FIREBASE_PHONE_TEST_TOKEN` (only if you enable `phone`; the api boots without them), `JWT_SECRET`, `NEXT_PUBLIC_API_URL`.
 Secrets handling is a HITL area (`80-infrastructure/secrets-management.md`): never commit `.env.dev`.
 
 The first start builds the OSRM routing graph (`osrm-prep` then `osrm-extract`), which can take several minutes.

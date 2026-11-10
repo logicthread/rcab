@@ -14,17 +14,15 @@ Back to [README](../README.md) · see also [dispatch-and-offers](dispatch-and-of
 
 ## Provisioning a driver (operator procedure)
 
-`POST /v1/auth/firebase-exchange` always creates a **client**. A driver is made by promoting an existing account. Derived from the schema (`app_user`, `driver`); `driver.user_id` is the primary key and references `app_user.id`:
+Sign-in (Google, or phone when re-enabled) always creates a **client**. A driver is made by promoting an existing account with the operator script, which sets `role='driver'`, inserts the `driver` row, drops the unused `client` row and can add a starter vehicle (it is idempotent and has `--dry-run`):
 
-```sql
--- 1. the person signs in once on the driver app (creates app_user + client rows)
--- 2. promote
-UPDATE app_user SET role = 'driver' WHERE phone_e164 = '+91XXXXXXXXXX';
-INSERT INTO driver (user_id, verified_at)
-  SELECT id, now() FROM app_user WHERE phone_e164 = '+91XXXXXXXXXX';
+```bash
+# 1. the person signs in once on the driver app with Google (creates app_user + client rows)
+# 2. promote
+scripts/provision-driver.sh driver@example.com --vehicle-reg AS01AB1234
 ```
 
-The role is read from the database on every token refresh, so the driver sees the new role after the next refresh or a fresh sign-in. The pilot runbook (manual driver verification, RCAB-E9.S1) is not written yet; `driver.verified_at` and `license_no` exist but **no code reads them**, so verification is currently a convention, not an enforced gate. For dev and demos use `./scripts/seed-dev.sh` (fixture drivers, synthetic Firebase uids, cannot sign in) or the SQL in [RUN-GUIDE](../../manual-testing/RUN-GUIDE.md) section 8.
+Against a database other than the dev compose, pass `--database-url postgres://...`. Until promoted, the driver app shows "Not registered as a driver yet" with Retry. The role is read from the database on every token refresh, so the driver sees the new role after the next refresh (Retry on that screen) or a fresh sign-in. The pilot runbook (manual driver verification, RCAB-E9.S1) is not written yet; `driver.verified_at` and `license_no` exist but **no code reads them**, so verification is currently a convention, not an enforced gate. For dev and demos use `./scripts/seed-dev.sh` (fixture drivers, synthetic Firebase uids, cannot sign in) or the SQL in [RUN-GUIDE](../../manual-testing/RUN-GUIDE.md) section 8.
 
 ## User-visible behaviour (driver app)
 

@@ -124,9 +124,11 @@ down -v` is never run against the live project.
 | Business tunables | `docs/POLICY.md` and the generated policy block in `api.env.example`; env vars override per deployment |
 
 The api fails closed at startup outside development/test: weak or missing `JWT_SECRET` (HS256 shared secret, at
-least 32 bytes), invalid `CORS_ORIGINS` (must be an explicit https list, no wildcard), missing Firebase Admin
-values (`FIREBASE_PROJECT_ID`, `FIREBASE_SERVICE_ACCOUNT_JSON` as one-line JSON in an env var), or an invalid policy
-value all abort boot. A failing `migrator` blocks `api` (`service_completed_successfully`).
+least 32 bytes), invalid `CORS_ORIGINS` (must be an explicit https list, no wildcard), or an invalid policy value
+all abort boot. Firebase Admin is initialised lazily and only while `phone` is among `AUTH_ENABLED_METHODS`: a
+Google-only api (the default until launch) boots with no `FIREBASE_*` values at all. Only when `phone` is enabled do
+missing `FIREBASE_PROJECT_ID` / `FIREBASE_SERVICE_ACCOUNT_JSON` (one-line JSON in an env var) abort boot. A failing
+`migrator` blocks `api` (`service_completed_successfully`).
 
 **Google sign-in config (owner action):** the api needs `GOOGLE_CLIENT_IDS` (comma list of accepted OAuth client ids; `GOOGLE_CLIENT_ID` is an alias) and the web image build needs `NEXT_PUBLIC_GOOGLE_CLIENT_ID` (inlined at build time). The OAuth clients are created in Google Cloud Console by the owner; both are public identifiers, not secrets. Without a client id the api boots but Google sign-in returns 503 `google_not_configured`. `AUTH_ENABLED_METHODS` (default `google`) is the policy knob; keep `phone` off until the launch OTP provider is chosen.
 
@@ -243,9 +245,9 @@ Based on `scripts/deploy/README.md` "Host layout" and vault `80-infrastructure/v
   `postgres` and `osrm` are `platform: linux/amd64` (slow under emulation on Apple Silicon).
 - **Dev vs prod parity gaps:** dev has no TLS or nginx; dev Redis has no password; dev publishes DB/Redis host ports;
   dev bind-mounts source. Do not conclude prod is fine from dev. `pnpm prod:test` is the parity check.
-- **`NODE_ENV=production` changes behaviour:** the refresh cookie gets `Secure`, Firebase credentials become
-  mandatory, `JWT_SECRET`/`CORS_ORIGINS` are validated. `prod-up.sh` mints a throwaway RSA key to satisfy
-  firebase-admin in CI; it is never valid against Google.
+- **`NODE_ENV=production` changes behaviour:** the refresh cookie gets `Secure`, `JWT_SECRET`/`CORS_ORIGINS` are
+  validated, and Firebase credentials become mandatory only if `phone` is enabled. `prod-up.sh` mints a throwaway
+  RSA key to satisfy firebase-admin in CI; it is never valid against Google.
 - **nginx limits:** `limit_req_zone ... rate=60r/m` with `burst=20` on `/v1/` is per client IP; a carrier-grade NAT
   full of riders shares one bucket. Measure before tightening; the app also has its own throttler (policy `rateLimits.*`).
   WebSocket location uses 7-day read/send timeouts.
