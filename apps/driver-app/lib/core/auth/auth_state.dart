@@ -26,5 +26,9 @@ class AuthStateAuthenticated extends AuthState {
 
   /// What to show as "who is signed in": the email when there is one, else
   /// the phone. Null when neither is known.
+  /// Only drivers may use this app; anyone else (e.g. a fresh Google
+  /// sign-in, which registers as 'client') sees the not-a-driver screen.
+  bool get isDriver => role == 'driver';
+
   String? get accountLabel => email ?? phoneE164;
 }

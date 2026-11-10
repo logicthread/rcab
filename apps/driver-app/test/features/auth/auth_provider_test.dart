@@ -565,4 +565,97 @@ void main() {
       expect(state.email, 'me@example.com');
     });
   });
+
+  group('refreshSession', () {
+    Map<String, dynamic> body(String role) => {
+          'access_token': 'a2',
+          'token_type': 'bearer',
+          'expires_in': 900,
+          'refresh_token': 'r2',
+          'user': {
+            'id': 'u1',
+            'role': role,
+            'phone_e164': null,
+            'email': 'me@example.com',
+          },
+        };
+
+    test('picks up a role change and rotates the tokens', () async {
+      final store = _FakeTokenStore();
+      await store.saveTokens(jwt: 'a1', refresh: 'r1');
+      final dio = MockDio();
+      when(() => dio.post<Map<String, dynamic>>(any(), data: any(named: 'data')))
+          .thenAnswer((_) async => _successResponse(body('driver')));
+      final notifier = AuthNotifier(
+        store,
+        MockFirebaseAuth(),
+        dio,
+        initialState: const AuthStateAuthenticated(
+          userId: 'u1',
+          role: 'client',
+          email: 'me@example.com',
+        ),
+      );
+
+      expect(await notifier.refreshSession(), isNull);
+
+      final state = notifier.state as AuthStateAuthenticated;
+      expect(state.role, 'driver');
+      expect(state.isDriver, isTrue);
+      expect(await store.getRefresh(), 'r2');
+      verify(() => dio.post<Map<String, dynamic>>(
+            '/v1/auth/native/refresh',
+            data: {'refresh_token': 'r1'},
+          )).called(1);
+    });
+
+    test('network failure keeps the session and returns a message', () async {
+      final store = _FakeTokenStore();
+      await store.saveTokens(jwt: 'a1', refresh: 'r1');
+      final dio = MockDio();
+      when(() => dio.post<Map<String, dynamic>>(any(), data: any(named: 'data')))
+          .thenThrow(DioException(
+        requestOptions: RequestOptions(path: ''),
+        type: DioExceptionType.connectionError,
+      ));
+      final notifier = AuthNotifier(
+        store,
+        MockFirebaseAuth(),
+        dio,
+        initialState:
+            const AuthStateAuthenticated(userId: 'u1', role: 'client'),
+      );
+
+      expect(await notifier.refreshSession(), isNotNull);
+      expect(notifier.state, isA<AuthStateAuthenticated>());
+    });
+
+    test('a rejected refresh (401) signs out', () async {
+      final store = _FakeTokenStore();
+      await store.saveTokens(jwt: 'a1', refresh: 'r1');
+      final dio = MockDio();
+      final fb = MockFirebaseAuth();
+      when(() => fb.signOut()).thenAnswer((_) async {});
+      when(() => dio.post<Map<String, dynamic>>(any(), data: any(named: 'data')))
+          .thenThrow(_dioError(401));
+      when(() => dio.post<dynamic>(any(),
+          data: any(named: 'data'),
+          options: any(named: 'options'))).thenAnswer((_) async =>
+          Response<dynamic>(
+              statusCode: 204, requestOptions: RequestOptions(path: '')));
+      final google = MockGoogleSignIn();
+      when(() => google.signOut()).thenAnswer((_) async => null);
+      final notifier = AuthNotifier(
+        store,
+        fb,
+        dio,
+        initialState:
+            const AuthStateAuthenticated(userId: 'u1', role: 'client'),
+        googleSignInFactory: (_) => google,
+      );
+
+      expect(await notifier.refreshSession(), isNull);
+      expect(notifier.state, isA<AuthStateUnauthenticated>());
+    });
+  });
 }

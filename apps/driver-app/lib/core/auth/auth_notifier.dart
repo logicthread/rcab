@@ -74,6 +74,61 @@ class AuthNotifier extends StateNotifier<AuthState> {
     return _exchange(NativeAuthContract.googlePath, idToken);
   }
 
+  /// Re-checks the account by rotating the refresh token at
+  /// `POST /v1/auth/native/refresh`. The API reads the role from the database
+  /// on every refresh, so an operator enabling this account as a driver takes
+  /// effect here without signing in again (RCAB-E8.S15).
+  ///
+  /// Returns null on success (state updated with the current role). A
+  /// rejected refresh (4xx) signs out; a network/5xx failure keeps the
+  /// session and returns an error message.
+  Future<String?> refreshSession() async {
+    final refresh = await _tokenStore.getRefresh();
+    if (refresh == null || refresh.isEmpty) {
+      await signOut();
+      return null;
+    }
+    final Response<Map<String, dynamic>> response;
+    try {
+      response = await _dio.post<Map<String, dynamic>>(
+        NativeAuthContract.refreshPath,
+        data: {'refresh_token': refresh},
+      );
+    } on DioException catch (e) {
+      final status = e.response?.statusCode;
+      if (status != null && status < 500) {
+        await signOut();
+        return null;
+      }
+      return 'Could not reach the server. Check your connection and try again.';
+    } catch (_) {
+      return 'Could not re-check your account. Try again.';
+    }
+    final session = NativeSession.tryParse(response.data);
+    if (session == null) return 'Could not re-check your account. Try again.';
+    await _tokenStore.saveTokens(
+      jwt: session.accessToken,
+      refresh: session.refreshToken,
+    );
+    final current = state;
+    final email = session.email ??
+        (current is AuthStateAuthenticated ? current.email : null);
+    final phone = session.phoneE164 ??
+        (current is AuthStateAuthenticated ? current.phoneE164 : null);
+    try {
+      await _tokenStore.saveAccount(email: email, phoneE164: phone);
+    } catch (_) {}
+    if (mounted) {
+      state = AuthStateAuthenticated(
+        userId: session.userId,
+        role: session.role,
+        email: email,
+        phoneE164: phone,
+      );
+    }
+    return null;
+  }
+
   Future<String?> _exchange(String path, String idToken) async {
     try {
       final response = await _dio.post<Map<String, dynamic>>(
