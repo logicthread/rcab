@@ -1,0 +1,12 @@
+# Dev-only extra scrape jobs (mounted by docker-compose.dev.yml at /etc/prometheus/scrape.d/).
+# They feed the Redis and Postgres dashboards in grafana/dashboards/. Prod does not run these exporters yet
+# (the postgres exporter needs the DB credential, which is a secrets-handling decision - see onboarding notes).
+scrape_configs:
+  - job_name: redis
+    static_configs:
+      - targets: ['redis-exporter:9121']
+    scrape_interval: 15s
+  - job_name: postgres
+    static_configs:
+      - targets: ['postgres-exporter:9187']
+    scrape_interval: 15s

@@ -198,12 +198,37 @@ services:
       - prom-data:/prometheus
       - ../../infra/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ../../infra/observability/alert_rules.yml:/etc/prometheus/alert_rules.yml:ro
+      - ../../infra/observability/scrape.dev/exporters.yml:/etc/prometheus/scrape.d/exporters.yml:ro
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
       - '--storage.tsdb.retention.time=15d'
+      - '--web.enable-lifecycle'
     depends_on:
       api:
+        condition: service_healthy
+    profiles: [obs]
+    restart: unless-stopped
+
+  # Exporters behind the Redis / Postgres Grafana dashboards (dev only; dev creds are the compose defaults).
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.62.0
+    networks: [rcab_dev_net]
+    environment:
+      REDIS_ADDR: redis://redis:6379
+    depends_on:
+      redis:
+        condition: service_healthy
+    profiles: [obs]
+    restart: unless-stopped
+
+  postgres-exporter:
+    image: quay.io/prometheuscommunity/postgres-exporter:v0.15.0
+    networks: [rcab_dev_net]
+    environment:
+      DATA_SOURCE_NAME: postgresql://${POSTGRES_USER:-rcab}:${POSTGRES_PASSWORD:-rcab}@postgres:5432/${POSTGRES_DB:-rcab}?sslmode=disable
+    depends_on:
+      postgres:
         condition: service_healthy
     profiles: [obs]
     restart: unless-stopped

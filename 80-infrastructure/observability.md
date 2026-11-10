@@ -36,7 +36,9 @@ audience: both
 - **Dispatch** — latency, outcomes, K-wave usage.
 - **Postgres** — connections, locks, slow queries.
 - **Redis** — memory, ops/sec, blocked clients.
-- **Logs** — Loki panel with request_id search.
+- **Logs** — Loki panel with request_id search. `request_id` is a parsed JSON field, not a Loki label (one stream per request would exceed Loki's stream limit): query `{container=~".*api.*"} | json | request_id = "<id>"` (`infra/observability/promtail.yml`).
+
+The Postgres and Redis dashboards need exporters. The dev compose runs `redis-exporter` and `postgres-exporter` (obs profile) and Prometheus loads their scrape jobs from `infra/observability/scrape.dev/exporters.yml` via `scrape_config_files`; a stack that mounts nothing there scrapes only `api`. Recorded walkthroughs of every tool: [docs/onboarding/videos/ops/INDEX.md](../docs/onboarding/videos/ops/INDEX.md).
 
 ## Alerts (Alertmanager → Slack)
 

@@ -18,7 +18,7 @@
           "refId": "A"
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "bytes" }, "overrides": [] }
+      "fieldConfig": { "defaults": { "unit": "bytes", "color": { "mode": "fixed", "fixedColor": "blue" } }, "overrides": [] }
     },
     {
       "title": "Ops/sec",

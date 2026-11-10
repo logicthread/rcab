@@ -2,7 +2,8 @@
 /**
  * Prepare the DEV stack for the k6 workloads (RCAB-E8.S12).
  *
- *   node infra/load/prepare-dev.mjs [--clients N] [--drivers N] [--contention N] [--ttl-s S] [--clean]
+ *   node infra/load/prepare-dev.mjs [--clients N] [--drivers N] [--contention N] [--ttl-s S]
+ *                                   [--base-lat LAT --base-lng LNG] [--clean]
  *
  * What it does
  *   1. Upserts N load-test clients and M verified, online drivers (+ vehicle) in the dev Postgres and
@@ -22,6 +23,10 @@
  *   RCAB_ENV_FILE     env file holding JWT_SECRET + POSTGRES_* (default: <repo>/.env.dev)
  *   RCAB_COMPOSE_PROJECT   compose project of the running dev stack (default: rcab-dev)
  *   API_BASE          where k6 will point (default http://localhost:3000); must be loopback
+ *   LOAD_BASE_LAT / LOAD_BASE_LNG   pickup cluster centre (default 26.1445 / 91.7362 = Guwahati "Area A");
+ *                     the flags --base-lat / --base-lng win. Point it away from other people's fixtures
+ *                     (e.g. 26.1150 / 91.7000) so simulated drivers never get offers for real demo rides -
+ *                     keep it > dispatch.r2Meters (docs/POLICY.md) from them, and inside the OSRM extract.
  */
 import { createHmac, randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
@@ -102,7 +107,15 @@ const clientId = (n) => `00000000-0000-4000-8000-0000005100${pad(n)}`;
 const vehicleId = (n) => `00000000-0000-4000-8000-0000005200${pad(n)}`;
 
 // Guwahati pickup cluster, inside the NE-India OSRM extract (routing returns NoRoute outside it).
-const BASE = { lat: 26.1445, lng: 91.7362 };
+const coord = (name, env, dflt, lo, hi) => {
+  const v = flag(name, process.env[env] !== undefined && process.env[env] !== '' ? Number(process.env[env]) : dflt);
+  if (!Number.isFinite(v) || v < lo || v > hi) die(`--${name}/${env} must be a number in ${lo}..${hi}`);
+  return v;
+};
+const BASE = {
+  lat: coord('base-lat', 'LOAD_BASE_LAT', 26.1445, 20, 30),
+  lng: coord('base-lng', 'LOAD_BASE_LNG', 91.7362, 85, 98),
+};
 
 if (CLEAN) {
   psql(`

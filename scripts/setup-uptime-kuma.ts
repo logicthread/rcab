@@ -30,10 +30,15 @@ async function waitForKuma(maxAttempts = 30): Promise<void> {
   throw new Error('Uptime Kuma did not become ready');
 }
 
-async function needsSetup(): Promise<boolean> {
-  const res = await fetch(`${KUMA_URL}/api/entry-page`);
-  const data = (await res.json()) as { type: string };
-  return data.type === 'setup';
+/**
+ * Kuma 1.x reports "needs setup" through the socket event `needSetup`; `/api/entry-page` answers
+ * {type:"entryPage"} on a brand-new instance too, so it cannot be used for this.
+ */
+function needsSetup(socket: ReturnType<typeof io>): Promise<boolean> {
+  return new Promise((resolve, reject) => {
+    socket.emit('needSetup', (needed: boolean) => resolve(Boolean(needed)));
+    setTimeout(() => reject(new Error('needSetup timeout')), 10_000);
+  });
 }
 
 function connectSocket(): Promise<ReturnType<typeof io>> {
@@ -66,22 +71,26 @@ async function run(): Promise<void> {
   log('connected to Uptime Kuma socket');
 
   try {
-    if (await needsSetup()) {
+    // Kuma pushes the monitor list as a `monitorList` event after login (the getMonitorList ack carries no data).
+    let monitors: { [id: string]: { name: string } } = {};
+    socket.on('monitorList', (list: { [id: string]: { name: string } }) => {
+      monitors = list;
+    });
+
+    if (await needsSetup(socket)) {
       log('running initial setup...');
       await emit(socket, 'setup', KUMA_USER, KUMA_PASS);
       log('admin account created');
     } else {
-      log('already set up — logging in...');
-      await emit(socket, 'login', { username: KUMA_USER, password: KUMA_PASS, token: '' });
-      log('logged in');
+      log('already set up');
     }
+    // `setup` creates the account but does not authenticate the socket, so always log in.
+    await emit(socket, 'login', { username: KUMA_USER, password: KUMA_PASS, token: '' });
+    log('logged in');
 
-    const monitorList = (await emit(socket, 'getMonitorList')) as {
-      [id: string]: { name: string };
-    };
-    const existing = Object.values(monitorList).find(
-      (m) => m.name === 'API Health',
-    );
+    await emit(socket, 'getMonitorList');
+    await new Promise((r) => setTimeout(r, 800));
+    const existing = Object.values(monitors).find((m) => m.name === 'API Health');
 
     if (existing) {
       log('monitor "API Health" already exists — skipping');

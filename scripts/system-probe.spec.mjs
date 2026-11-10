@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
-import { detectDeps, buildCapacityModel, inventoryHost } from './system-probe.mjs';
+import { createServer } from 'node:net';
+import { detectDeps, buildCapacityModel, inventoryHost, checkPorts } from './system-probe.mjs';
 
 // ---------------------------------------------------------------------------
 // detectDeps
@@ -152,5 +153,25 @@ describe('inventoryHost', () => {
     expect(inv).toHaveProperty('ram_free_gb');
     expect(typeof inv.cpu_logical_cores).toBe('number');
     expect(inv.cpu_logical_cores).toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// checkPorts
+// ---------------------------------------------------------------------------
+describe('checkPorts', () => {
+  it('reports a port held on the wildcard address (how docker publishes) as in use', async () => {
+    // Regression: probing 127.0.0.1 only reported docker-published ports as free on macOS.
+    const srv = createServer();
+    await new Promise(r => srv.listen(0, '0.0.0.0', r));
+    const { port } = srv.address();
+    try {
+      const res = await checkPorts({ held: port });
+      expect(res.held).toEqual({ port, available: false });
+    } finally {
+      await new Promise(r => srv.close(r));
+    }
+    const after = await checkPorts({ held: port });
+    expect(after.held.available).toBe(true);
   });
 });

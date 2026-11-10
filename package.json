@@ -33,6 +33,7 @@
     "test:probe": "vitest run --config vitest.probe.config.mjs",
     "code:graph": "node scripts/codegraph/build.mjs",
     "code:graph:check": "node scripts/codegraph/drift-check.mjs",
+    "demo:record:ops": "node scripts/demo/ops/record.mjs",
     "policy:doc": "tsx scripts/policy-doc.ts",
     "policy:doc:check": "tsx scripts/policy-doc.ts --check"
   },
