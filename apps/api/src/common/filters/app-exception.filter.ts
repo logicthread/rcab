@@ -1,10 +1,9 @@
-import { ExceptionFilter, Catch, ArgumentsHost, HttpException, HttpStatus, Logger } from '@nestjs/common';
+import { ExceptionFilter, Catch, ArgumentsHost, HttpException, HttpStatus } from '@nestjs/common';
 import type { Request, Response } from 'express';
+import { logger } from '../../logger';
 
 @Catch()
 export class AppExceptionFilter implements ExceptionFilter {
-  private readonly log = new Logger('AppExceptionFilter');
-
   catch(exception: unknown, host: ArgumentsHost): void {
     const ctx = host.switchToHttp();
     const res = ctx.getResponse<Response>();
@@ -17,30 +16,44 @@ export class AppExceptionFilter implements ExceptionFilter {
 
     if (status >= 500) {
       const err = exception instanceof Error ? exception : new Error(String(exception));
-      this.log.error(
-        `${req.method} ${req.url} → ${status}: ${err.message}\n${err.stack ?? ''}`,
+      // main.ts boots Nest with `logger: false`, so Nest's Logger is silent: use pino, or a 5xx leaves no trace
+      // in the api logs / Loki (found while recording the M03 Loki scene).
+      logger.error(
+        { err, method: req.method, route: req.route?.path ?? req.path, request_id: req.headers['x-request-id'] },
+        'unhandled exception → 5xx',
       );
     }
 
     const httpEx = exception instanceof HttpException ? exception : null;
     const response = httpEx?.getResponse();
 
+    const body = typeof response === 'object' && response !== null ? (response as Record<string, unknown>) : null;
+
+    // ValidationPipe throws BadRequestException({ statusCode, message: string[], error }) with no `code`.
+    // Only that array shape is treated as validation: it carries field messages and nothing internal.
+    const isValidation =
+      status === HttpStatus.BAD_REQUEST && body !== null && !('code' in body) && Array.isArray(body.message);
+
     const code =
-      typeof response === 'object' && response !== null && 'code' in response
-        ? (response as Record<string, string>).code
-        : status === 404
-          ? 'not_found'
-          : status === 401
-            ? 'unauthorized'
-            : status === 429
-              ? 'rate_limited'
-              : 'internal_error';
+      typeof body?.code === 'string'
+        ? body.code
+        : isValidation
+          ? 'validation_error'
+          : status === 404
+            ? 'not_found'
+            : status === 401
+              ? 'unauthorized'
+              : status === 429
+                ? 'rate_limited'
+                : 'internal_error';
 
     const message =
       typeof response === 'string'
         ? response
-        : typeof response === 'object' && response !== null && 'message' in response
-          ? String((response as Record<string, unknown>).message)
+        : body !== null && 'message' in body
+          ? Array.isArray(body.message)
+            ? body.message.map(String).join('; ')
+            : String(body.message)
           : 'An error occurred';
 
     res.status(status).json({

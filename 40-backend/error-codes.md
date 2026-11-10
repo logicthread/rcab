@@ -22,13 +22,13 @@ Every error response (from `AppExceptionFilter`):
 
 There is no `details` object. `request_id` is the `x-request-id` header, also returned on every response.
 
-**How `code` is chosen** (verified against `app-exception.filter.ts`): the `code` of the thrown exception's response object if it has one; otherwise `not_found` (404), `unauthorized` (401), `rate_limited` (429), else `internal_error`. Consequences to know: a `ValidationPipe` 400 has no code of its own and therefore reads **`internal_error` with HTTP 400** (message = the joined validation messages), and the 503 `OsrmUnavailableException` reads `internal_error` with message `routing_unavailable`. Clients must treat the HTTP status as primary and the code as secondary for those cases. (A fix mapping 400 to `validation_error` is proposed in `docs/onboarding/functionality/admin-and-observability.md`.)
+**How `code` is chosen** (verified against `app-exception.filter.ts`): the `code` of the thrown exception's response object if it has one; otherwise `validation_error` for a `ValidationPipe` 400 (message = the field messages joined with `; `, nothing internal), then `not_found` (404), `unauthorized` (401), `rate_limited` (429), else `internal_error`. The 503 `OsrmUnavailableException` carries its own code `routing_unavailable`.
 
 ## Catalog (codes the code actually emits)
 
 | HTTP | Code | Where / meaning |
 |---|---|---|
-| 400 | `internal_error` (validation) | DTO validation failed (see above) |
+| 400 | `validation_error` | DTO validation failed; message lists the field errors |
 | 400 | `idempotency_key_required` / `idempotency_key_invalid` | `Idempotency-Key` missing on solo/scheduled create / not 1–128 visible ASCII |
 | 400 | `invalid_quote` / `quote_expired` / `quote_mismatch` | Quote token missing or tampered / older than 5 min / route differs from the quoted one |
 | 400 | `scheduled_for_required` / `scheduled_for_out_of_window` | Scheduled create without a time / outside 15 min – 24 h |
@@ -46,11 +46,12 @@ There is no `details` object. `request_id` is the `x-request-id` header, also re
 | 409 | `ride_not_completed` / `already_rated` | Rating a non-completed ride / rating twice |
 | 409 | `idempotency_request_in_progress` | Original request with this key still running |
 | 409 | `passenger_has_active_pool` / `pool_conflict` | Already holds a shared seat (carries `sharedRideId`) / concurrent pool change, retry |
-| 409 | `vehicle_reg_exists`, `google_already_linked` | Duplicate registration number (own vehicles only; a cross-driver duplicate currently returns 500) / Google account linked to another user |
+| 409 | `vehicle_reg_exists`, `google_already_linked` | Duplicate registration number (own or another driver's vehicle) / Google account linked to another user |
 | 422 | `idempotency_key_conflict` | Key reused for a different request |
 | 429 | `rate_limited` | Throttler (auth routes 10/min, global 1000/min where applied) |
 | 500 | `fare_unavailable` | A legacy shared seat without a recorded fare |
-| 500 / 503 | `internal_error` | Catch-all; 503 also for `routing_unavailable` (OSRM down) |
+| 503 | `routing_unavailable` | OSRM down / no route |
+| 500 | `internal_error` | Catch-all for unhandled errors |
 | 501 | `not_implemented` | Unsupported ride `type` |
 | — | `offer_expired`, `trip_taken`, `driver_busy`, ... | Not HTTP: accept-ack and `ride_offer_outcome` reasons, see `docs/onboarding/functionality/dispatch-and-offers.md` |
 
