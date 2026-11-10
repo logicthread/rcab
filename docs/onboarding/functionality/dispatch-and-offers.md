@@ -117,4 +117,4 @@ Unit: `dispatch.service.spec.ts`, `dispatch.processor.spec.ts`, `dispatch-start.
 - A pool that nobody accepts is aborted and its passengers are not re-queued as solo rides (owner decision F-5).
 - The geo index does not hold driver heading/vehicle; the accept transaction is the only authority on vehicle capacity.
 - Accept/decline are Socket.IO only. A driver whose socket is down cannot respond; there is no REST fallback.
-- Nest `Logger` output (the `warn`/`error` lines in these services, including "no fresh candidates this wave" and reconciler repairs) is currently dropped, so the log lines described above do not reach stdout or Loki (see [admin-and-observability](admin-and-observability.md) known gaps).
+- ~~Nest `Logger` output was dropped.~~ Fixed in 74a1b38: the `warn`/`error` lines described above now reach stdout and Loki through pino.

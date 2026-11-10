@@ -21,7 +21,7 @@ audience: both
 
 ## Metrics
 
-- `prom-client` in the API exposes `/metrics` (bound only on the internal network).
+- `prom-client` in the API exposes `/metrics` (bound only on the internal network; the public nginx API vhost answers 404 for it, f581d09).
 - Standard process metrics + custom:
   - `rcab_dispatch_latency_seconds` (histogram)
   - `rcab_dispatch_outcome_total{outcome}` (counter)

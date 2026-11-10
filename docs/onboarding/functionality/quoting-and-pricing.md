@@ -30,7 +30,7 @@ Back to [README](../README.md) · next steps: [normal-booking](normal-booking.md
 
 `sharedEstimate` is present only for `type=shared`. A scheduled quote is priced exactly like a normal one; the pickup time is supplied later at booking.
 
-Errors: 503 when OSRM cannot be reached (response body message `routing_unavailable`; note the envelope's `code` field reads `internal_error` for this exception, so clients key on status 503), 400 on coordinate validation, 403 for non-clients.
+Errors: 503 when OSRM cannot be reached (envelope `code` `routing_unavailable`, fixed in 7c31b31), 400 on coordinate validation, 403 for non-clients.
 
 At booking time the quote token produces: 400 `invalid_quote` (missing, tampered), 400 `quote_expired`, 400 `quote_mismatch` (coordinates differ by more than 1e-6 degrees from the quoted route).
 
@@ -88,4 +88,4 @@ A solo ride's fare is fixed at booking from the quote token (`rides.fare_cents`)
 - The quote token is not bound to the user: it proves the fare and route, not who asked. This is acceptable because booking is also authenticated and idempotent, but do not treat it as an entitlement.
 - `rides.fare_cents` is naming debt (paise, not cents); `me.quotedFareCents` in the pool snapshot actually carries the agreed fare.
 - Scheduled quoting has no web UI (see [scheduled-rides](scheduled-rides.md)).
-- OSRM unavailable errors carry `code: internal_error` in the envelope; clients must key on status 503.
+- ~~OSRM unavailable errors carried `code: internal_error`.~~ Fixed in 7c31b31: they carry `routing_unavailable`.

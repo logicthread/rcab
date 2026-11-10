@@ -88,5 +88,5 @@ Unit: `rides.idempotency.spec.ts`, `outbox.relay.spec.ts`, `outbox.jobs.spec.ts`
 
 - No retention policy for `outbox` (processed rows accumulate), `idempotency_record`, or `dispatch_offer`.
 - Exhausted outbox rows alert only through gauges; there is no Alertmanager rule for them yet (alert rules cover only API 5xx rate and p99 latency; E8.S2).
-- Outbox and reconciler warnings go through the Nest `Logger`, whose output is currently discarded (see [admin-and-observability](admin-and-observability.md)), so "reconcile repaired" and "outbox backlog" lines are not visible in Loki today; rely on the gauges.
+- ~~Outbox and reconciler warnings were invisible because Nest `Logger` output was discarded.~~ Fixed in 74a1b38 (see [admin-and-observability](admin-and-observability.md)): "reconcile repaired" and "outbox backlog" lines now reach Loki; the gauges remain the primary signal.
 - The reconciler cannot recover a booking whose commit never happened (by design) or a Postgres loss (restore from backup).

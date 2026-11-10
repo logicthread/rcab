@@ -247,8 +247,8 @@ Based on `scripts/deploy/README.md` "Host layout" and vault `80-infrastructure/v
 - **nginx limits:** `limit_req_zone ... rate=60r/m` with `burst=20` on `/v1/` is per client IP; a carrier-grade NAT
   full of riders shares one bucket. Measure before tightening; the app also has its own throttler (policy `rateLimits.*`).
   WebSocket location uses 7-day read/send timeouts.
-- **`/metrics` is currently reachable through the public API vhost** (`location /` proxies every path). Prometheus
-  scrapes `api:3000` internally, so blocking it at nginx is safe (task 2).
+- **`/metrics` is not served on the public API vhost**: `location = /metrics { return 404; }` in `api.conf` (fixed in
+  f581d09). Prometheus scrapes `api:3000` internally.
 - **Observability tools have no external access path** in prod (no ports, no vhost). Document an SSH-tunnel recipe or
   add an authenticated vhost with the owner's approval.
 - **Migrations run before cutover**; if one is slow or locks a hot table, deploys block. Keep them small and
@@ -303,8 +303,8 @@ Straight from [`95-delivery/hitl-touchpoints.md`](../../../95-delivery/hitl-touc
    issuance, add a scheduled `certbot renew` plus nginx reload, add HSTS and a CSP, set a certificate-expiry
    alert, and prove it with the self-signed `prod:test` plus one real-domain rehearsal. Also fix the "systemd timer /
    `--nginx` plugin" mismatch noted in `ssl-letsencrypt.md`.
-2. **Close the public `/metrics` and give operators a way in.** Deny `/metrics` (and nothing else under `/`) at the
-   API vhost, then write and test the access path to Grafana/Prometheus/Kuma in production. Coordinate with the
+2. **Give operators a way in.** Write and test the production access path to Grafana/Prometheus/Kuma (SSH tunnel
+   recipe or an authenticated vhost; the public `/metrics` 404 is already done, f581d09). Coordinate with the
    monitoring owner, who also wants Redis and Postgres exporters in the prod compose (RCAB-E8.S1).
 3. **Make the VPS bootstrap repeatable.** Turn section 3.3 into a script or runbook that is rehearsed on a scratch
    VM: users, firewall, sysctls, directory layout and modes, env templates, GHCR read token, first bring-up order.

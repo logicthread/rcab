@@ -102,7 +102,7 @@ Scene to documentation map: W03/D04 [normal-booking](functionality/normal-bookin
 - **The web app cannot book a scheduled ride yet**, and a shared pool is not restored on reload ([scheduled-rides](functionality/scheduled-rides.md), [shared-rides](functionality/shared-rides.md)).
 - **Migrations are not applied on restart.** Run the migrator explicitly ([workflows/database-migrations.md](workflows/database-migrations.md)).
 - **Seeded drivers vanish after 60 s** without `./scripts/seed-dev.sh --keepalive` (auto-offline sweep).
-- **Service logs are currently mostly silent**: Nest `Logger` output is discarded; only request lines reach stdout and Loki ([admin-and-observability](functionality/admin-and-observability.md), known gap 1).
+- **Service logs**: Nest `Logger` output goes through pino to stdout and Loki, with credential-like fields redacted ([admin-and-observability](functionality/admin-and-observability.md), known gap 1, fixed in 74a1b38).
 - **No payments, no cancellation fee, no earnings, no ratings aggregation** in Phase-0.
 - **Postgres is on host port 55432**, not 5432. OSRM, Loki and Alertmanager have no host port.
 - Human-in-the-loop stops (ADRs, secrets, real VPS deploys, demo sign-off, ...) are listed in `95-delivery/hitl-touchpoints.md`; read it before any risky action.

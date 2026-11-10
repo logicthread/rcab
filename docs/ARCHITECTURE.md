@@ -71,7 +71,7 @@ Access JWTs are HS256 with `iss=rcab`, `aud=rcab-api`, `typ=access`. `JWT_SECRET
 | `GET /v1/health/live` | health | public | liveness probe |
 | `GET /v1/health/ready` | health | public | readiness (checks pg/redis/osrm) |
 | `GET /v1/health/version` | health | public | running build identity `{version, builtAt}` (commit SHA in release images, `dev` locally; RCAB-E8.S11) |
-| `GET /metrics` | health | public | Prometheus metrics |
+| `GET /metrics` | health | unauthenticated in the API; 404 on the public nginx vhost (f581d09) | Prometheus metrics |
 | `POST /v1/auth/firebase-exchange` | auth | public | Firebase ID token → rcab JWT pair + refresh cookie |
 | `POST /v1/auth/refresh` | auth | cookie+CSRF | single-use rotation of the refresh cookie; replay revokes the session family |
 | `POST /v1/auth/native/*` | auth | public / JWT (logout) | native exchange/refresh/logout, JSON tokens |

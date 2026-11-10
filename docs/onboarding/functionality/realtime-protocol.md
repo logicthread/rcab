@@ -89,7 +89,7 @@ Unit: `realtime.gateway.spec.ts`, `realtime.bus.spec.ts`, `realtime.protocol.spe
 
 ## Known gaps
 
-- The gateway is declared with `cors: { origin: '*' }`. With websocket-only transport and mandatory token auth this is not exploitable by itself, but it is wider than the REST allowlist (`CORS_ORIGINS`); align it before the pilot.
+- ~~The gateway was declared with `cors: { origin: '*' }`.~~ Fixed in 3a80460: socket CORS uses the same `resolveBrowserOrigins()` allowlist as REST (`CORS_ORIGINS`); native clients that send no `Origin` are still allowed.
 - A suspended user's open sockets stay connected until they disconnect (token is only checked at connect).
 - `ride_state_changed` emitted by the driver's forward transition carries no `version`; the web derives it from the status rank. Adding it would match the other emitters.
 - Legacy constant `RIDE_SUBSCRIBE_REQUEST_EVENT` and its listener (`RidesRealtimeListener.onRideSubscribe`) are dead code since R09.

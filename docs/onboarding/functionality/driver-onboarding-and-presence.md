@@ -44,7 +44,7 @@ Scene IDs: [D01 to D03, D08](../videos/driver/INDEX.md).
 
 | Endpoint / event | Auth | Notes |
 |---|---|---|
-| `POST /v1/vehicles` | driver | Body `type, reg_no, make, model, color, seats (>=1)`. 409 `vehicle_reg_exists` if this driver already has that reg no |
+| `POST /v1/vehicles` | driver | Body `type, reg_no, make, model, color, seats (>=1)`. 409 `vehicle_reg_exists` if the reg no already exists (this driver's or another driver's; same on update, fixed in 18a6069) |
 | `GET /v1/vehicles` | driver | Own **active** vehicles |
 | `PATCH /v1/vehicles/:id` | driver (owner) | Partial update of the same fields. 404 `vehicle_not_found`, 403 `forbidden` |
 | `PATCH /v1/drivers/me/vehicle` | driver | Body `{ vehicle_id }` (UUID). Sets `driver.current_vehicle_id` |
@@ -78,9 +78,9 @@ API: `vehicles.service.spec.ts`, `drivers.service.spec.ts`; integration `vehicle
 ## Known gaps
 
 - **No driver provisioning path** and no enforced verification (see above).
-- **Duplicate registration number across drivers returns 500.** `vehicle.reg_no` is unique table-wide, but `VehiclesService.create` only pre-checks the same driver, so a second driver registering an existing plate hits the unique constraint and the global filter answers `internal_error` (500) instead of a 409. Proposed fix: catch the unique violation via `pgConstraintViolation()` and throw `vehicle_reg_exists`.
+- ~~Duplicate registration number across drivers returned 500.~~ Fixed in 18a6069: create and update both answer 409 `vehicle_reg_exists`.
 - **Vehicles cannot be deactivated.** `vehicle.active` is read but no endpoint sets it to false; there is no delete.
-- `driver:location` writes the geo index and `last_seen` for any authenticated driver socket, even if the driver has already gone offline. A late packet after `POST /v1/drivers/offline` can re-add the driver to `active_drivers` until the next sweep (60 s). The app is expected to stop streaming on offline, so this needs a stray or replayed packet; a server-side guard (ignore location unless `driver:state` exists) is a candidate fix. Not reproduced here, read from `handleDriverLocation`.
+- ~~`driver:location` re-added an offline driver.~~ Fixed in 3a80460: the packet is ignored when the driver is offline or its `driver:state` hash is gone, so a late packet cannot re-add them to `active_drivers`.
 - `driver.availability = 'on_ride'` is allowed by the CHECK but nothing writes it; "busy" is `driver_active_assignment`.
-- The sweep lists presence with Redis `KEYS driver:state:*`, which is O(keys) and blocking; fine at pilot scale, replace with `SCAN` or an indexed set before the fleet grows.
+- ~~The sweep listed presence with Redis `KEYS`.~~ Fixed in d130abb: it uses `SCAN`.
 - A driver forced offline mid-trip loses their Redis presence hash, including the `current_ride_id` projection. The trip itself is safe (it lives in Postgres, the assignment guard stays), but the live-location fan-out to the passenger depends on that projection, so the passenger's map stops updating until the next location packet recreates the hash and the 30 s assignment reconcile re-projects it.

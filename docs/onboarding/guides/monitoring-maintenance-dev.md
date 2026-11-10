@@ -245,9 +245,8 @@ for you.
   publish **no host ports** and nginx has no vhost for them (only `api` and `app`). Reach them from the VPS over an
   SSH tunnel to the container network or via `docker compose exec`; this access path is not yet documented or
   automated. Treat that as a gap, not an oversight to work around by opening a port.
-- **`/metrics` is public in prod.** nginx's `location /` on the API vhost proxies every path, including `/metrics`,
-  so the exposition is reachable on the public API hostname although the vault says it is internal-only. Prometheus
-  scrapes `api:3000` directly, so blocking it at nginx is safe. This is a DevOps fix to schedule (E8.S6).
+- **`/metrics` is no longer public in prod** (fixed in f581d09): `api.conf` has `location = /metrics { return 404; }`.
+  Prometheus scrapes `api:3000` directly on the internal network.
 - **Alerting is not live.** `alert_rules.yml` defines only `ApiHighErrorRate` (5xx > 1% for 5 min, critical) and
   `ApiHighP99Latency` (p99 > 1.5 s for 10 min, warning; deliberately looser than the 800 ms load-test budget).
   `alertmanager.yml` has a single receiver named `default` with no Slack, email or webhook, so nothing is
@@ -306,8 +305,8 @@ From [`95-delivery/hitl-touchpoints.md`](../../../95-delivery/hitl-touchpoints.m
    and add dashboard panels for the metrics that are not charted yet (`rcab_busy_drivers`, `rcab_ws_connections`,
    pool closures).
 3. **Document and automate production access** to Grafana, Prometheus and Kuma (SSH tunnel recipe or a
-   password-protected, TLS-terminated nginx vhost with the owner's approval), and close the public `/metrics`
-   exposure.
+   password-protected, TLS-terminated nginx vhost with the owner's approval). The public `/metrics` exposure is
+   already closed (f581d09).
 4. **Backup health signal (runbook section 8, last bullet).** The backup healthcheck and alerting are not wired.
    Export the age of `.last_success` and `.last_offsite_failure` (a tiny textfile exporter or a Kuma push
    monitor) and alert on staleness; then run the first monthly restore drill on a real backup and record it.
@@ -318,9 +317,8 @@ From [`95-delivery/hitl-touchpoints.md`](../../../95-delivery/hitl-touchpoints.m
 
 Known documentation drift to correct (kept out of this pack because another change is editing that note):
 `80-infrastructure/observability.md` says the request log line includes `user_id` (it does not), that
-`rcab_shared_match_rate` is computed every 5 minutes (it is sampled every 15 s over a 15 min window), that
-`/metrics` is bound only on the internal network (it is proxied publicly), and its metric list omits
-`rcab_pool_*`, `rcab_outbox_*` and `rcab_busy_drivers`.
+`rcab_shared_match_rate` is computed every 5 minutes (it is sampled every 15 s over a 15 min window), and its
+metric list omits `rcab_pool_*`, `rcab_outbox_*` and `rcab_busy_drivers`.
 
 ---
 
