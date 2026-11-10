@@ -96,4 +96,86 @@ describe('native auth contract parity: API fixture vs driver-app fixture', () =>
     }
     expect(codes.account_disabled).toBe(apiContract.errors.account_disabled_on_exchange.status);
   });
+
+  describe('google section (RCAB-E8.S15)', () => {
+    it('google: unauthenticated JSON POST like the exchange; no bearer, no CSRF header', () => {
+      const a = api.google;
+      expect(headerNames(a.request.headers)).toEqual(['content-type']);
+      expect(a.request.body.id_token).toEqual(expect.any(String));
+      expect(Object.keys(mobileContract.google.request)).toEqual(Object.keys(a.request.body));
+    });
+
+    it('google: the 200 body registers a phone-less account carrying the verified email', () => {
+      const apiUser = api.google.response.body.user;
+      const mobileUser = mobileContract.google.response_200.user;
+      expect(apiUser.phone_e164).toBeNull();
+      expect(mobileUser.phone_e164).toBeNull();
+      expect(apiUser.email).toEqual(expect.any(String));
+      expect(mobileUser.email).toEqual(expect.any(String));
+      expect(mobileContract.google.response_200.expires_in).toBe(api.google.response.body.expires_in);
+    });
+
+    it('google: shares the exchange response keys on both sides (phone/email nullability aside)', () => {
+      const keys = (o: Json): string[] => Object.keys(o).sort();
+      expect(keys(mobileContract.google.response_200)).toEqual(keys(mobileContract.firebase_exchange.response_200));
+      expect(keys(api.google.response.body.user)).toEqual(keys(api.firebase_exchange.response.body.user));
+    });
+  });
+
+  describe('config section (RCAB-E8.S15)', () => {
+    it('config: public GET, methods are strings and include google, clientId is a string or null', () => {
+      const a = api.config;
+      const m = mobileContract.config;
+      expect(a.auth).toMatch(/^none/);
+      expect(a.method).toBe('GET');
+      for (const body of [a.response.body, m.response_200]) {
+        expect(Array.isArray(body.methods)).toBe(true);
+        expect(body.methods.length).toBeGreaterThan(0);
+        expect(body.methods.every((x: unknown) => typeof x === 'string')).toBe(true);
+        expect(body.methods).toContain('google');
+        expect(['string', 'object']).toContain(typeof body.google.clientId); // string | null
+      }
+      expect(a.response.status).toBe(200);
+    });
+
+    it('config: google-only fixtures do not advertise phone', () => {
+      expect(api.config.response.body.methods).toEqual(mobileContract.config.response_200.methods);
+    });
+  });
+
+  describe('error codes', () => {
+    const errors = apiContract.errors as Json;
+    const mobileCodes = mobileContract.error_codes as Record<string, number>;
+    // The two account_disabled variants differ by endpoint; exchange is what a sign-in sees.
+    const apiStatusFor = (code: string): number =>
+      code === 'account_disabled' ? errors.account_disabled_on_exchange.status : errors[code].status;
+
+    it('every code the app has copy for exists in the API fixture with the same status', () => {
+      for (const [code, status] of Object.entries(mobileCodes)) {
+        expect(apiStatusFor(code), code).toBe(status);
+      }
+    });
+
+    it('every sign-in error code in the API fixture is known to the app', () => {
+      const signInCodes = [
+        'google_token_invalid',
+        'google_email_unverified',
+        'google_not_configured',
+        'auth_method_disabled',
+      ];
+      for (const code of signInCodes) {
+        expect(errors[code], code).toBeDefined();
+        expect(mobileCodes[code], code).toBe(errors[code].status);
+      }
+    });
+
+    it('error envelopes carry code, message and request_id, and the code matches the key', () => {
+      for (const [key, e] of Object.entries(errors) as [string, Json][]) {
+        if (!e.body) continue; // invalid_request documents only a status
+        expect(Object.keys(e.body.error).sort(), key).toEqual(['code', 'message', 'request_id']);
+        const expectedCode = key.startsWith('account_disabled_') ? 'account_disabled' : key;
+        expect(e.body.error.code, key).toBe(expectedCode);
+      }
+    });
+  });
 });
