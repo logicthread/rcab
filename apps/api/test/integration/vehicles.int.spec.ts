@@ -128,6 +128,19 @@ describe.skipIf(skip)('vehicles round-trip', () => {
     expect(second.body.error?.code ?? second.body.code).toBe('vehicle_reg_exists');
   });
 
+  it('POST /v1/vehicles with a reg_no owned by ANOTHER driver → 409 vehicle_reg_exists (not 500)', async () => {
+    const a = await createDriverAndJwt();
+    const b = await createDriverAndJwt();
+    const regNo = uniqueRegNo();
+    const server = app.getHttpServer();
+    const body = { type: 'auto', reg_no: regNo, make: 'Honda', model: 'Activa', color: 'Red', seats: 2 };
+
+    expect((await supertest(server).post('/v1/vehicles').set('Authorization', `Bearer ${a.jwt}`).send(body)).status).toBe(201);
+    const res = await supertest(server).post('/v1/vehicles').set('Authorization', `Bearer ${b.jwt}`).send(body);
+    expect(res.status).toBe(409);
+    expect(res.body.error.code).toBe('vehicle_reg_exists');
+  });
+
   it('PATCH /v1/drivers/me/vehicle with another driver\'s vehicle → 403', async () => {
     const driverA = await createDriverAndJwt();
     const driverB = await createDriverAndJwt();
