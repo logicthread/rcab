@@ -8,10 +8,14 @@
 # /version.json) and as the org.opencontainers.image.revision label. Deliberately
 # no `latest` tag: the only way to refer to a release is its SHA.
 #
-# The web image inlines the public browser config at build time, so these must be
-# set in the environment (the Dockerfile fails the build if any is empty):
-#   NEXT_PUBLIC_API_URL NEXT_PUBLIC_FIREBASE_API_KEY NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN
-#   NEXT_PUBLIC_FIREBASE_PROJECT_ID NEXT_PUBLIC_FIREBASE_APP_ID  [NEXT_PUBLIC_NOMINATIM_URL]
+# The web image inlines the public browser config at build time. Set in the
+# environment (the Dockerfile fails the build if a required one is empty):
+#   NEXT_PUBLIC_API_URL                                  always required
+#   WEB_AUTH_PHONE_ENABLED=true                          only once phone OTP is re-enabled; then
+#     NEXT_PUBLIC_FIREBASE_API_KEY / _AUTH_DOMAIN / _PROJECT_ID / _APP_ID become required
+#   [NEXT_PUBLIC_GOOGLE_CLIENT_ID] [NEXT_PUBLIC_NOMINATIM_URL]   optional
+# Sign-in is Google-only until launch (RCAB-E8.S15): the browser reads the Google client
+# id from the API (GET /v1/auth/config), so NEXT_PUBLIC_GOOGLE_CLIENT_ID is only a fallback.
 # This script never pushes; the Jenkinsfile does that in its own credentialed stage.
 set -euo pipefail
 
@@ -43,6 +47,8 @@ docker build \
   --build-arg "RCAB_VERSION=${VERSION}" \
   --build-arg "RCAB_BUILT_AT=${BUILT_AT}" \
   --build-arg "NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-}" \
+  --build-arg "WEB_AUTH_PHONE_ENABLED=${WEB_AUTH_PHONE_ENABLED:-false}" \
+  --build-arg "NEXT_PUBLIC_GOOGLE_CLIENT_ID=${NEXT_PUBLIC_GOOGLE_CLIENT_ID:-}" \
   --build-arg "NEXT_PUBLIC_FIREBASE_API_KEY=${NEXT_PUBLIC_FIREBASE_API_KEY:-}" \
   --build-arg "NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=${NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN:-}" \
   --build-arg "NEXT_PUBLIC_FIREBASE_PROJECT_ID=${NEXT_PUBLIC_FIREBASE_PROJECT_ID:-}" \

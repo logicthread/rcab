@@ -105,6 +105,21 @@ beforeEach(() => {
   });
 });
 
+describe('BookPage identity line (RCAB-E8.S15)', () => {
+  it('shows the email for a Google account that has no phone', () => {
+    useAuthStore.setState({
+      user: { id: 'u1', role: 'client', phone_e164: null, email: 'rider@gmail.com' },
+    });
+    render(<BookClient />);
+    expect(screen.getByText(/signed in as/i)).toHaveTextContent('rider@gmail.com');
+  });
+
+  it('falls back to the phone number when there is no email', () => {
+    render(<BookClient />);
+    expect(screen.getByText(/signed in as/i)).toHaveTextContent('+911234567890');
+  });
+});
+
 describe('BookPage quote flow (F01)', () => {
   it('delayed success: quote arrives after a slow request and enables booking', async () => {
     const d = deferred<QuoteResponse>();

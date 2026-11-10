@@ -11,7 +11,9 @@ pipeline {
         // (the names docker-compose.prod.yml pulls). Release flow: scripts/deploy/.
         RCAB_REGISTRY = 'ghcr.io/logicthread'
         // Jenkins job/folder environment (not in this file):
-        //   NEXT_PUBLIC_*   public browser config inlined into the web image
+        //   NEXT_PUBLIC_*   public browser config inlined into the web image: NEXT_PUBLIC_API_URL
+        //                   (required); NEXT_PUBLIC_GOOGLE_CLIENT_ID (optional fallback, the API serves it);
+        //                   NEXT_PUBLIC_FIREBASE_* only with WEB_AUTH_PHONE_ENABLED=true (off until the OTP provider ships)
         //   PROD_API_URL    public https URL of the API on the VPS (default https://$PROD_HOST)
         //   PROD_WEB_URL    optional public web URL; also asserted via /version.json
         // Credentials: ghcr-pat, vps-ssh-key, vps-known-hosts, vps-host (= PROD_HOST).

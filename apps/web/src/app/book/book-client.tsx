@@ -433,7 +433,7 @@ function BookPage() {
         </button>
       </header>
       <p style={{ fontSize: 13, color: '#525252', marginTop: 0 }}>
-        Signed in as <strong>{user?.phone_e164}</strong>
+        Signed in as <strong>{user?.email ?? user?.phone_e164}</strong>
       </p>
 
       {tracking ? (
