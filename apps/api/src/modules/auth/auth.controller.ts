@@ -1,4 +1,4 @@
-import { Controller, Post, Body, UseGuards, HttpCode, Req, Res, UnauthorizedException, Inject } from '@nestjs/common';
+import { Controller, Get, Post, Body, UseGuards, HttpCode, Req, Res, UnauthorizedException, Inject } from '@nestjs/common';
 import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import { getPolicy } from '../../config/policy/policy';
 import type { Request, Response } from 'express';
@@ -6,7 +6,8 @@ import { FirebaseExchangeDto } from './dto/firebase-exchange.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { NativeRefreshTokenDto } from './dto/native-refresh-token.dto';
 import { GoogleIdTokenDto } from './dto/google-id-token.dto';
-import { AuthService, type TokenResponse } from './auth.service';
+import { GoogleSignInDto } from './dto/google-sign-in.dto';
+import { AuthService, type AuthConfigResponse, type TokenResponse } from './auth.service';
 import { AuthGuard, type JwtPayload } from '../../common/guards/auth.guard';
 import { CsrfGuard } from '../../common/guards/csrf.guard';
 import { REFRESH_COOKIE_NAME, refreshCookieOptions, clearCookieOptions } from '../../common/utils/cookie';
@@ -36,6 +37,35 @@ const AUTH_THROTTLE = {
 export class AuthController {
   constructor(@Inject(AuthService) private auth: AuthService) {}
 
+  /**
+   * Public: the enabled sign-in methods (policy auth.enabledMethods) and the
+   * Google OAuth client id to request ID tokens for. Clients render only the
+   * listed methods. Global throttle only.
+   */
+  @Get('config')
+  config(): AuthConfigResponse {
+    return this.auth.getAuthConfig();
+  }
+
+  /**
+   * Web Google sign-in / registration (RCAB-E8.S15). Same body as
+   * firebase-exchange and the refresh token in the HttpOnly cookie. Origin
+   * checked like /refresh: it sets the session cookie.
+   */
+  @Post('google')
+  @HttpCode(200)
+  @UseGuards(CsrfGuard)
+  @Throttle(AUTH_THROTTLE)
+  async google(
+    @Body() dto: GoogleSignInDto,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<PublicTokenResponse> {
+    const tokens = await this.auth.signInWithGoogle(dto.id_token);
+    setRefreshCookie(res, tokens.refresh_token);
+    return tokenBody(tokens);
+  }
+
+  /** 403 auth_method_disabled while `phone` is not in auth.enabledMethods. */
   @Post('firebase-exchange')
   @Throttle(AUTH_THROTTLE)
   async firebaseExchange(
@@ -84,6 +114,15 @@ export class AuthController {
   // refresh cookie, and web routes never return the refresh token in JSON.
   // Contract fixture: test/fixtures/native-auth-contract.json.
 
+  /** Native Google sign-in / registration: the native token body, no cookie, no CSRF. */
+  @Post('native/google')
+  @HttpCode(200)
+  @Throttle(AUTH_THROTTLE)
+  async nativeGoogle(@Body() dto: GoogleSignInDto): Promise<TokenResponse> {
+    return this.auth.signInWithGoogle(dto.id_token);
+  }
+
+  /** 403 auth_method_disabled while `phone` is not in auth.enabledMethods. */
   @Post('native/firebase-exchange')
   @HttpCode(200)
   @Throttle(AUTH_THROTTLE)
@@ -110,6 +149,10 @@ export class AuthController {
     await this.auth.revokePresented(dto.refresh_token);
   }
 
+  /**
+   * Links a Google identity to the signed-in account (kept: the only way an
+   * existing account gains a google_sub, since sign-in never links by email).
+   */
   @Post('google/link')
   @UseGuards(AuthGuard)
   @HttpCode(200)
@@ -120,7 +163,13 @@ export class AuthController {
     await this.auth.linkGoogle(req.user.sub, dto.google_id_token);
   }
 
+  /**
+   * Legacy alias of POST /v1/auth/google (body `{ google_id_token }`), folded
+   * into it: login-or-register, same gates, CSRF and throttle. Prefer /google.
+   */
   @Post('google/login')
+  @UseGuards(CsrfGuard)
+  @Throttle(AUTH_THROTTLE)
   async googleLogin(
     @Body() dto: GoogleIdTokenDto,
     @Res({ passthrough: true }) res: Response,

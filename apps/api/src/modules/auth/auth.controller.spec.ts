@@ -10,7 +10,13 @@
  */
 import { describe, it, expect, vi, beforeAll, beforeEach, afterAll } from 'vitest';
 import { Test } from '@nestjs/testing';
-import { ValidationPipe, UnauthorizedException, type INestApplication } from '@nestjs/common';
+import {
+  ValidationPipe,
+  UnauthorizedException,
+  ForbiddenException,
+  ServiceUnavailableException,
+  type INestApplication,
+} from '@nestjs/common';
 import { APP_FILTER, APP_PIPE } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
 import { ThrottlerModule } from '@nestjs/throttler';
@@ -28,8 +34,9 @@ import { signAccessToken } from '../../common/guards/access-token';
 const contract = JSON.parse(
   readFileSync(join(__dirname, '../../../test/fixtures/native-auth-contract.json'), 'utf8'),
 ) as {
+  errors: Record<string, { status: number; body?: { error: { code: string } } }>;
   endpoints: Record<
-    'firebase_exchange' | 'refresh' | 'logout',
+    'config' | 'google' | 'firebase_exchange' | 'refresh' | 'logout',
     { method: string; path: string; request: { body: Record<string, unknown> }; response: { status: number; body: unknown } }
   >;
 };
@@ -43,8 +50,12 @@ function tokens(refresh = 'rt-new'): TokenResponse {
     token_type: 'bearer',
     expires_in: 900,
     refresh_token: refresh,
-    user: { id: 'user-1', role: 'driver', phone_e164: '+919876543210' },
+    user: { id: 'user-1', role: 'driver', phone_e164: '+919876543210', email: null },
   };
+}
+
+function googleTokens(refresh = 'rt-g'): TokenResponse {
+  return { ...tokens(refresh), user: { id: 'user-g', role: 'driver', phone_e164: null, email: 'driver@example.com' } };
 }
 
 /** Recursively maps a JSON value to its shape (keys + primitive types). */
@@ -75,6 +86,8 @@ describe('AuthController', () => {
     revokePresented: vi.fn(),
     linkGoogle: vi.fn(),
     loginWithGoogle: vi.fn(),
+    signInWithGoogle: vi.fn(),
+    getAuthConfig: vi.fn(),
   };
   const bearer = `Bearer ${signAccessToken(jwt, { sub: 'user-1', role: 'driver', auth_method: 'phone' })}`;
 
@@ -270,6 +283,135 @@ describe('AuthController', () => {
       expect(res.status).toBe(204);
       expect(auth.revoke).toHaveBeenCalledWith('rt-old', 'user-1');
       expect(setCookies(res)).toMatch(/refresh_token=;.*Max-Age=0|Expires=Thu, 01 Jan 1970/);
+    });
+  });
+
+  describe('sign-in methods (RCAB-E8.S15)', () => {
+    const { config, google } = contract.endpoints;
+
+    it('GET /v1/auth/config: public 200 with the enabled methods — matches fixture', async () => {
+      auth.getAuthConfig.mockReturnValue(config.response.body);
+
+      const res = await supertest(app.getHttpServer()).get(config.path);
+
+      expect(res.status).toBe(config.response.status);
+      expect(res.body).toEqual(config.response.body);
+    });
+
+    it('native/google: 200, full token body incl. refresh_token, no cookie — matches fixture', async () => {
+      auth.signInWithGoogle.mockResolvedValue(googleTokens('rt-ng'));
+
+      const res = await supertest(app.getHttpServer()).post(google.path).send(google.request.body);
+
+      expect(res.status).toBe(google.response.status);
+      expect(shapeOf(res.body)).toEqual(shapeOf(google.response.body));
+      expect(res.body.user.phone_e164).toBeNull();
+      expect(res.body.refresh_token).toBe('rt-ng');
+      expect(setCookies(res)).toBe('');
+      expect(auth.signInWithGoogle).toHaveBeenCalledWith(google.request.body.id_token);
+    });
+
+    it('native/google: is not subject to the browser CSRF check', async () => {
+      auth.signInWithGoogle.mockResolvedValue(googleTokens());
+      const res = await supertest(app.getHttpServer())
+        .post(google.path)
+        .set('Origin', 'https://evil.example')
+        .send({ id_token: 'g' });
+      expect(res.status).toBe(200);
+    });
+
+    it.each([
+      { why: 'missing', body: {} },
+      { why: 'legacy field name', body: { google_id_token: 'g' } },
+      { why: 'not a string', body: { id_token: 42 } },
+      { why: 'oversized', body: { id_token: 'x'.repeat(8193) } },
+    ])('native/google: id_token $why → 400', async ({ body }) => {
+      const res = await supertest(app.getHttpServer()).post(google.path).send(body);
+      expect(res.status).toBe(400);
+      expect(auth.signInWithGoogle).not.toHaveBeenCalled();
+    });
+
+    it('web google: 200, sets the HttpOnly refresh cookie, omits refresh_token from JSON', async () => {
+      auth.signInWithGoogle.mockResolvedValue(googleTokens('rt-wg'));
+
+      const res = await supertest(app.getHttpServer()).post('/v1/auth/google').send({ id_token: 'g' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.refresh_token).toBeUndefined();
+      expect(res.body.user).toEqual({ id: 'user-g', role: 'driver', phone_e164: null, email: 'driver@example.com' });
+      const cookie = setCookies(res);
+      expect(cookie).toMatch(/refresh_token=rt-wg/);
+      expect(cookie).toMatch(/HttpOnly/i);
+      expect(cookie).toMatch(/Path=\/v1\/auth/);
+    });
+
+    it('web google: enforces the CSRF Origin check like /refresh', async () => {
+      const res = await supertest(app.getHttpServer())
+        .post('/v1/auth/google')
+        .set('Origin', 'https://evil.example')
+        .send({ id_token: 'g' });
+      expect(res.status).toBe(403);
+      expect(res.body.error.code).toBe('csrf_rejected');
+      expect(auth.signInWithGoogle).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['google_token_invalid', new UnauthorizedException({ code: 'google_token_invalid', message: 'x' })],
+      ['google_email_unverified', new ForbiddenException({ code: 'google_email_unverified', message: 'x' })],
+      ['google_not_configured', new ServiceUnavailableException({ code: 'google_not_configured', message: 'x' })],
+      ['auth_method_disabled', new ForbiddenException({ code: 'auth_method_disabled', message: 'x' })],
+    ])('surfaces %s with the fixture status on web and native', async (code, err) => {
+      auth.signInWithGoogle.mockRejectedValue(err);
+      for (const path of ['/v1/auth/google', google.path]) {
+        const res = await supertest(app.getHttpServer()).post(path).send({ id_token: 'g' });
+        expect(res.status).toBe(contract.errors[code].status);
+        expect(res.body.error.code).toBe(code);
+        expect(setCookies(res)).toBe('');
+      }
+    });
+
+    it('firebase-exchange (web + native) surfaces 403 auth_method_disabled without a cookie', async () => {
+      auth.exchangeFirebaseToken.mockRejectedValue(
+        new ForbiddenException({ code: 'auth_method_disabled', message: 'Sign-in with phone is disabled on this server' }),
+      );
+      for (const path of ['/v1/auth/firebase-exchange', contract.endpoints.firebase_exchange.path]) {
+        const res = await supertest(app.getHttpServer()).post(path).send({ id_token: 'fb' });
+        expect(res.status).toBe(contract.errors.auth_method_disabled.status);
+        expect(res.body.error.code).toBe('auth_method_disabled');
+        expect(setCookies(res)).toBe('');
+      }
+    });
+
+    it('legacy google/login: folded into the login-or-register flow, cookie session', async () => {
+      auth.loginWithGoogle.mockResolvedValue(googleTokens('rt-legacy'));
+
+      const res = await supertest(app.getHttpServer()).post('/v1/auth/google/login').send({ google_id_token: 'g' });
+
+      expect(res.status).toBe(201);
+      expect(auth.loginWithGoogle).toHaveBeenCalledWith('g');
+      expect(res.body.refresh_token).toBeUndefined();
+      expect(setCookies(res)).toMatch(/refresh_token=rt-legacy/);
+    });
+
+    it('legacy google/login: CSRF-checked too', async () => {
+      const res = await supertest(app.getHttpServer())
+        .post('/v1/auth/google/login')
+        .set('Origin', 'https://evil.example')
+        .send({ google_id_token: 'g' });
+      expect(res.status).toBe(403);
+      expect(auth.loginWithGoogle).not.toHaveBeenCalled();
+    });
+
+    it('google/link: still requires a Bearer and links for the signed-in user', async () => {
+      const anon = await supertest(app.getHttpServer()).post('/v1/auth/google/link').send({ google_id_token: 'g' });
+      expect(anon.status).toBe(401);
+
+      const res = await supertest(app.getHttpServer())
+        .post('/v1/auth/google/link')
+        .set('Authorization', bearer)
+        .send({ google_id_token: 'g' });
+      expect(res.status).toBe(200);
+      expect(auth.linkGoogle).toHaveBeenCalledWith('user-1', 'g');
     });
   });
 });

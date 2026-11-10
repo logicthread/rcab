@@ -1,4 +1,6 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
+import { POLICY, getPolicy } from '../../config/policy/policy';
+import type { Policy } from '../../config/policy/policy.schema';
 import * as admin from 'firebase-admin';
 
 const REQUIRED_SERVICE_ACCOUNT_FIELDS = ['project_id', 'client_email', 'private_key'] as const;
@@ -32,26 +34,38 @@ export function parseServiceAccountJson(json: string): admin.ServiceAccount {
   };
 }
 
+/**
+ * Firebase Admin — verifies phone-OTP ID tokens for the `phone` sign-in
+ * method. While `phone` is enabled (policy `auth.enabledMethods`) missing
+ * credentials fail startup (F11). While it is disabled (Google-only until
+ * launch, RCAB-E8.S15) nothing is initialised at boot, so a deployment needs no
+ * Firebase credentials; the exchange is refused upstream with
+ * `auth_method_disabled` before this provider is reached.
+ */
 @Injectable()
 export class FirebaseAdminService {
-  private readonly auth: admin.auth.Auth;
+  private auth: admin.auth.Auth | null = null;
 
-  constructor() {
-    const projectId = process.env.FIREBASE_PROJECT_ID;
-    const serviceAccountJson = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
-
-    if (admin.apps.length === 0) {
-      if (!projectId || !serviceAccountJson) {
-        throw new Error('FIREBASE_PROJECT_ID and FIREBASE_SERVICE_ACCOUNT_JSON must be set');
-      }
-      const serviceAccount = parseServiceAccountJson(serviceAccountJson);
-      admin.initializeApp({ credential: admin.credential.cert(serviceAccount), projectId });
-    }
-
-    this.auth = admin.app().auth();
+  constructor(@Optional() @Inject(POLICY) policy: Policy = getPolicy()) {
+    if (policy.auth.enabledMethods.includes('phone')) this.auth = initFirebaseAuth();
   }
 
   verifyIdToken(idToken: string): Promise<admin.auth.DecodedIdToken> {
+    this.auth ??= initFirebaseAuth();
     return this.auth.verifyIdToken(idToken);
   }
+}
+
+function initFirebaseAuth(): admin.auth.Auth {
+  const projectId = process.env.FIREBASE_PROJECT_ID;
+  const serviceAccountJson = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
+
+  if (admin.apps.length === 0) {
+    if (!projectId || !serviceAccountJson) {
+      throw new Error('FIREBASE_PROJECT_ID and FIREBASE_SERVICE_ACCOUNT_JSON must be set');
+    }
+    const serviceAccount = parseServiceAccountJson(serviceAccountJson);
+    admin.initializeApp({ credential: admin.credential.cert(serviceAccount), projectId });
+  }
+  return admin.app().auth();
 }

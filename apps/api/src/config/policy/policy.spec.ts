@@ -240,6 +240,32 @@ describe('buildPolicy — per-knob validation', () => {
   });
 });
 
+describe('auth.enabledMethods (RCAB-E8.S15)', () => {
+  it('defaults to Google only (owner 2026-11-10)', () => {
+    expect(defaultPolicy().auth.enabledMethods).toEqual(['google']);
+  });
+
+  it('reads AUTH_ENABLED_METHODS as a comma list over google, phone', () => {
+    expect(buildPolicy({ AUTH_ENABLED_METHODS: 'google, phone' }).auth.enabledMethods).toEqual(['google', 'phone']);
+    expect(buildPolicy({ AUTH_ENABLED_METHODS: 'phone' }).auth.enabledMethods).toEqual(['phone']);
+  });
+
+  it.each([
+    ['sms', /entries must be among google, phone/],
+    ['google,google', /must not repeat/],
+  ])('rejects AUTH_ENABLED_METHODS=%j', (value, reason) => {
+    const err = issuesOf(() => buildPolicy({ AUTH_ENABLED_METHODS: value }));
+    expect(err.issues).toEqual([{ key: 'auth.enabledMethods', env: ['AUTH_ENABLED_METHODS'], reason: expect.stringMatching(reason) }]);
+  });
+
+  it.each(['', ' , '])('requires at least one method (AUTH_ENABLED_METHODS=%j)', (value) => {
+    const err = issuesOf(() => buildPolicy({ AUTH_ENABLED_METHODS: value }));
+    expect(err.issues).toHaveLength(1);
+    expect(err.issues[0]).toMatchObject({ key: 'rule', env: ['AUTH_ENABLED_METHODS'] });
+    expect(err.issues[0].reason).toMatch(/at least one sign-in method/);
+  });
+});
+
 describe('buildPolicy — cross-field rules', () => {
   it.each([
     [{ SCHEDULED_DISPATCH_WINDOW_MS: '1000', SCHEDULED_DISPATCH_WAVE_ONE_MS: '1001' }, /waveOneMs ≤ windowMs/],

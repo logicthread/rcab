@@ -126,7 +126,8 @@ describe.skipIf(skip)('Stage C schema invariants (0014–0016)', () => {
 
   it('records 0014–0017 as applied', async () => {
     const { rows } = await c.query<{ name: string }>(
-      `SELECT name FROM _rcab_migrations WHERE name >= '0014' ORDER BY name`,
+      // Bounded to Stage C: later migrations (0018+) are asserted by their own specs.
+      `SELECT name FROM _rcab_migrations WHERE name >= '0014' AND name < '0018' ORDER BY name`,
     );
     expect(rows.map((r) => r.name)).toEqual([
       '0014_dispatch_offer_assignment.sql',

@@ -7,6 +7,7 @@ import {
   resolveBrowserOrigins,
   resolveJwtSecret,
 } from './auth-config';
+import { resolveGoogleClientIds } from '../../infra/google/google-verifier.service';
 
 const STRONG_SECRET = 'b3f1c0a9e8d7c6b5a4f3e2d1c0b9a8f7e6d5c4b3a2f1e0d9c8b7a6f5e4d3c2b1';
 
@@ -126,9 +127,13 @@ describe('infra/docker/env.example/api.env.example matches what the API reads (F
   ) as Record<string, string>;
 
   it('documents every auth variable the API consumes', () => {
-    for (const key of ['JWT_SECRET', 'FIREBASE_PROJECT_ID', 'FIREBASE_SERVICE_ACCOUNT_JSON', 'GOOGLE_CLIENT_ID', 'CORS_ORIGINS']) {
+    for (const key of ['JWT_SECRET', 'FIREBASE_PROJECT_ID', 'FIREBASE_SERVICE_ACCOUNT_JSON', 'GOOGLE_CLIENT_IDS', 'CORS_ORIGINS']) {
       expect(entries, key).toHaveProperty(key);
     }
+  });
+
+  it('ships a Google client id placeholder that configures no audience (RCAB-E8.S15)', () => {
+    expect(resolveGoogleClientIds({ GOOGLE_CLIENT_IDS: entries.GOOGLE_CLIENT_IDS })).toEqual([]);
   });
 
   it('does not document variables the API never reads', () => {

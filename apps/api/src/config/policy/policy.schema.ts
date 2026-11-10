@@ -91,6 +91,14 @@ const LIVE_RIDE_STATES = [
   'in_progress',
 ] as const;
 
+/**
+ * Sign-in methods. `phone` is the phone-OTP exchange (Firebase today; the
+ * pre-launch OTP provider may differ), `google` is a Google ID token verified
+ * directly with Google.
+ */
+export const AUTH_METHODS = ['google', 'phone'] as const;
+export type AuthMethodName = (typeof AUTH_METHODS)[number];
+
 const MIN = 60_000;
 const HOUR = 60 * MIN;
 const DAY = 24 * HOUR;
@@ -352,6 +360,16 @@ export const POLICY_SCHEMA = {
     }),
   },
 
+  auth: {
+    enabledMethods: listOf({
+      env: 'AUTH_ENABLED_METHODS', default: ['google'], allowed: AUTH_METHODS, unit: 'methods',
+      description:
+        'Sign-in / registration methods the API accepts and GET /v1/auth/config advertises (comma list, at least one). ' +
+        'A disabled method answers 403 auth_method_disabled.',
+      decision: 'owner 2026-11-10: Google-only until launch; OTP provider TBD (RCAB-E8.S15, ADR-0003 amendment).',
+    }),
+  },
+
   idempotency: {
     pendingReclaimMs: ms({
       env: 'IDEMPOTENCY_PENDING_RECLAIM_MS', default: 60_000, min: 1000, unit: 'ms',
@@ -496,6 +514,7 @@ export const POLICY_CATEGORIES: Record<PolicyCategory, { title: string; blurb: s
   drivers: { title: 'Driver presence', blurb: 'Auto-offline sweep.' },
   realtime: { title: 'Realtime', blurb: 'Location fan-out and geo-index cadence.' },
   sessions: { title: 'Sessions & auth', blurb: 'Token lifetimes and refresh rotation grace.' },
+  auth: { title: 'Sign-in methods', blurb: 'Which sign-in / registration methods are enabled.' },
   idempotency: { title: 'Idempotency', blurb: 'Create-request claim reclaim.' },
   rateLimits: { title: 'Rate limits', blurb: 'HTTP throttling.' },
   outbox: { title: 'Outbox relay & reconciler', blurb: 'Durable work publication, retries and repair loop.' },
@@ -589,5 +608,10 @@ export const POLICY_RULES: readonly PolicyRule[] = [
     keys: ['sessions.accessTokenTtlS', 'sessions.refreshTokenTtlMs'],
     description: 'an access token never outlives its refresh session (accessTokenTtlS × 1000 < refreshTokenTtlMs)',
     check: (p) => p.sessions.accessTokenTtlS * 1000 < p.sessions.refreshTokenTtlMs,
+  },
+  {
+    keys: ['auth.enabledMethods'],
+    description: 'at least one sign-in method must stay enabled (auth.enabledMethods non-empty)',
+    check: (p) => p.auth.enabledMethods.length >= 1,
   },
 ];

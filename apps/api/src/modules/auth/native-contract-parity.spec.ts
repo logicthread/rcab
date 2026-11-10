@@ -41,6 +41,7 @@ describe('native auth contract parity: API fixture vs driver-app fixture', () =>
 
   it.each([
     ['firebase_exchange', 'response_200'],
+    ['google', 'response_200'],
     ['refresh', 'response_200'],
   ])('%s: path, method, request body and 200 body match the API', (name, mobileResponseKey) => {
     const a = api[name];
@@ -77,5 +78,22 @@ describe('native auth contract parity: API fixture vs driver-app fixture', () =>
     expect(headerNames(a.request.headers)).not.toContain('authorization');
     expect(headerNames(m.headers)).toEqual([]);
     expect(apiContract.errors.unauthorized).toBeUndefined();
+  });
+
+  it('config: path, method and 200 body match the API (RCAB-E8.S15)', () => {
+    const a = api.config;
+    const m = mobileContract.config;
+
+    expect(m.path).toBe(a.path);
+    expect(m.method).toBe(a.method);
+    expect(shapeOf(m.response_200)).toEqual(shapeOf(a.response.body));
+  });
+
+  it('google + phone-gate error codes carry the same status on both sides', () => {
+    const codes = mobileContract.error_codes as Record<string, number>;
+    for (const code of ['google_token_invalid', 'google_email_unverified', 'google_not_configured', 'auth_method_disabled']) {
+      expect(codes[code], code).toBe(apiContract.errors[code].status);
+    }
+    expect(codes.account_disabled).toBe(apiContract.errors.account_disabled_on_exchange.status);
   });
 });

@@ -12,7 +12,8 @@ import { PG_POOL } from '../../infra/db/drizzle.module';
 import { FirebaseAdminService } from '../../infra/firebase/firebase-admin.service';
 import { GoogleVerifierService } from '../../infra/google/google-verifier.service';
 import { ACCESS_TOKEN_TTL_SECONDS, signAccessToken } from '../../common/guards/access-token';
-import { getPolicy } from '../../config/policy/policy';
+import { POLICY, getPolicy } from '../../config/policy/policy';
+import type { AuthMethodName, Policy } from '../../config/policy/policy.schema';
 
 const PHONE_E164_RE = /^\+[1-9]\d{7,14}$/;
 const REFRESH_TOKEN_BYTES = 32;
@@ -30,20 +31,31 @@ export const REFRESH_REUSE_GRACE_SECONDS: number = getPolicy().sessions.refreshR
 /** app_user.status values that may not obtain or renew a session (F12). */
 export const BLOCKED_USER_STATUSES: readonly string[] = ['suspended', 'deleted'];
 
-export type AuthMethod = 'phone' | 'google';
+export type AuthMethod = AuthMethodName;
+
+/** Postgres unique_violation. */
+const PG_UNIQUE_VIOLATION = '23505';
 
 export interface TokenResponse {
   access_token: string;
   token_type: 'bearer';
   expires_in: number;
   refresh_token: string;
-  user: { id: string; role: string; phone_e164: string };
+  /** phone_e164 is null for Google-registered accounts; email null for phone-only ones. */
+  user: { id: string; role: string; phone_e164: string | null; email: string | null };
+}
+
+/** GET /v1/auth/config — what a client may render (RCAB-E8.S15). */
+export interface AuthConfigResponse {
+  methods: AuthMethod[];
+  google: { clientId: string | null };
 }
 
 interface SessionUser {
   id: string;
   role: string;
-  phone_e164: string;
+  phone_e164: string | null;
+  email: string | null;
   status: string;
 }
 
@@ -52,9 +64,12 @@ interface ConsumedRefreshRow {
   family_id: string;
   auth_method: AuthMethod;
   role: string;
-  phone_e164: string;
+  phone_e164: string | null;
+  email: string | null;
   status: string;
 }
+
+const SESSION_USER_COLUMNS = 'id, role, phone_e164, email, status';
 
 type Queryable = Pick<Pool | PoolClient, 'query'>;
 
@@ -82,9 +97,35 @@ export class AuthService {
     @Inject(GoogleVerifierService) private google: GoogleVerifierService,
     @Inject(JwtService) private jwt: JwtService,
     @Inject(PG_POOL) private pool: Pool,
+    @Inject(POLICY) private policy: Policy,
   ) {}
 
+  /** The enabled sign-in methods and the Google client id clients request tokens for. */
+  getAuthConfig(): AuthConfigResponse {
+    return {
+      methods: [...this.policy.auth.enabledMethods],
+      google: { clientId: this.google.primaryClientId },
+    };
+  }
+
+  /** 403 auth_method_disabled unless `method` is in policy auth.enabledMethods. */
+  private assertMethodEnabled(method: AuthMethod): void {
+    if (!this.policy.auth.enabledMethods.includes(method)) {
+      throw new ForbiddenException({
+        code: 'auth_method_disabled',
+        message: `Sign-in with ${method} is disabled on this server`,
+      });
+    }
+  }
+
+  /**
+   * Phone-OTP exchange (Firebase today). Gated by auth.enabledMethods: while
+   * `phone` is off (Google-only until launch) it is refused before the token
+   * is even verified. The pre-launch OTP provider replaces the verification
+   * below; the user lookup/registration and session issue stay.
+   */
   async exchangeFirebaseToken(idToken: string): Promise<TokenResponse> {
+    this.assertMethodEnabled('phone');
     let decoded: Awaited<ReturnType<FirebaseAdminService['verifyIdToken']>>;
     try {
       decoded = await this.firebase.verifyIdToken(idToken);
@@ -137,7 +178,7 @@ export class AuthService {
             AND art.revoked_at IS NULL
             AND art.expires_at > now()
             AND au.id = art.user_id
-        RETURNING art.user_id, art.family_id, art.auth_method, au.role, au.phone_e164, au.status`,
+        RETURNING art.user_id, art.family_id, art.auth_method, au.role, au.phone_e164, au.email, au.status`,
         [tokenHash],
       );
 
@@ -167,7 +208,7 @@ export class AuthService {
         } else {
           outcome = await this.issueSession(
             client,
-            { id: row.user_id, role: row.role, phone_e164: row.phone_e164, status: row.status },
+            { id: row.user_id, role: row.role, phone_e164: row.phone_e164, email: row.email, status: row.status },
             row.auth_method,
             row.family_id,
           );
@@ -224,21 +265,81 @@ export class AuthService {
     );
   }
 
-  async loginWithGoogle(googleIdToken: string): Promise<TokenResponse> {
-    const { sub } = await this.google.verifyIdToken(googleIdToken);
+  /**
+   * Google sign-in / registration (RCAB-E8.S15), web and native. Logs in the
+   * account whose google_sub matches; otherwise registers a new `client`
+   * account holding that sub and the verified email. Never links by email: an
+   * existing account with the same email but no (or another) google_sub is
+   * not touched — linking stays an explicit, authenticated /google/link.
+   * Concurrent first sign-ins for one sub converge on one account.
+   */
+  async signInWithGoogle(idToken: string): Promise<TokenResponse> {
+    this.assertMethodEnabled('google');
+    const identity = await this.google.verifyIdToken(idToken);
+    const found = await this.findOrRegisterGoogleUser(identity.sub, identity.email);
+    this.assertAccountActive(found.status);
+    const user = await this.refreshGoogleEmail(found, identity.email);
+    return this.issueSession(this.pool, user, 'google', randomUUID());
+  }
 
-    const result = await this.pool.query<SessionUser>(
-      'SELECT id, role, phone_e164, status FROM app_user WHERE google_sub = $1',
+  /** Legacy POST /v1/auth/google/login — folded into {@link signInWithGoogle}. */
+  async loginWithGoogle(googleIdToken: string): Promise<TokenResponse> {
+    return this.signInWithGoogle(googleIdToken);
+  }
+
+  private async findUserByGoogleSub(db: Queryable, sub: string): Promise<SessionUser | null> {
+    const result = await db.query<SessionUser>(
+      `SELECT ${SESSION_USER_COLUMNS} FROM app_user WHERE google_sub = $1`,
       [sub],
     );
+    return result.rows[0] ?? null;
+  }
 
-    if (result.rows.length === 0) {
-      throw new UnauthorizedException({ code: 'not_found', message: 'No account linked to this Google identity' });
+  private async findOrRegisterGoogleUser(sub: string, email: string): Promise<SessionUser> {
+    const existing = await this.findUserByGoogleSub(this.pool, sub);
+    if (existing) return existing;
+
+    const client = await this.pool.connect();
+    let created: SessionUser | null = null;
+    try {
+      await client.query('BEGIN');
+      const userId = randomUUID();
+      // ON CONFLICT: a concurrent first sign-in for the same sub that commits
+      // first makes this a no-op (it waits for that commit), so the loser
+      // falls through to the login lookup below instead of failing.
+      const inserted = await client.query<SessionUser>(
+        `INSERT INTO app_user (id, google_sub, email, role, status)
+         VALUES ($1, $2, $3, 'client', 'active')
+         ON CONFLICT (google_sub) DO NOTHING
+         RETURNING ${SESSION_USER_COLUMNS}`,
+        [userId, sub, email],
+      );
+      if (inserted.rows.length > 0) {
+        await client.query('INSERT INTO client (user_id) VALUES ($1)', [userId]);
+        created = inserted.rows[0];
+      }
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK');
+      if ((err as { code?: string }).code !== PG_UNIQUE_VIOLATION) throw err;
+      // Lost a race on a unique key: retry as a login below.
+    } finally {
+      client.release();
     }
+    if (created) return created;
 
-    const user = result.rows[0];
-    this.assertAccountActive(user.status);
-    return this.issueSession(this.pool, user, 'google', randomUUID());
+    const winner = await this.findUserByGoogleSub(this.pool, sub);
+    if (!winner) {
+      throw new ConflictException({ code: 'conflict', message: 'Google sign-in raced; retry' });
+    }
+    return winner;
+  }
+
+  /** Keeps the stored email in step with the address Google just verified. */
+  private async refreshGoogleEmail(user: SessionUser, email: string): Promise<SessionUser> {
+    if (user.email === email) return user;
+    await this.pool.query('UPDATE app_user SET email = $2, updated_at = now() WHERE id = $1', [user.id, email]);
+    return { ...user, email };
   }
 
   private assertAccountActive(status: string): void {
@@ -267,13 +368,13 @@ export class AuthService {
       token_type: 'bearer',
       expires_in: ACCESS_TOKEN_TTL_SECONDS,
       refresh_token: refreshToken,
-      user: { id: user.id, role: user.role, phone_e164: user.phone_e164 },
+      user: { id: user.id, role: user.role, phone_e164: user.phone_e164, email: user.email },
     };
   }
 
   private async findOrCreateUser(firebaseUid: string, phone: string): Promise<SessionUser> {
     const existing = await this.pool.query<SessionUser>(
-      'SELECT id, role, phone_e164, status FROM app_user WHERE firebase_uid = $1',
+      `SELECT ${SESSION_USER_COLUMNS} FROM app_user WHERE firebase_uid = $1`,
       [firebaseUid],
     );
     if (existing.rows.length > 0) return existing.rows[0];
@@ -288,7 +389,7 @@ export class AuthService {
       );
       await client.query('INSERT INTO client (user_id) VALUES ($1)', [userId]);
       await client.query('COMMIT');
-      return { id: userId, role: 'client', phone_e164: phone, status: 'active' };
+      return { id: userId, role: 'client', phone_e164: phone, email: null, status: 'active' };
     } catch (err) {
       await client.query('ROLLBACK');
       throw err;
