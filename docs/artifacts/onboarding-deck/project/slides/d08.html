@@ -1,0 +1,13 @@
+<section id="d08" data-transition="fade" style="background:#15202B;color:#ECEAE4;font-family:Inter, Arial, sans-serif;padding:96px 128px 160px;display:flex;gap:96px">
+<div style="flex:1;display:flex;flex-direction:column;gap:28px">
+<p style="font-size:24px;letter-spacing:3px;text-transform:uppercase;color:#F0A93B;font-weight:600">Driver app · D08 · 43 s</p>
+<h2 style="font-family:'Space Grotesk', Arial, sans-serif;font-size:60px;font-weight:600;line-height:1.1">Earnings, profile, sign-out</h2>
+<h3 style="font-family:'Space Grotesk', Arial, sans-serif;font-size:32px;font-weight:600;color:#F0A93B">States</h3>
+<p style="font-size:28px;line-height:1.5">online → offline → refresh token revoked → secure storage cleared → sign-in</p>
+<h3 style="font-family:'Space Grotesk', Arial, sans-serif;font-size:32px;font-weight:600;color:#F0A93B">Status</h3>
+<p style="font-size:28px;line-height:1.5;color:#A9B4BF">Earnings is still a placeholder until epic E7. Sign-out was added while recording.</p>
+</div>
+<img src="/_blob/0e944095793fa20700aa3d876b15c119" data-video="/_blob/05fa16f415c3cd8e4f63730d137e0ea9" alt="D08: earnings placeholder, profile with vehicles, then sign-out verified on the server" style="width:432px;height:768px;object-fit:contain;border-radius:24px;background:#0E151C">
+<p style="position:absolute;left:128px;bottom:64px;font-size:24px;color:#8995A2">functionality/auth-and-sessions.md · guides/stakeholder-driver-app.md</p>
+<aside>Before this pass the driver app had no sign-out at all. Mobile logout is possession-based: it needs only the refresh token, so it works even after the access token expired. Open gap: no endpoint returns the driver’s current vehicle, so “Selected” is only remembered for the session.</aside>
+</section>

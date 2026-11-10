@@ -1,0 +1,15 @@
+<section id="m02" data-transition="fade" style="background:#15202B;color:#ECEAE4;font-family:Inter, Arial, sans-serif;padding:96px 128px 160px;display:flex;flex-direction:column;gap:36px">
+<p style="font-size:24px;letter-spacing:3px;text-transform:uppercase;color:#F0A93B;font-weight:600">Monitoring · M02 · 53 s</p>
+<h2 style="font-family:'Space Grotesk', Arial, sans-serif;font-size:60px;font-weight:600;line-height:1.1">Prometheus targets and business metrics</h2>
+<div style="display:flex;gap:56px">
+<img src="/_blob/36490d0f0f385de27a5cede81eaa5c35" data-video="/_blob/3041fcb752278972a07776800a291142" alt="M02: Prometheus scrape targets and queries for dispatch outcomes and route-template HTTP metrics" style="width:1088px;height:612px;object-fit:contain;border-radius:16px;background:#0E151C">
+<div style="flex:1;display:flex;flex-direction:column;gap:20px">
+<h3 style="font-family:'Space Grotesk', Arial, sans-serif;font-size:32px;font-weight:600;color:#F0A93B">Queries shown</h3>
+<p style="font-size:26px;line-height:1.5">rcab_dispatch_outcome_total by outcome; HTTP latency by route template</p>
+<h3 style="font-family:'Space Grotesk', Arial, sans-serif;font-size:32px;font-weight:600;color:#F0A93B">Why templates</h3>
+<p style="font-size:26px;line-height:1.5;color:#A9B4BF">/v1/rides/:id is one series, not one per ride.</p>
+</div>
+</div>
+<p style="position:absolute;left:128px;bottom:64px;font-size:24px;color:#8995A2">functionality/admin-and-observability.md · apps/api/src/metrics.ts</p>
+<aside>The metrics catalogue lives in apps/api/src/metrics.ts. Labels are kept low-cardinality: no ride, user or pool ids. In production /metrics is blocked at nginx and is scraped only inside the compose network.</aside>
+</section>

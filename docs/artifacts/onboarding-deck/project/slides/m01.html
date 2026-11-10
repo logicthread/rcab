@@ -1,0 +1,15 @@
+<section id="m01" data-transition="fade" style="background:#15202B;color:#ECEAE4;font-family:Inter, Arial, sans-serif;padding:96px 128px 160px;display:flex;flex-direction:column;gap:36px">
+<p style="font-size:24px;letter-spacing:3px;text-transform:uppercase;color:#F0A93B;font-weight:600">Monitoring · M01 · 58 s</p>
+<h2 style="font-family:'Space Grotesk', Arial, sans-serif;font-size:60px;font-weight:600;line-height:1.1">Grafana dashboards under live traffic</h2>
+<div style="display:flex;gap:56px">
+<img src="/_blob/c54b86fa6be8d8d7a3cbf6238bb50a8e" data-video="/_blob/07c6fc2f49bb36e4ebd2707d732149a9" alt="M01: Grafana API and dispatch dashboards while a k6 workload runs" style="width:1088px;height:612px;object-fit:contain;border-radius:16px;background:#0E151C">
+<div style="flex:1;display:flex;flex-direction:column;gap:20px">
+<h3 style="font-family:'Space Grotesk', Arial, sans-serif;font-size:32px;font-weight:600;color:#F0A93B">Panels</h3>
+<p style="font-size:26px;line-height:1.5">Ride transitions, dispatch outcomes, active drivers, pool joins, outbox backlog and age, HTTP p95 by route</p>
+<h3 style="font-family:'Space Grotesk', Arial, sans-serif;font-size:32px;font-weight:600;color:#F0A93B">Normal</h3>
+<p style="font-size:26px;line-height:1.5;color:#A9B4BF">Outbox backlog near zero; oldest due row under a few seconds.</p>
+</div>
+</div>
+<p style="position:absolute;left:128px;bottom:64px;font-size:24px;color:#8995A2">guides/stakeholder-monitoring.md · POLICY: perfBudget.*</p>
+<aside>Traffic comes from the k6 workload in infra/load (quote, idempotent create, offer contention, driver location), run in its own area of Guwahati so it never reaches the demo drivers. Fixed while recording: the Redis and Postgres dashboards were empty because no exporters existed, and the 5xx panel showed nothing when there were no errors.</aside>
+</section>

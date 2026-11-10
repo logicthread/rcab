@@ -1,0 +1,15 @@
+<section id="w07" data-transition="fade" style="background:#15202B;color:#ECEAE4;font-family:Inter, Arial, sans-serif;padding:96px 128px 160px;display:flex;flex-direction:column;gap:36px">
+<p style="font-size:24px;letter-spacing:3px;text-transform:uppercase;color:#F0A93B;font-weight:600">Passenger app · W07 · 110 s</p>
+<h2 style="font-family:'Space Grotesk', Arial, sans-serif;font-size:60px;font-weight:600;line-height:1.1">Shared ride: two passengers, one cab</h2>
+<div style="display:flex;gap:56px">
+<img src="/_blob/5f7724e157183f850f1440bed8041b75" data-video="/_blob/c393e6702936d8fc64632020dce4b1d9" alt="W07: two riders side by side join one pool, which closes on timeout and is driven to completion" style="width:1088px;height:612px;object-fit:contain;border-radius:16px;background:#0E151C">
+<div style="flex:1;display:flex;flex-direction:column;gap:20px">
+<h3 style="font-family:'Space Grotesk', Arial, sans-serif;font-size:32px;font-weight:600;color:#F0A93B">States</h3>
+<p style="font-size:26px;line-height:1.5">open → open (seat 2) → closed_timeout → claimed → closed_started → completed</p>
+<h3 style="font-family:'Space Grotesk', Arial, sans-serif;font-size:32px;font-weight:600;color:#F0A93B">Watch for</h3>
+<p style="font-size:26px;line-height:1.5;color:#A9B4BF">Two riders don’t fill a 3-seat pool, so it closes after its 60 s window.</p>
+</div>
+</div>
+<p style="position:absolute;left:128px;bottom:64px;font-size:24px;color:#8995A2">functionality/shared-rides.md · state-machines.md §3 · left = rider 1, right = rider 2</p>
+<aside>Each fare is fixed when the rider joins: priced outside the pool lock and committed only if the pool did not change meanwhile (stand-in policy fixed_at_join; story E8.S9 decides the real one). Fixed while recording: riders used to see the raw pool enum and an internal id. Still open: shared rides have no live map or cancel in the web app.</aside>
+</section>

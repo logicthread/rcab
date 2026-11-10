@@ -1,0 +1,15 @@
+<section id="w04" data-transition="fade" style="background:#15202B;color:#ECEAE4;font-family:Inter, Arial, sans-serif;padding:96px 128px 160px;display:flex;flex-direction:column;gap:36px">
+<p style="font-size:24px;letter-spacing:3px;text-transform:uppercase;color:#F0A93B;font-weight:600">Passenger app · W04 · 24 s</p>
+<h2 style="font-family:'Space Grotesk', Arial, sans-serif;font-size:60px;font-weight:600;line-height:1.1">Passenger cancels before pickup</h2>
+<div style="display:flex;gap:56px">
+<img src="/_blob/47fff0e5d007fb85a6db5b9639570f03" data-video="/_blob/92a6d078ab5688906042b9cd76e65e40" alt="W04: rider cancels from the tracking panel while the driver is en route" style="width:1088px;height:612px;object-fit:contain;border-radius:16px;background:#0E151C">
+<div style="flex:1;display:flex;flex-direction:column;gap:20px">
+<h3 style="font-family:'Space Grotesk', Arial, sans-serif;font-size:32px;font-weight:600;color:#F0A93B">States</h3>
+<p style="font-size:26px;line-height:1.5">requested → accepted → en_route → cancelled (by client)</p>
+<h3 style="font-family:'Space Grotesk', Arial, sans-serif;font-size:32px;font-weight:600;color:#F0A93B">Rule</h3>
+<p style="font-size:26px;line-height:1.5;color:#A9B4BF">Cancel is offered until the trip starts, and it is free in Phase 0.</p>
+</div>
+</div>
+<p style="position:absolute;left:128px;bottom:64px;font-size:24px;color:#8995A2">functionality/ride-lifecycle-cancel-no-show.md · POLICY: rides.clientCancellableFrom</p>
+<aside>Cancellation releases the driver’s assignment guard in the same transaction and revokes any live offers. The driver app gets the cancel live through ride_state_changed, as D07 shows from the driver’s side.</aside>
+</section>

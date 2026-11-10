@@ -1,0 +1,13 @@
+<section id="d05" data-transition="fade" style="background:#15202B;color:#ECEAE4;font-family:Inter, Arial, sans-serif;padding:96px 128px 160px;display:flex;gap:96px">
+<div style="flex:1;display:flex;flex-direction:column;gap:28px">
+<p style="font-size:24px;letter-spacing:3px;text-transform:uppercase;color:#F0A93B;font-weight:600">Driver app · D05 · 46 s</p>
+<h2 style="font-family:'Space Grotesk', Arial, sans-serif;font-size:60px;font-weight:600;line-height:1.1">Offers that end without a trip</h2>
+<h3 style="font-family:'Space Grotesk', Arial, sans-serif;font-size:32px;font-weight:600;color:#F0A93B">States</h3>
+<p style="font-size:28px;line-height:1.5">offered → declined<br>offered → expired (12 s)<br>offered → lost (a nearer driver accepted first)</p>
+<h3 style="font-family:'Space Grotesk', Arial, sans-serif;font-size:32px;font-weight:600;color:#F0A93B">Watch for</h3>
+<p style="font-size:28px;line-height:1.5;color:#A9B4BF">Each ending is explained on the home screen instead of silently vanishing.</p>
+</div>
+<img src="/_blob/c817b0b3828d73ce7868ebb690f95607" data-video="/_blob/8ebcddf66e14663ae8d2538fc16e8658" alt="D05: the driver declines one offer, lets one expire and loses one to a rival" style="width:432px;height:768px;object-fit:contain;border-radius:24px;background:#0E151C">
+<p style="position:absolute;left:128px;bottom:64px;font-size:24px;color:#8995A2">functionality/dispatch-and-offers.md · POLICY: dispatch.offerTtlMs</p>
+<aside>Offers are rows in dispatch_offer with a generation. A driver holds at most one live offer, and the accept transaction re-checks ownership, expiry on the database clock, generation and trip state. Losing a race returns trip_taken and the app shows “taken by another driver”.</aside>
+</section>

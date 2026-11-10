@@ -1,0 +1,15 @@
+<section id="w06" data-transition="fade" style="background:#15202B;color:#ECEAE4;font-family:Inter, Arial, sans-serif;padding:96px 128px 160px;display:flex;flex-direction:column;gap:36px">
+<p style="font-size:24px;letter-spacing:3px;text-transform:uppercase;color:#F0A93B;font-weight:600">Passenger app · W06 · 72 s</p>
+<h2 style="font-family:'Space Grotesk', Arial, sans-serif;font-size:60px;font-weight:600;line-height:1.1">No driver available</h2>
+<div style="display:flex;gap:56px">
+<img src="/_blob/71d1bb40f0e8ca67c2b86178c99de3d3" data-video="/_blob/2b51aa3e3d4be2f453cb9e237698b140" alt="W06: dispatch widens its search, then ends the ride as no driver after 60 seconds" style="width:1088px;height:612px;object-fit:contain;border-radius:16px;background:#0E151C">
+<div style="flex:1;display:flex;flex-direction:column;gap:20px">
+<h3 style="font-family:'Space Grotesk', Arial, sans-serif;font-size:32px;font-weight:600;color:#F0A93B">States</h3>
+<p style="font-size:26px;line-height:1.5">requested → wave 1 (2 km) → wave 2 at 30 s (4 km) → no_driver at 60 s</p>
+<h3 style="font-family:'Space Grotesk', Arial, sans-serif;font-size:32px;font-weight:600;color:#F0A93B">Watch for</h3>
+<p style="font-size:26px;line-height:1.5;color:#A9B4BF">Recorded at the shipped default windows; the wait is real time.</p>
+</div>
+</div>
+<p style="position:absolute;left:128px;bottom:64px;font-size:24px;color:#8995A2">functionality/dispatch-and-offers.md · POLICY: dispatch.*</p>
+<aside>Wave timers and the hard-fail are BullMQ jobs keyed by trip and generation. They are restored from Postgres by the reconciler if Redis is lost. Both radii and both windows are policy knobs, with cross-field rules: R1 must not exceed R2, and wave one must end before the hard-fail.</aside>
+</section>

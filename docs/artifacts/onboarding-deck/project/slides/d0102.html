@@ -1,0 +1,13 @@
+<section id="d0102" data-transition="fade" style="background:#15202B;color:#ECEAE4;font-family:Inter, Arial, sans-serif;padding:96px 128px 160px;display:flex;gap:64px">
+<div style="flex:1;display:flex;flex-direction:column;gap:28px">
+<p style="font-size:24px;letter-spacing:3px;text-transform:uppercase;color:#F0A93B;font-weight:600">Driver app · D01, D02</p>
+<h2 style="font-family:'Space Grotesk', Arial, sans-serif;font-size:60px;font-weight:600;line-height:1.1">Sign-in and vehicle onboarding</h2>
+<p style="font-size:28px;line-height:1.5;color:#A9B4BF"><b style="color:#ECEAE4">D01</b> · 34 s · phone OTP screen with E.164 validation, UI only.</p>
+<p style="font-size:28px;line-height:1.5;color:#A9B4BF"><b style="color:#ECEAE4">D02</b> · 62 s · going online is refused until a vehicle is registered and selected.</p>
+<p style="font-size:26px;line-height:1.5">offline → refused (no_vehicle_selected) → vehicle registered → selected → online</p>
+</div>
+<img src="/_blob/e2757dfeae7a91e3f46531b31584e969" data-video="/_blob/891c566bace69aae4a3dcfbe2c622234" alt="D01: driver sign-in screen with phone validation" style="width:378px;height:672px;object-fit:contain;border-radius:24px;background:#0E151C">
+<img src="/_blob/c39d9cdec77ccee0eaf9aa8c22febf63" data-video="/_blob/ea1ed539a3cf0ff8eef5a1117d02a272" alt="D02: driver registers a vehicle, selects it and goes online" style="width:378px;height:672px;object-fit:contain;border-radius:24px;background:#0E151C">
+<p style="position:absolute;left:128px;bottom:64px;font-size:24px;color:#8995A2">functionality/driver-onboarding-and-presence.md · videos/driver/INDEX.md#d01</p>
+<aside>The driver app uses the native session contract at /v1/auth/native/*, with the refresh token kept in secure storage. Fixed while recording: field errors now clear as soon as the input is corrected, and the app reads the real API error envelope, so no_vehicle_selected and vehicle_reg_exists show proper messages.</aside>
+</section>
