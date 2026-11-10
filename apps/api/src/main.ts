@@ -3,6 +3,7 @@ import { NestFactory } from '@nestjs/core';
 import cookieParser from 'cookie-parser';
 import { AppModule } from './app.module';
 import { logger } from './logger';
+import { PinoNestLogger } from './common/logging/pino-nest-logger';
 import { resolveBrowserOrigins } from './common/guards/auth-config';
 import { envNumber } from './common/utils/env';
 
@@ -14,6 +15,8 @@ async function bootstrap(): Promise<void> {
   const corsOrigins = resolveBrowserOrigins();
 
   const app = await NestFactory.create(AppModule, { bufferLogs: true, logger: false });
+  // `logger: false` alone drops every Nest Logger line; forward them to pino (stdout -> Loki).
+  app.useLogger(new PinoNestLogger());
   app.use(cookieParser());
 
   app.enableCors({
