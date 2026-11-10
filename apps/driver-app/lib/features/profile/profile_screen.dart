@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/auth/auth_state.dart';
 import '../../core/driver/driver_state.dart';
 import '../../di/providers.dart';
 import 'models/vehicle.dart';
@@ -26,18 +27,45 @@ class ProfileScreen extends ConsumerWidget {
           ),
         ],
       ),
-      body: vehiclesAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(child: Text('Failed to load vehicles: $e')),
-        data: (vehicles) => vehicles.isEmpty
-            ? _EmptyState(onAdd: () => context.push('/profile/vehicle/add'))
-            : _VehicleList(vehicles: vehicles, onAdd: () => context.push('/profile/vehicle/add')),
+      body: Column(
+        children: [
+          const _AccountTile(),
+          Expanded(
+            child: vehiclesAsync.when(
+              loading: () => const Center(child: CircularProgressIndicator()),
+              error: (e, _) => Center(child: Text('Failed to load vehicles: $e')),
+              data: (vehicles) => vehicles.isEmpty
+                  ? _EmptyState(onAdd: () => context.push('/profile/vehicle/add'))
+                  : _VehicleList(vehicles: vehicles, onAdd: () => context.push('/profile/vehicle/add')),
+            ),
+          ),
+        ],
       ),
       floatingActionButton: FloatingActionButton(
         key: const Key('add_vehicle_fab'),
         onPressed: () => context.push('/profile/vehicle/add'),
         child: const Icon(Icons.add),
       ),
+    );
+  }
+}
+
+/// Who is signed in: the Google email, or the phone for a phone account
+/// (RCAB-E8.S15: Google accounts have no phone). Hidden when neither is
+/// known, e.g. a session restored on a build that never stored it.
+class _AccountTile extends ConsumerWidget {
+  const _AccountTile();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final auth = ref.watch(authProvider);
+    final label = auth is AuthStateAuthenticated ? auth.accountLabel : null;
+    if (label == null) return const SizedBox.shrink();
+    return ListTile(
+      key: const Key('account_tile'),
+      leading: const Icon(Icons.account_circle_outlined),
+      title: Text(label, key: const Key('account_label')),
+      subtitle: const Text('Signed in'),
     );
   }
 }

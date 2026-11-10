@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 import 'package:mocktail/mocktail.dart';
 
 import 'package:driver_app/core/auth/auth_notifier.dart';
@@ -19,6 +20,8 @@ import 'package:driver_app/features/profile/profile_screen.dart';
 class MockDio extends Mock implements Dio {}
 
 class MockFirebaseAuth extends Mock implements FirebaseAuth {}
+
+class MockGoogleSignIn extends Mock implements GoogleSignIn {}
 
 class _MemTokenStore extends TokenStore {
   bool cleared = false;
@@ -56,6 +59,13 @@ Widget _buildScreen({
     overrides: [
       vehiclesProvider.overrideWith((_) => Future.value(vehicles)),
       apiClientProvider.overrideWithValue(dio),
+      // The account tile reads the auth state; keep it off real Firebase.
+      authProvider.overrideWith((ref) => AuthNotifier(
+            _MemTokenStore(),
+            MockFirebaseAuth(),
+            MockDio(),
+            initialState: const AuthStateAuthenticated(userId: 'd1'),
+          )),
     ],
     child: const MaterialApp(home: ProfileScreen()),
   );
@@ -128,6 +138,9 @@ void main() {
     final dio = MockDio();
     final fb = MockFirebaseAuth();
     when(() => fb.signOut()).thenAnswer((_) async {});
+    // The real GoogleSignIn's platform channel never answers in a widget test.
+    final google = MockGoogleSignIn();
+    when(() => google.signOut()).thenAnswer((_) async => null);
     when(() => dio.post<dynamic>(
           any(),
           data: any(named: 'data'),
@@ -142,6 +155,7 @@ void main() {
             fb,
             dio,
             initialState: const AuthStateAuthenticated(userId: 'd1'),
+            googleSignInFactory: (_) => google,
           )),
     ]);
     addTearDown(container.dispose);
@@ -161,5 +175,44 @@ void main() {
     expect(store.cleared, isTrue);
     verify(() => dio.post<dynamic>('/v1/auth/native/logout',
         data: {'refresh_token': 'refresh'}, options: any(named: 'options'))).called(1);
+    verify(() => google.signOut()).called(1);
   });
+
+  // RCAB-E8.S15: a Google account has no phone; the profile shows the email.
+  for (final c in <(String, AuthStateAuthenticated, String?)>[
+    ('email when the phone is null',
+        const AuthStateAuthenticated(userId: 'd1', email: 'me@example.com'), 'me@example.com'),
+    ('phone for a phone account',
+        const AuthStateAuthenticated(userId: 'd1', phoneE164: '+233201234567'), '+233201234567'),
+    ('email wins when both are present',
+        const AuthStateAuthenticated(
+            userId: 'd1', email: 'me@example.com', phoneE164: '+233201234567'),
+        'me@example.com'),
+    ('nothing when neither is known', const AuthStateAuthenticated(userId: 'd1'), null),
+  ]) {
+    testWidgets('account label: ${c.$1}', (tester) async {
+      final container = ProviderContainer(overrides: [
+        vehiclesProvider.overrideWith((_) => Future.value(<Vehicle>[])),
+        apiClientProvider.overrideWithValue(MockDio()),
+        authProvider.overrideWith((ref) => AuthNotifier(
+              _MemTokenStore(),
+              MockFirebaseAuth(),
+              MockDio(),
+              initialState: c.$2,
+            )),
+      ]);
+      addTearDown(container.dispose);
+      await tester.pumpWidget(UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(home: ProfileScreen()),
+      ));
+      await tester.pump();
+
+      if (c.$3 == null) {
+        expect(find.byKey(const Key('account_tile')), findsNothing);
+      } else {
+        expect(tester.widget<Text>(find.byKey(const Key('account_label'))).data, c.$3);
+      }
+    });
+  }
 }

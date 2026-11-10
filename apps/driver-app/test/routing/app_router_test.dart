@@ -1,5 +1,6 @@
 import 'package:dio/dio.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -7,6 +8,7 @@ import 'package:go_router/go_router.dart';
 import 'package:mocktail/mocktail.dart';
 
 import 'package:driver_app/app.dart';
+import 'package:driver_app/core/auth/auth_config.dart';
 import 'package:driver_app/core/auth/auth_notifier.dart';
 import 'package:driver_app/core/auth/auth_state.dart';
 import 'package:driver_app/core/auth/token_store.dart';
@@ -27,6 +29,8 @@ import 'package:driver_app/features/profile/profile_screen.dart';
 // ---------------------------------------------------------------------------
 
 class MockFirebaseAuth extends Mock implements FirebaseAuth {}
+
+class MockGoogleSignIn extends Mock implements GoogleSignIn {}
 
 /// In-memory [TokenStore] — overrides every method so the underlying
 /// [FlutterSecureStorage] is never called (no platform channels in tests).
@@ -97,6 +101,9 @@ Future<void> _pumpApp(
       overrides: [
         tokenStoreProvider.overrideWithValue(store),
         firebaseAuthProvider.overrideWithValue(mockFb),
+        authConfigProvider.overrideWith(
+          (ref) async => const AuthConfig(methods: {'google'}),
+        ),
         authProvider.overrideWith(
           (ref) => AuthNotifier(store, mockFb, Dio())..state = initialState,
         ),
@@ -126,6 +133,9 @@ Future<void> _pumpRoute(
       overrides: [
         tokenStoreProvider.overrideWithValue(store),
         firebaseAuthProvider.overrideWithValue(mockFb),
+        authConfigProvider.overrideWith(
+          (ref) async => const AuthConfig(methods: {'google'}),
+        ),
         authProvider.overrideWith(
           (ref) => AuthNotifier(store, mockFb, Dio()),
         ),
@@ -160,6 +170,10 @@ void main() {
       final store = _FakeTokenStore();
       final mockFb = MockFirebaseAuth();
       when(() => mockFb.signOut()).thenAnswer((_) async {});
+      // The real GoogleSignIn talks to a platform channel that never answers
+      // inside a widget test.
+      final google = MockGoogleSignIn();
+      when(() => google.signOut()).thenAnswer((_) async => null);
       late AuthNotifier notifier;
 
       await tester.pumpWidget(
@@ -167,9 +181,16 @@ void main() {
           overrides: [
             tokenStoreProvider.overrideWithValue(store),
             firebaseAuthProvider.overrideWithValue(mockFb),
+            authConfigProvider.overrideWith(
+              (ref) async => const AuthConfig(methods: {'google'}),
+            ),
             authProvider.overrideWith((ref) {
-              notifier = AuthNotifier(store, mockFb, Dio())
-                ..state = const AuthStateAuthenticated(userId: 'u1');
+              notifier = AuthNotifier(
+                store,
+                mockFb,
+                Dio(),
+                googleSignInFactory: (_) => google,
+              )..state = const AuthStateAuthenticated(userId: 'u1');
               return notifier;
             }),
           ],

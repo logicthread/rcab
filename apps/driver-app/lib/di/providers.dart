@@ -3,7 +3,9 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 
+import '../core/auth/auth_config.dart';
 import '../core/auth/auth_notifier.dart';
+import '../core/auth/native_auth_contract.dart';
 import '../core/auth/auth_state.dart';
 import '../core/auth/token_store.dart';
 import '../core/api/api_client.dart';
@@ -60,6 +62,27 @@ final apiClientProvider = Provider<Dio>((ref) {
 });
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
+
+/// Web OAuth client id fallback for builds whose API reports none:
+/// `--dart-define=GOOGLE_SERVER_CLIENT_ID=<web client id>`. The API's
+/// `GET /v1/auth/config` value wins when present.
+const kGoogleServerClientIdFallback =
+    String.fromEnvironment('GOOGLE_SERVER_CLIENT_ID');
+
+/// Enabled sign-in methods + the Google web client id (RCAB-E8.S15).
+/// Public endpoint, so the plain Dio is used. Invalidate to retry.
+final authConfigProvider = FutureProvider.autoDispose<AuthConfig>((ref) async {
+  final res = await ref.read(_exchangeDioProvider).get<dynamic>(
+        NativeAuthContract.configPath,
+        options: Options(
+          sendTimeout: const Duration(seconds: 10),
+          receiveTimeout: const Duration(seconds: 10),
+        ),
+      );
+  final config = AuthConfig.tryParse(res.data);
+  if (config == null) throw const FormatException('bad /v1/auth/config body');
+  return config;
+});
 
 final authProvider = StateNotifierProvider<AuthNotifier, AuthState>((ref) {
   return AuthNotifier(

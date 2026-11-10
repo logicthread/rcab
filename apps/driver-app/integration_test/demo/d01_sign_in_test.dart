@@ -1,6 +1,10 @@
-// D01 — Sign-in screen (UI only). Real Firebase phone OTP is NOT exercised:
-// the recording stops before "Send OTP" is pressed with a valid number, so no
-// SMS is sent. The flow behind it is narrated in the caption.
+// D01 — Sign-in screen (UI only). Google sign-in is NOT exercised: a recording
+// cannot complete Google's account picker / consent, so it stops before the
+// button is pressed. The flow behind it is narrated in the captions.
+//
+// RCAB-E8.S15: until launch, Google is the only sign-in method. The screen asks
+// `GET /v1/auth/config` and renders only the enabled methods, so the phone/OTP
+// form is deliberately absent here (it returns when the OTP provider is wired).
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -15,26 +19,24 @@ void main() {
     await demo.boot(
       tester,
       signedIn: false,
-      title: const DemoTitle('Sign in with phone OTP', [
+      title: const DemoTitle('Sign in with Google', [
         'Cold start with no stored session → /sign-in',
-        'E.164 phone validation',
-        'Send OTP → Firebase SMS → 6-digit code step',
-        'Code → POST /v1/auth/native/firebase-exchange',
+        'GET /v1/auth/config → which methods are enabled',
+        'Continue with Google → Google ID token',
+        'POST /v1/auth/native/google → tokens in secure storage',
       ]),
     );
 
     await demo.say('No session in secure storage → router redirects to /sign-in', hold: 3);
-    await demo.say('Validation: the number must be E.164 (+<country><number>)');
-    await demo.type(find.byKey(const Key('phone_field')), '98300 70001');
-    await demo.tap(find.byKey(const Key('send_otp_button')), after: 2.5);
-
-    await demo.say('A valid E.164 number enables the OTP request');
-    await demo.tester.enterText(find.byKey(const Key('phone_field')), '');
-    await demo.type(find.byKey(const Key('phone_field')), '+919830070001');
-    await demo.wait(1.5);
-    await demo.say('Send OTP → Firebase verifyPhoneNumber → SMS (not sent in this recording)', hold: 4);
-    await demo.say('Then: code step → Firebase ID token → /v1/auth/native/firebase-exchange → '
-        'access + refresh tokens in secure storage → /home', hold: 5);
+    await demo.waitFor(find.byKey(const Key('google_sign_in_button')),
+        what: 'the Continue with Google button (is the dev api up with /v1/auth/config?)');
+    await demo.say('GET /v1/auth/config → methods: [google]. Only enabled methods are drawn', hold: 4);
+    expect(find.byKey(const Key('phone_field')), findsNothing);
+    await demo.say('Phone / OTP is switched off by policy (auth.enabledMethods): no phone field, no SMS', hold: 4);
+    await demo.say('Continue with Google → account picker → Google ID token '
+        '(not pressed in this recording)', hold: 4);
+    await demo.say('POST /v1/auth/native/google → login by Google subject, or first-use registration '
+        '→ access + refresh tokens in secure storage → /home', hold: 5);
     await demo.end();
   });
 }

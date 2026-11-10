@@ -9,6 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 
 import 'package:driver_app/app.dart';
+import 'package:driver_app/core/auth/auth_config.dart';
 import 'package:driver_app/core/auth/auth_notifier.dart';
 import 'package:driver_app/core/auth/auth_state.dart';
 import 'package:driver_app/core/auth/token_store.dart';
@@ -45,6 +46,9 @@ void main() {
         overrides: [
           tokenStoreProvider.overrideWithValue(store),
           firebaseAuthProvider.overrideWithValue(mockFb),
+          authConfigProvider.overrideWith(
+            (ref) async => const AuthConfig(methods: {'google'}),
+          ),
           authProvider.overrideWith(
             (ref) =>
                 AuthNotifier(store, mockFb, Dio())
