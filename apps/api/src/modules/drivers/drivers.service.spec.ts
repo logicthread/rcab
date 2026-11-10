@@ -37,7 +37,8 @@ function buildRedis() {
     hset: vi.fn().mockResolvedValue(1),
     zrem: vi.fn().mockResolvedValue(1),
     del: vi.fn().mockResolvedValue(1),
-    keys: vi.fn().mockResolvedValue([]),
+    scan: vi.fn().mockResolvedValue(['0', []]),
+    keys: vi.fn(() => { throw new Error('KEYS blocks Redis; use SCAN'); }),
     hget: vi.fn().mockResolvedValue(null),
   };
 }
@@ -155,7 +156,7 @@ describe('DriversService', () => {
   describe('autoOfflineSweep', () => {
     it('evicts a stale driver and emits force_offline', async () => {
       const staleMs = Date.now() - 65_000; // 65 s ago
-      redis.keys.mockResolvedValue([`driver:state:${DRIVER_ID}`]);
+      redis.scan.mockResolvedValue(['0', [`driver:state:${DRIVER_ID}`]]);
       redis.hget.mockResolvedValue(String(staleMs));
 
       await service.autoOfflineSweep();
@@ -166,7 +167,7 @@ describe('DriversService', () => {
 
     it('does not evict a fresh driver', async () => {
       const freshMs = Date.now() - 10_000; // 10 s ago
-      redis.keys.mockResolvedValue([`driver:state:${DRIVER_ID}`]);
+      redis.scan.mockResolvedValue(['0', [`driver:state:${DRIVER_ID}`]]);
       redis.hget.mockResolvedValue(String(freshMs));
 
       await service.autoOfflineSweep();
@@ -176,7 +177,7 @@ describe('DriversService', () => {
     });
 
     it('skips keys with no last_seen', async () => {
-      redis.keys.mockResolvedValue([`driver:state:${DRIVER_ID}`]);
+      redis.scan.mockResolvedValue(['0', [`driver:state:${DRIVER_ID}`]]);
       redis.hget.mockResolvedValue(null);
 
       await service.autoOfflineSweep();
@@ -185,9 +186,25 @@ describe('DriversService', () => {
     });
 
     it('is a no-op when no driver:state:* keys exist', async () => {
-      redis.keys.mockResolvedValue([]);
+      redis.scan.mockResolvedValue(['0', []]);
       await service.autoOfflineSweep();
       expect(redis.hget).not.toHaveBeenCalled();
+    });
+
+    it('iterates SCAN cursors in batches until the cursor returns to 0, never KEYS', async () => {
+      const stale = String(Date.now() - 65_000);
+      redis.scan
+        .mockResolvedValueOnce(['17', ['driver:state:a', 'driver:state:b']])
+        .mockResolvedValueOnce(['0', ['driver:state:c']]);
+      redis.hget.mockResolvedValue(stale);
+
+      await service.autoOfflineSweep();
+
+      expect(redis.scan).toHaveBeenCalledTimes(2);
+      expect(redis.scan).toHaveBeenNthCalledWith(1, '0', 'MATCH', 'driver:state:*', 'COUNT', 200);
+      expect(redis.scan).toHaveBeenNthCalledWith(2, '17', 'MATCH', 'driver:state:*', 'COUNT', 200);
+      expect(redis.zrem.mock.calls.map((c) => c[1])).toEqual(['a', 'b', 'c']);
+      expect(redis.keys).not.toHaveBeenCalled();
     });
   });
 });
