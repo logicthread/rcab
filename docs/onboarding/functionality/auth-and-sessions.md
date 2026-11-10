@@ -22,7 +22,7 @@ A Google account can be linked to an existing phone account and later used to lo
 | Web sign out | Local state is cleared first, then the server revokes the refresh token and clears the cookie. A refresh is done first if the access token is expired, because logout itself needs a valid bearer. Video W10 |
 | Driver app sign-in | Phone + SMS code screen (`lib/features/auth/sign_in_screen.dart`). Tokens go to `flutter_secure_storage`. A rejected refresh signs the driver out. Video D01 |
 
-Scene IDs: web [W01, W02, W09, W10](../videos/web/INDEX.md), driver app [D01](../videos/driver-app/INDEX.md).
+Scene IDs: web [W01, W02, W09, W10](../videos/web/INDEX.md), driver app [D01](../videos/driver/INDEX.md).
 
 ## API endpoints
 

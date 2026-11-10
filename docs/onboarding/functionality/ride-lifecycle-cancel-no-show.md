@@ -69,7 +69,7 @@ A driver-initiated cancel ends the ride as `cancelled`; it is **not** re-dispatc
 | Driver no-show | "Marked as no-show" | "Report no-show (wait 5 min)" becomes enabled when the wait elapses | W05, D07 |
 | Normal completion | "Trip complete" + rating card | Rating screen | W03, D04 |
 
-Scene IDs: [W03 to W05](../videos/web/INDEX.md), [D04, D07](../videos/driver-app/INDEX.md).
+Scene IDs: [W03 to W05](../videos/web/INDEX.md), [D04, D07](../videos/driver/INDEX.md).
 
 ## Metrics
 

@@ -29,7 +29,7 @@ If nobody accepts within the hard-fail time (60 s by default) the ride ends as `
 | No driver | "No driver available - please try again" | - | W06 |
 | Cancel before pickup | "Ride cancelled" | If a driver was assigned they are released and told | W04 |
 
-Scene index: [web W03 to W06](../videos/web/INDEX.md), [driver app D04, D05, D07](../videos/driver-app/INDEX.md).
+Scene index: [web W03 to W06](../videos/web/INDEX.md), [driver app D04, D05, D07](../videos/driver/INDEX.md).
 
 Reload (W09): the web stores the active solo ride id in `localStorage` key `rcab_active_ride` and on mount rehydrates from `GET /v1/rides/:id`, then re-subscribes (`ride:subscribe`, re-sent on every socket reconnect) and receives a `ride:snapshot`.
 

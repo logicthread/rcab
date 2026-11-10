@@ -2,7 +2,7 @@
 
 Audience: the person who will own technical direction of rcab. Assumes you read `docs/ARCHITECTURE.md` (code-verified reference) and will use this page as the "why, guarantees, risks" companion. Where this page and the vault disagree, the code wins; drift found while writing it was fixed (see the end).
 
-Related onboarding pages: [README](../README.md) · [Manager guide](manager.md) · videos index per area: [web](../videos/web/INDEX.md), [driver app](../videos/driver-app/INDEX.md), [ops](../videos/ops/INDEX.md).
+Related onboarding pages: [README](../README.md) · [Manager guide](manager.md) · videos index per area: [web](../videos/web/INDEX.md), [driver app](../videos/driver/INDEX.md), [ops](../videos/ops/INDEX.md).
 
 ## 1. Shape of the system in one paragraph
 

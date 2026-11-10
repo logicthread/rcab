@@ -17,7 +17,7 @@ Read this README, then [01 System overview](01-system-overview.md), then your ro
 | **UI/UX developer** (web and driver app screens) | [guides/ui-ux-dev.md](guides/ui-ux-dev.md) | [normal-booking](functionality/normal-booking.md), [shared-rides](functionality/shared-rides.md), [realtime-protocol](functionality/realtime-protocol.md), web and driver videos |
 | **Backend developer** | [guides/backend-dev.md](guides/backend-dev.md) | all [functionality pages](functionality/), [state machines](state-machines.md), [workflows](workflows/README.md) |
 | **Stakeholder: passenger web app** (product, support) | [guides/stakeholder-user-app.md](guides/stakeholder-user-app.md) | [web videos](videos/web/INDEX.md) W01 to W10 |
-| **Stakeholder: driver app** (driver managers, trainers) | [guides/stakeholder-driver-app.md](guides/stakeholder-driver-app.md) | [driver videos](videos/driver-app/INDEX.md) D01 to D08 |
+| **Stakeholder: driver app** (driver managers, trainers) | [guides/stakeholder-driver-app.md](guides/stakeholder-driver-app.md) | [driver videos](videos/driver/INDEX.md) D01 to D08 |
 | **Stakeholder: maintainer** (day-to-day operations) | [guides/stakeholder-maintainer.md](guides/stakeholder-maintainer.md) | [ops videos](videos/ops/INDEX.md) M01 to M06, [admin-and-observability](functionality/admin-and-observability.md) |
 | **Stakeholder: monitoring and on-call** | [guides/stakeholder-monitoring.md](guides/stakeholder-monitoring.md) | [ops videos](videos/ops/INDEX.md), [incident-and-recovery](workflows/incident-and-recovery.md) |
 | **Monitoring and maintenance developer** | [guides/monitoring-maintenance-dev.md](guides/monitoring-maintenance-dev.md) | [admin-and-observability](functionality/admin-and-observability.md), [idempotency-and-durability](functionality/idempotency-and-durability.md), [recovery runbook](../operations/recovery-runbook.md) |
@@ -67,7 +67,7 @@ Recordings are produced by re-runnable harnesses (`pnpm demo:record:web`, `scrip
 | ID | Scene | Index |
 |---|---|---|
 | W01 to W10 | landing, sign-in screen, normal ride full lifecycle, passenger cancel, driver no-show or cancel, no driver available, shared ride with two passengers, scheduled ride, reload and reconnect, sign out | [videos/web/INDEX.md](videos/web/INDEX.md) |
-| D01 to D08 | sign-in, vehicle registration, go online and presence, solo offer to rating, decline/expiry/lost, shared offer and stops, cancel and no-show, earnings and profile | [videos/driver-app/INDEX.md](videos/driver-app/INDEX.md) |
+| D01 to D08 | sign-in, vehicle registration, go online and presence, solo offer to rating, decline/expiry/lost, shared offer and stops, cancel and no-show, earnings and profile | [videos/driver/INDEX.md](videos/driver/INDEX.md) |
 | M01 to M06 | Grafana dashboards, Prometheus targets and a business query, Loki by request id, Uptime Kuma, Alertmanager, dev tooling and drills (terminal recordings) | [videos/ops/INDEX.md](videos/ops/INDEX.md) |
 
 Scene to documentation map: W03/D04 [normal-booking](functionality/normal-booking.md); W04, W05, D07 [lifecycle](functionality/ride-lifecycle-cancel-no-show.md); W06, D05 [dispatch](functionality/dispatch-and-offers.md); W07, D06 [shared-rides](functionality/shared-rides.md); W08 [scheduled-rides](functionality/scheduled-rides.md); W09 [realtime-protocol](functionality/realtime-protocol.md); W02, W10, D01 [auth](functionality/auth-and-sessions.md); D02, D03 [presence](functionality/driver-onboarding-and-presence.md); M01 to M06 [admin-and-observability](functionality/admin-and-observability.md).

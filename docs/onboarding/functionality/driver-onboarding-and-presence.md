@@ -38,7 +38,7 @@ The role is read from the database on every token refresh, so the driver sees th
 | Forced offline | `/home` | On `force_offline` the app flips to offline. A banner appears if the OS killed the service within the last 24 h | D03 |
 | Earnings | `/earnings` | Placeholder text "Earnings - coming in E7" | D08 |
 
-Scene IDs: [D01 to D03, D08](../videos/driver-app/INDEX.md).
+Scene IDs: [D01 to D03, D08](../videos/driver/INDEX.md).
 
 ## API endpoints and socket events
 

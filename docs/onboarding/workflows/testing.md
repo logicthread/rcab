@@ -27,7 +27,7 @@ pnpm --filter @rcab/api test:int -- test/integration/pool-membership.int.spec.ts
 ```
 
 `apps/driver-app/integration_test/` holds only the scene harness used to record the driver-app onboarding videos
-(`demo/`, see [`../videos/driver-app/INDEX.md`](../videos/driver-app/INDEX.md)); a regression suite of Flutter
+(`demo/`, see [`../videos/driver/INDEX.md`](../videos/driver/INDEX.md)); a regression suite of Flutter
 `integration_test`s, as described in the strategy note and `CLAUDE.md`, is planned, not built. Driver coverage today
 is `flutter test` unit/widget suites with a fake realtime socket (`test/support/fake_realtime_socket.dart`).
 

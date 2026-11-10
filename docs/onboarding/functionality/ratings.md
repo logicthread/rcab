@@ -20,7 +20,7 @@ The direction is inferred from the caller's identity (the body carries only star
 | Passenger (web) | When the tracking panel reaches "Trip complete" a card appears: five stars, optional comment (max 1000 characters), **Submit rating** (disabled until a star is chosen) and **Skip**. After submit or skip the card is replaced by "Thanks for rating!" | W03 |
 | Driver (app) | After `end_ride` the app routes to `/rating/:id` ("Rate this ride", "How was your trip?", stars, optional text, Submit, Skip). A 409 from the API is treated as success (already rated) | D04 |
 
-No rating prompt appears for cancelled, no-driver or no-show rides, nor for shared trips. Scene IDs: [W03](../videos/web/INDEX.md), [D04](../videos/driver-app/INDEX.md).
+No rating prompt appears for cancelled, no-driver or no-show rides, nor for shared trips. Scene IDs: [W03](../videos/web/INDEX.md), [D04](../videos/driver/INDEX.md).
 
 ## API
 

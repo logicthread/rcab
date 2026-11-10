@@ -1,6 +1,6 @@
 # Stakeholder guide: Driver app
 
-For driver managers, trainers and stakeholders. No technical knowledge needed. The app is Android (Flutter). Videos are in the [driver-app video index](../videos/driver-app/INDEX.md); IDs D01 to D08 match that index.
+For driver managers, trainers and stakeholders. No technical knowledge needed. The app is Android (Flutter). Videos are in the [driver-app video index](../videos/driver/INDEX.md); IDs D01 to D08 match that index.
 
 ## 1. Getting started (D01, D02)
 

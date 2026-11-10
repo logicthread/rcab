@@ -107,7 +107,7 @@ Operator tools: `/redis-inspect`, `/pool-inspect`, `/db-migrate`; invariant SQL 
 
 ## Tests
 
-Unit: `dispatch.service.spec.ts`, `dispatch.processor.spec.ts`, `dispatch-start.service.spec.ts`, `offer-assignment.repository.spec.ts`, `driver-assignment.projection.spec.ts`, `outbox.relay.spec.ts`, `dispatch-reconciler.service.spec.ts`, `outbox.jobs.spec.ts`. Integration (real Postgres/Redis): `dispatch-offer-assignment.int.spec.ts` (claim races), `dispatch-offer-gateway.int.spec.ts`, `dispatch-pool.int.spec.ts`, `outbox-dispatch.int.spec.ts`, `outbox-e2e.int.spec.ts`, `migrations-stage-c.int.spec.ts`. Driver app: `test/features/offer/`, `test/core/realtime/`. Videos: D04, D05, D06, D07 ([driver app index](../videos/driver-app/INDEX.md)), W03, W06, W07 ([web index](../videos/web/INDEX.md)); metrics M01, M02 ([ops index](../videos/ops/INDEX.md)).
+Unit: `dispatch.service.spec.ts`, `dispatch.processor.spec.ts`, `dispatch-start.service.spec.ts`, `offer-assignment.repository.spec.ts`, `driver-assignment.projection.spec.ts`, `outbox.relay.spec.ts`, `dispatch-reconciler.service.spec.ts`, `outbox.jobs.spec.ts`. Integration (real Postgres/Redis): `dispatch-offer-assignment.int.spec.ts` (claim races), `dispatch-offer-gateway.int.spec.ts`, `dispatch-pool.int.spec.ts`, `outbox-dispatch.int.spec.ts`, `outbox-e2e.int.spec.ts`, `migrations-stage-c.int.spec.ts`. Driver app: `test/features/offer/`, `test/core/realtime/`. Videos: D04, D05, D06, D07 ([driver app index](../videos/driver/INDEX.md)), W03, W06, W07 ([web index](../videos/web/INDEX.md)); metrics M01, M02 ([ops index](../videos/ops/INDEX.md)).
 
 ## Known gaps
 

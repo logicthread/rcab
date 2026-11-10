@@ -2,7 +2,7 @@
 
 Goal: from a fresh clone to a running stack, a signed-in web app, and (optionally) the driver app on an Android
 emulator. Authoritative long form: [`docs/manual-testing/RUN-GUIDE.md`](../../manual-testing/RUN-GUIDE.md) section 1.
-Videos of the finished result: [web scenes](../videos/web/INDEX.md), [driver scenes](../videos/driver-app/INDEX.md),
+Videos of the finished result: [web scenes](../videos/web/INDEX.md), [driver scenes](../videos/driver/INDEX.md),
 [ops scenes](../videos/ops/INDEX.md).
 
 ## 1. Prerequisites
@@ -102,7 +102,7 @@ seeded drivers never answer an offer; and **driver presence expires** — the ap
 Web (`http://localhost:3002/signin`) and the driver app use real **Firebase phone OTP**. For development without SMS,
 add *test phone numbers with fixed codes* in the Firebase console (Authentication, Sign-in method, Phone). The
 first successful exchange creates a `client`; making a user a driver is done through the driver registration flow
-(see the driver-app videos [D01](../videos/driver-app/INDEX.md#d01)/[D02](../videos/driver-app/INDEX.md#d02)).
+(see the driver-app videos [D01](../videos/driver/INDEX.md#d01)/[D02](../videos/driver/INDEX.md#d02)).
 
 ## 7. Driver app on an Android emulator
 

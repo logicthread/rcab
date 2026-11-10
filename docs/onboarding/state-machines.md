@@ -24,7 +24,7 @@
   per-user and per-driver rooms (`toUser`, `toDriver`). Event vocabulary: vault `40-backend/websocket-events.md`;
   wire shapes: `apps/api/src/modules/realtime/realtime.protocol.ts`.
 - **Video scenes.** Scene IDs (W01–W10 web, D01–D08 driver app, M01–M06 ops) are indexed in
-  [`videos/web/INDEX.md`](videos/web/INDEX.md), [`videos/driver-app/INDEX.md`](videos/driver-app/INDEX.md) and
+  [`videos/web/INDEX.md`](videos/web/INDEX.md), [`videos/driver/INDEX.md`](videos/driver/INDEX.md) and
   [`videos/ops/INDEX.md`](videos/ops/INDEX.md). Files live at `docs/onboarding/videos/<area>/<ID>-<slug>.mp4`; the
   index has the exact slug and a one-line description of every scene.
 
@@ -104,10 +104,10 @@ rideStatusVersion(status)` (rank 1–6, terminals 10, in `realtime.protocol.ts`)
 events from `RideStateMachine` carry no `version`, which the web socket wrapper treats as "unordered, pass through";
 the `ride:snapshot` returned by `ride:subscribe` is the authoritative catch-up after any reconnect.
 
-**Videos.** Full happy path [W03](videos/web/INDEX.md#w03) + [D04](videos/driver-app/INDEX.md#d04); passenger cancel
+**Videos.** Full happy path [W03](videos/web/INDEX.md#w03) + [D04](videos/driver/INDEX.md#d04); passenger cancel
 [W04](videos/web/INDEX.md#w04); driver no-show / driver cancel [W05](videos/web/INDEX.md#w05) +
-[D07](videos/driver-app/INDEX.md#d07); no driver [W06](videos/web/INDEX.md#w06); decline / expiry / lost
-[D05](videos/driver-app/INDEX.md#d05); reconnect restore [W09](videos/web/INDEX.md#w09).
+[D07](videos/driver/INDEX.md#d07); no driver [W06](videos/web/INDEX.md#w06); decline / expiry / lost
+[D05](videos/driver/INDEX.md#d05); reconnect restore [W09](videos/web/INDEX.md#w09).
 
 **Drift notes.** (a) Vault `30-domain/sm-ride-lifecycle.md`'s top diagram shows `en_route_pickup`,
 `canceled_client` / `canceled_driver` and a cancellation fee; the shipped table uses `en_route` / `arrived`, one
@@ -224,7 +224,7 @@ There is **no member-initiated leave or cancel for a pool seat** in Phase-0: the
 `rides` rows. A member leaves only when the pool reaches `aborted` or `completed`.
 
 **Videos.** [W07](videos/web/INDEX.md#w07) (two passengers: pool open -> closed_full -> claimed -> stops ->
-completed) and [D06](videos/driver-app/INDEX.md#d06) (driver side: shared offer -> accept -> pickups/dropoffs).
+completed) and [D06](videos/driver/INDEX.md#d06) (driver side: shared offer -> accept -> pickups/dropoffs).
 
 **Drift notes.** Vault `30-domain/sm-shared-ride-pool.md` was out of date and is corrected in this change:
 `open -> closed_started` and `open -> aborted` (non-empty) do not exist; `completed` was missing; the job id is
@@ -301,8 +301,8 @@ Accept refusals (`AcceptOfferFailure`): `offer_not_found` (unknown or someone el
 exhausted; the offer stays live and the app may retry). Mapping to the UI outcome:
 `outcomeForAcceptFailure` (api `realtime.protocol.ts`, mirrored in `offer_outcome.dart`).
 
-**Videos.** [D04](videos/driver-app/INDEX.md#d04) (accept), [D05](videos/driver-app/INDEX.md#d05) (decline / expiry / lost),
-[D06](videos/driver-app/INDEX.md#d06) (shared offer).
+**Videos.** [D04](videos/driver/INDEX.md#d04) (accept), [D05](videos/driver/INDEX.md#d05) (decline / expiry / lost),
+[D06](videos/driver/INDEX.md#d06) (shared offer).
 
 ---
 
@@ -346,7 +346,7 @@ Operational consequences you will hit: (1) **seeded fixture drivers go offline a
 assignment reconciler re-projects it from the guard table; (3) a driver can go offline while holding a trip —
 the trip is not touched.
 
-**Video:** [D03](videos/driver-app/INDEX.md#d03). **Drift notes:** vault `30-domain/sm-driver-availability.md` claims
+**Video:** [D03](videos/driver/INDEX.md#d03). **Drift notes:** vault `30-domain/sm-driver-availability.md` claims
 Redis is authoritative for dispatch, that `on_ride` is a stored state and that the geo entry is dropped on
 accept; none of that is true of the code (corrected in this change).
 
@@ -380,7 +380,7 @@ delete) after the releasing tx; `DriverAssignmentProjection` rebuilds it from th
 `DISPATCH_ASSIGNMENT_RECONCILE_MS` (30 s). The `rcab_busy_drivers` gauge is `count(*)` of this table.
 Pre-Stage-C double assignments were recorded in `migration_conflict` rather than guessed at — see
 [`workflows/database-migrations.md`](workflows/database-migrations.md) and the recovery runbook section 6.
-**Videos:** [D04](videos/driver-app/INDEX.md#d04), [D06](videos/driver-app/INDEX.md#d06), [D07](videos/driver-app/INDEX.md#d07).
+**Videos:** [D04](videos/driver/INDEX.md#d04), [D06](videos/driver/INDEX.md#d06), [D07](videos/driver/INDEX.md#d07).
 
 ---
 
@@ -417,7 +417,7 @@ stateDiagram-v2
 
 Google link / login (`/v1/auth/google/*`) mints sessions with `auth_method='google'` using the same machine.
 Refresh-token revocation lives in Postgres, **not Redis**. **Videos:** [W01](videos/web/INDEX.md#w01) /
-[W02](videos/web/INDEX.md#w02) (sign-in UI), [W10](videos/web/INDEX.md#w10) (sign out), [D01](videos/driver-app/INDEX.md#d01).
+[W02](videos/web/INDEX.md#w02) (sign-in UI), [W10](videos/web/INDEX.md#w10) (sign out), [D01](videos/driver/INDEX.md#d01).
 Reuse/rotation is proved by `test/integration/auth.int.spec.ts`.
 
 ---
@@ -625,10 +625,10 @@ survives `reset` on purpose: a stale snapshot after a finished trip cannot resur
 server (silence > 60 s) tears it down locally. `DriverOnRide` is declared in `driver_state.dart` but is **never
 constructed** — being on a ride is represented by the offer/ride/shared-ride providers, not by `DriverState`.
 
-**Videos:** [D01](videos/driver-app/INDEX.md#d01) sign-in, [D03](videos/driver-app/INDEX.md#d03) go online,
-[D04](videos/driver-app/INDEX.md#d04) solo flow, [D05](videos/driver-app/INDEX.md#d05) decline/expiry/lost,
-[D06](videos/driver-app/INDEX.md#d06) shared, [D07](videos/driver-app/INDEX.md#d07) cancel / no-show,
-[D08](videos/driver-app/INDEX.md#d08) earnings and profile.
+**Videos:** [D01](videos/driver/INDEX.md#d01) sign-in, [D03](videos/driver/INDEX.md#d03) go online,
+[D04](videos/driver/INDEX.md#d04) solo flow, [D05](videos/driver/INDEX.md#d05) decline/expiry/lost,
+[D06](videos/driver/INDEX.md#d06) shared, [D07](videos/driver/INDEX.md#d07) cancel / no-show,
+[D08](videos/driver/INDEX.md#d08) earnings and profile.
 
 ---
 

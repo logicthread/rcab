@@ -42,7 +42,7 @@ Triggers (migration 0016) back this up for any writer that forgets: inserts only
 | Driver | One offer card listing the stops; after accept a multi-stop screen with the ordered stop list and a confirm action for the next pending stop | D06 |
 | Completion | Last drop confirmed: pool `completed`, `ride:completed` emitted to the pool's ride room | W07, D06 |
 
-Scene IDs: [W07](../videos/web/INDEX.md), [D06](../videos/driver-app/INDEX.md).
+Scene IDs: [W07](../videos/web/INDEX.md), [D06](../videos/driver/INDEX.md).
 
 ## API and socket events
 

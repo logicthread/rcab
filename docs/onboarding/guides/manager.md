@@ -1,6 +1,6 @@
 # Guide: Manager
 
-Audience: engineering or delivery manager taking over rcab. Plain-language, no code needed. Companions: [Senior Architect guide](senior-architect.md) for risks in depth, [README](../README.md) for the whole pack, demo videos in [web](../videos/web/INDEX.md), [driver app](../videos/driver-app/INDEX.md) and [ops](../videos/ops/INDEX.md).
+Audience: engineering or delivery manager taking over rcab. Plain-language, no code needed. Companions: [Senior Architect guide](senior-architect.md) for risks in depth, [README](../README.md) for the whole pack, demo videos in [web](../videos/web/INDEX.md), [driver app](../videos/driver/INDEX.md) and [ops](../videos/ops/INDEX.md).
 
 ## 1. What the product does today
 
