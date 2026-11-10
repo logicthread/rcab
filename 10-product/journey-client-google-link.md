@@ -3,12 +3,22 @@ title: Journey — Client Google account linking
 tags: [layer/product, kind/journey]
 status: accepted
 phase: 0
-depends_on: [[journey-client-otp-signup]]
+depends_on: [[journey-client-otp-signup]], [[ADR-0003-otp-firebase]]
 related: [[integration-google-account-link]], [[module-auth]], [[entity-user]]
 audience: both
 ---
 
-# Client Google account linking & login
+# Client Google sign-in, registration & linking
+
+> **Adjusted 2026-11-10 (RCAB-E8.S15):** Google is now the primary and only enabled entry point until launch ([[ADR-0003-otp-firebase]] amendment). First-time users **register** by signing in with Google (role `client`, no phone needed); returning users sign in by `google_sub`. Flows A and B below describe the earlier phone-first model and apply only when `phone` is re-enabled.
+
+## Flow 0 — Google sign-in / register (current)
+
+1. Client opens the app; `GET /v1/auth/config` says which methods to render (`google` only).
+2. User taps "Sign in with Google"; the client obtains a Google ID token and calls `POST /v1/auth/google` (web) or `POST /v1/auth/native/google` (driver app).
+3. Backend verifies the token with Google (`email_verified=true`), logs in by `google_sub`, or registers a new `client` user. Never auto-linked by email.
+4. Errors: 401 `google_token_invalid`, 403 `google_email_unverified`, 503 `google_not_configured`, 403 `account_disabled`.
+5. Drivers: the driver role is provisioned out of band; a driver account is provisioned out of band and must have its `google_sub` set the same way, since there is no email auto-link (open question tracked in [[story-rcab-e8-s15-google-only-sign-in]]).
 
 *After phone OTP, a client can attach a Google account so subsequent logins are one-tap.*
 

@@ -33,9 +33,9 @@ fix the note).
    Alertmanager have **no** host port; reach OSRM with
    `docker compose ... exec -T api sh -c 'curl http://osrm:5000/route/v1/driving/91.7362,26.1445;91.7898,26.1758'`.
 4. Seed fixtures if you need drivers around: `./scripts/seed-dev.sh --keepalive` (drivers are swept
-   offline after 60 s without a heartbeat). Seeded users cannot sign in through Firebase; for curl-only
-   work put a valid test ID token in `FIREBASE_PHONE_TEST_TOKEN` and use
-   `POST /v1/auth/firebase-exchange`.
+   offline after 60 s without a heartbeat). Seeded users cannot sign in; sign-in is Google-only until launch. For curl-only
+   work obtain a Google ID token for your OAuth client (for example from the OAuth Playground with your own client id) and post it to
+   `POST /v1/auth/google`. `POST /v1/auth/firebase-exchange` returns 403 `auth_method_disabled` unless `AUTH_ENABLED_METHODS` includes `phone`.
 5. Watch the web and driver videos (W03, W07, D04, D06) to see which API calls and events the flows
    produce: [`../videos/web/INDEX.md`](../videos/web/INDEX.md),
    [`../videos/driver/INDEX.md`](../videos/driver/INDEX.md).
@@ -102,7 +102,7 @@ Five ideas explain most of the codebase:
 | `metrics.ts` | All Prometheus instruments (catalogue in the [monitoring guide](monitoring-maintenance-dev.md)) |
 | `logger.ts` | pino JSON logger; `context.ts` request-scoped id store |
 | `migrate.ts` | The migration runner |
-| `modules/auth` | Firebase exchange, JWT issue, single-use refresh rotation, native endpoints, Google link/login |
+| `modules/auth` | Google login/register (active), Firebase exchange (gated by `auth.enabledMethods`), JWT issue, single-use refresh rotation, native endpoints, Google link/login |
 | `modules/vehicles`, `modules/drivers` | Vehicle CRUD; online/offline, presence (geo index), auto-offline sweep (cron from policy) |
 | `modules/rides` | Quote token, create (solo/shared/scheduled), state, cancel, idempotency; the controller is the largest file |
 | `modules/pricing` | Fares in integer paise (`money.ts`), shared-seat multipliers, `shared-fare-policy.ts` (`'fixed_at_join'` stand-in) |

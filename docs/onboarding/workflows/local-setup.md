@@ -93,15 +93,15 @@ for writing a new migration: [database-migrations.md](database-migrations.md).
 ```
 
 Upserts fixture drivers/clients/vehicles and puts drivers in the Redis geo index around Guwahati. Caveats
-(also in the `/seed-db` skill): seeded users have synthetic `firebase_uid`s and **cannot sign in through OTP**;
+(also in the `/seed-db` skill): seeded users have synthetic `firebase_uid`s and **cannot sign in**;
 seeded drivers never answer an offer; and **driver presence expires** — the api sweep drops a driver whose
 `last_seen` is older than 60 s, so use `--keepalive` to hold them online.
 
 ## 6. Sign in
 
-Web (`http://localhost:3002/signin`) and the driver app use real **Firebase phone OTP**. For development without SMS,
-add *test phone numbers with fixed codes* in the Firebase console (Authentication, Sign-in method, Phone). The
-first successful exchange creates a `client`; making a user a driver is done through the driver registration flow
+Web (`http://localhost:3002/signin`) and the driver app use **Google sign-in only** until launch (phone OTP is disabled). Create a Google OAuth web client
+(authorized JavaScript origin `http://localhost:3002`) and set `GOOGLE_CLIENT_IDS`, `NEXT_PUBLIC_GOOGLE_CLIENT_ID` and, for the driver app, `GOOGLE_SERVER_CLIENT_ID`: see [RUN-GUIDE](../../manual-testing/RUN-GUIDE.md) section 3. The
+first successful Google sign-in creates a `client`; making a user a driver is done through the driver registration flow
 (see the driver-app videos [D01](../videos/driver/INDEX.md#d01)/[D02](../videos/driver/INDEX.md#d02)).
 
 ## 7. Driver app on an Android emulator

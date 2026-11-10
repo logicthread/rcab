@@ -17,10 +17,10 @@ audience: both
 | Field | Type | Notes |
 |---|---|---|
 | id | uuid (v7) | pk |
-| firebase_uid | text | unique, **non-null** (we require phone OTP) |
-| phone_e164 | text | unique, indexed |
-| google_sub | text | unique, nullable — set when Google linked |
-| email | text | nullable, never used as primary identifier |
+| firebase_uid | text | unique; non-null for phone-registered users (**confirm against shipped migration 0018 whether it is relaxed for Google-registered users**) |
+| phone_e164 | text | unique, indexed; **nullable since 0018** (Google-only sign-in, 2026-11-10) |
+| google_sub | text | unique, nullable — identity for Google-registered users; `CHECK (phone_e164 IS NOT NULL OR google_sub IS NOT NULL)` |
+| email | text | nullable, Google-verified email; never used as primary identifier or to auto-link |
 | display_name | text | nullable, sourced from Google or set by user |
 | role | enum('client', 'driver') | exclusive in Phase-0 |
 | status | enum('active', 'suspended', 'deleted') | |

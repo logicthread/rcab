@@ -57,8 +57,10 @@ First small change (suggested): change one banner string in
 copy appear in the browser. Then do the same for a string in
 `apps/driver-app/lib/features/ride/ride_screen.dart` and its widget test.
 
-Signing in needs a real Firebase phone OTP. For testing without SMS, add test phone numbers with fixed
-codes in the Firebase console (Authentication, Sign-in method, Phone, Test numbers). Seeded fixture
+Signing in is Google-only until launch (RCAB-E8.S15): create a Google OAuth web client and set
+`GOOGLE_CLIENT_IDS` (api) and `NEXT_PUBLIC_GOOGLE_CLIENT_ID` (web), see
+[`RUN-GUIDE.md`](../../manual-testing/RUN-GUIDE.md) section 3. The sign-in screen renders only the methods
+returned by `GET /v1/auth/config`; the phone/OTP form is kept behind the `phone` method. Seeded fixture
 users (`./scripts/seed-dev.sh`) have synthetic Firebase UIDs and cannot sign in; they only exist so
 dispatch has candidates. See [`RUN-GUIDE.md`](../../manual-testing/RUN-GUIDE.md) section 0.
 
@@ -67,7 +69,7 @@ dispatch has candidates. See [`RUN-GUIDE.md`](../../manual-testing/RUN-GUIDE.md)
 ## 2. What you own and the mental model
 
 ```
- Firebase phone OTP  ->  POST /v1/auth/firebase-exchange  ->  access JWT (memory) + refresh cookie
+ Google sign-in  ->  POST /v1/auth/google  ->  access JWT (memory) + refresh cookie
  REST (quote, create, cancel, rate)  +  Socket.IO (snapshots, state, location, pool updates)
 ```
 
@@ -91,7 +93,7 @@ Firebase JS SDK 12 (phone auth only).
 | Route | File | State today |
 |---|---|---|
 | `/` | `src/app/page.tsx` | Placeholder: prints "rcab, Phase 0 scaffold" and a stack status. There is no real landing page. |
-| `/signin` | `src/app/signin/sign-in-client.tsx` | Two-step form: phone (E.164), then 6-digit OTP. Invisible reCAPTCHA. |
+| `/signin` | `src/app/signin/sign-in-client.tsx` | Renders the enabled methods from `GET /v1/auth/config`: Google button (current); the two-step phone (E.164) + 6-digit OTP form with invisible reCAPTCHA is retained for when `phone` is re-enabled. |
 | `/book` | `src/app/book/book-client.tsx` (655 lines) | The whole product: ride type toggle, pickup/drop pickers, quote, request, tracking, rating. Map is client-only (`dynamic(..., { ssr: false })`). |
 
 Code map (all under `apps/web/src`):

@@ -11,9 +11,9 @@ rcab is a ride-hailing platform for tier-2/3 Indian cities. Phase-0 is a closed 
 
 | In scope (shipped) | Out of scope (Phase-0) |
 |---|---|
-| Passenger web app: phone-OTP sign-in, map-based booking, live tracking, rating | Passenger mobile app, payments, receipts, ride history page (E7.S3) |
+| Passenger web app: Google sign-in (OTP disabled until launch), map-based booking, live tracking, rating | Passenger mobile app, payments, receipts, ride history page (E7.S3) |
 | Three ride types: **normal** (private, solo), **shared** (pooled, up to 3 seats), **scheduled** (15 min to 24 h ahead) | Cancellation fees (cancelling is free), surge pricing, promo codes |
-| Driver app (Flutter, Android): phone-OTP sign-in, vehicle registration, online toggle, offers, solo and multi-stop rides, rating | Driver earnings dashboard (screen exists, content is a placeholder, E7.S4), in-app driver verification (manual, E9.S1) |
+| Driver app (Flutter, Android): Google sign-in (OTP disabled until launch), vehicle registration, online toggle, offers, solo and multi-stop rides, rating | Driver earnings dashboard (screen exists, content is a placeholder, E7.S4), in-app driver verification (manual, E9.S1) |
 | One city's road graph (dev default: North-East India, Guwahati) | Multi-city, multi-region, Kubernetes, managed cloud (ADR-0009) |
 | Metrics, logs, dashboards, uptime checks, encrypted nightly backups, immutable-image release pipeline | Slack/pager alert routing (E8.S2), full dashboards (E8.S1), rating aggregation (E7.S2) |
 
@@ -29,7 +29,7 @@ flowchart LR
     W["Web app<br/>Next.js 14 :3002"]
     D["Driver app<br/>Flutter, Android"]
   end
-  FB["Firebase Auth<br/>phone OTP"]
+  FB["Firebase Auth<br/>phone OTP (disabled until launch)"]
   subgraph Host["One VPS / one docker-compose"]
     API["API<br/>NestJS 10 :3000<br/>HTTP /v1 + Socket.IO<br/>BullMQ workers, relay, reconciler"]
     PG[("Postgres 16 + PostGIS<br/>system of record")]

@@ -4,7 +4,7 @@ For product owners, support and anyone who needs to understand what a passenger 
 
 ## What a passenger can do
 
-1. **Open the site and sign in with a phone number** (W01 landing, W02 sign-in). The passenger enters a phone number, receives a one-time code by SMS, and types it in. No password.
+1. **Open the site and sign in with Google** (W01 landing, W02 sign-in). The passenger taps "Sign in with Google" and picks an account; first-time users are registered automatically. Phone-number sign-in by SMS code is switched off until launch. (Changed 2026-11-10, RCAB-E8.S15: until launch sign-in and registration are Google-only; phone OTP is disabled behind `auth.enabledMethods`. Recordings W02/D01 show the earlier phone flow until re-recorded.) No password.
 2. **Choose pickup and destination** on a map or by typing an address (suggestions appear after 3 characters).
 3. **See a price and route** (the quote). The quote stays valid for 5 minutes; after that the app asks for a fresh one.
 4. **Pick the ride type**: normal (a private ride), shared (a pooled ride, cheaper), or scheduled (book for later).

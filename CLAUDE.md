@@ -214,6 +214,7 @@ Do NOT read the entire vault. The reading-paths system (`00-index/reading-paths.
 - **Dispatch is outbox-driven** (Stage C): intents are written to `outbox` in the booking/pool transaction; offers, driver assignment and pool membership are authoritative in Postgres, and the Redis `driver:state.current_ride_id` / `pool:<id>` entries are projections reconciled from Postgres (the old `claim:ride:*`/`offer:*` keys and pool Lua scripts are gone).
 - **Driver presence expires:** the api auto-offline sweep (every 15 s) drops any driver whose `driver:state:<id>.last_seen` is older than 60 s. Seeded fixture drivers need `./scripts/seed-dev.sh --keepalive` to stay in the `active_drivers` geo index.
 - **Refresh-token revocation is in Postgres** (`auth_refresh_token.revoked_at`), not Redis.
+- **Auth (RCAB-E8.S15):** sign-in/registration is Google-only until launch (`auth.enabledMethods`, `GET /v1/auth/config`); phone OTP is disabled behind the flag, see ADR-0003 amendment 2026-11-10.
 - **Next up:** E7 Rating & dashboards (rating capture landed in E4.S9; aggregation is E7.S2), then E8 hardening, E9 pilot.
 - **Tech stack:** NestJS API + Next.js web + Flutter driver app + Postgres + Redis + OSRM, Phase-0 single VPS.
 

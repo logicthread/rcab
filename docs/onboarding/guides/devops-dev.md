@@ -128,6 +128,8 @@ least 32 bytes), invalid `CORS_ORIGINS` (must be an explicit https list, no wild
 values (`FIREBASE_PROJECT_ID`, `FIREBASE_SERVICE_ACCOUNT_JSON` as one-line JSON in an env var), or an invalid policy
 value all abort boot. A failing `migrator` blocks `api` (`service_completed_successfully`).
 
+**Google sign-in config (owner action):** the api needs `GOOGLE_CLIENT_IDS` (comma list of accepted OAuth client ids; `GOOGLE_CLIENT_ID` is an alias) and the web image build needs `NEXT_PUBLIC_GOOGLE_CLIENT_ID` (inlined at build time). The OAuth clients are created in Google Cloud Console by the owner; both are public identifiers, not secrets. Without a client id the api boots but Google sign-in returns 503 `google_not_configured`. `AUTH_ENABLED_METHODS` (default `google`) is the policy knob; keep `phone` off until the launch OTP provider is chosen.
+
 **Secrets handling is a HITL area.** The authority is
 [`80-infrastructure/secrets-management.md`](../../../80-infrastructure/secrets-management.md); you must not change
 that note, rotate keys, add a secrets product or alter where secrets live without the owner. Note for the owner (not

@@ -4,7 +4,7 @@ For driver managers, trainers and stakeholders. No technical knowledge needed. T
 
 ## 1. Getting started (D01, D02)
 
-1. **Sign in with a phone number** and the SMS one-time code (D01).
+1. **Sign in with Google** (D01). The driver account itself is still set up by the team, not self-registered. Phone SMS sign-in is switched off until launch. (Changed 2026-11-10, RCAB-E8.S15: until launch sign-in and registration are Google-only; phone OTP is disabled behind `auth.enabledMethods`. Recordings W02/D01 show the earlier phone flow until re-recorded.)
 2. **Register a vehicle** (D02): type, registration number, seats. **A driver with no active vehicle receives no ride offers**, and a vehicle needs enough seats for the ride (shared rides need more).
 3. **Phone setup**: some phone makers (OEMs) stop background apps to save battery. The app shows an onboarding sheet explaining which settings to change, and a banner if the system killed the app in the last 24 hours. Trainers should walk every driver through it.
 

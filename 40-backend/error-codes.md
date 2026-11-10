@@ -36,6 +36,10 @@ There is no `details` object. `request_id` is the `x-request-id` header, also re
 | 400 | `reason_required` / `invalid_event` | Driver cancel without a reason / unknown lifecycle event |
 | 401 | `unauthorized` | Missing, invalid or expired Bearer token |
 | 401 | `invalid_firebase_token` / `invalid_google_token` / `email_not_verified` / `invalid_refresh_token` | Failed credential verification (refresh also covers expired / already used; Google email must be verified) |
+| 401 | `google_token_invalid` | Google ID token failed verification (signature, issuer, expiry or audience not in `GOOGLE_CLIENT_IDS`) |
+| 403 | `google_email_unverified` | Google reports `email_verified` false |
+| 403 | `auth_method_disabled` | Sign-in method not in `auth.enabledMethods` (e.g. Firebase phone exchange while Google-only) |
+| 503 | `google_not_configured` | No `GOOGLE_CLIENT_IDS` configured (dev default); the API still boots |
 | 401 | `account_disabled` | Suspended or deleted user on refresh (403 on exchange / Google login) |
 | 401 | `not_found` | Google login with no linked account |
 | 403 | `forbidden` | Wrong role or not your resource |

@@ -10,6 +10,8 @@ audience: both
 
 # Web client — Firebase auth integration
 
+> **Suspended 2026-11-10 (RCAB-E8.S15):** the web app signs in with Google only (Google Identity Services -> `POST /v1/auth/google`; it reads `GET /v1/auth/config` and `NEXT_PUBLIC_GOOGLE_CLIENT_ID`). The Firebase OTP flow below is kept for when `phone` is re-enabled ([[ADR-0003-otp-firebase]] amendment).
+
 *Firebase Web SDK for OTP + Google sign-in. Tokens never persist beyond the exchange.*
 
 ## Initialization

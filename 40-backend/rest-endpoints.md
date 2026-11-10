@@ -17,16 +17,19 @@ audience: both
 ## auth
 | Method | Path | Description |
 |---|---|---|
-| POST | `/v1/auth/firebase-exchange` | Web. Body: `{ id_token }` (Firebase ID token) → `{ access_token, token_type, expires_in, user }`; the refresh token is set as the HttpOnly cookie `refresh_token` (`SameSite=Lax`, path `/v1/auth`) and is **not** in the JSON. Throttled 10/min |
+| GET | `/v1/auth/config` | Public. → `{ methods: ["google"], google: { clientId } }` (`clientId` = first `GOOGLE_CLIENT_IDS` or `null`). Clients render only enabled methods ([[ADR-0003-otp-firebase]] amendment 2026-11-10) |
+| POST | `/v1/auth/google` | Web, **active**. Body `{ id_token }` (Google ID token) → same body as `firebase-exchange` (`user.phone_e164` nullable); sets the HttpOnly refresh cookie, CSRF like `/refresh`. Logs in by `google_sub` or registers a `client`; no email auto-link |
+| POST | `/v1/auth/native/google` | Native, **active**. Body `{ id_token }` → 200 native tokens (adds `refresh_token`, no cookie) |
+| POST | `/v1/auth/firebase-exchange` | **Disabled while `phone` is not in `auth.enabledMethods` (403 `auth_method_disabled`).** Web. Body: `{ id_token }` (Firebase ID token) → `{ access_token, token_type, expires_in, user }`; the refresh token is set as the HttpOnly cookie `refresh_token` (`SameSite=Lax`, path `/v1/auth`) and is **not** in the JSON. Throttled 10/min |
 | POST | `/v1/auth/google/link` 🔒 | Body: `{ google_id_token }` → links to current user |
-| POST | `/v1/auth/google/login` | Body: `{ google_id_token }` → JWT if linked |
+| POST | `/v1/auth/google/login` | Legacy; folded into `POST /v1/auth/google` (login-or-register). Body: `{ google_id_token }` |
 | POST | `/v1/auth/refresh` | Web. Reads the `refresh_token` cookie (a body `refresh_token` is also accepted), Origin/Referer must be in `CORS_ORIGINS` → rotated `{ access_token, ... }` + new cookie. Single use; replay after the 10 s grace revokes the family |
 | POST | `/v1/auth/logout` 🔒 | Web. Needs a valid Bearer and an allowed Origin; revokes the presented refresh token and clears the cookie → 204 |
-| POST | `/v1/auth/native/firebase-exchange` | Native clients. Body `{ id_token }` → 200 tokens JSON (no cookie, no CSRF) |
+| POST | `/v1/auth/native/firebase-exchange` | Native clients. **403 `auth_method_disabled` while `phone` is not enabled.** Body `{ id_token }` → 200 tokens JSON (no cookie, no CSRF) |
 | POST | `/v1/auth/native/refresh` | Native. Body `{ refresh_token }` → 200 rotated tokens; replay revokes the session family |
 | POST | `/v1/auth/native/logout` | Native. Body `{ refresh_token }` → 204 always. Possession of the refresh token is the credential (no Bearer needed, so it works after the access token expired); throttled 10/min |
 
-Auth errors: 403 `account_disabled` (exchange/Google login), 401 `account_disabled` (refresh). See [[module-auth]].
+Auth errors: 403 `account_disabled` (exchange/Google login), 401 `account_disabled` (refresh), 401 `google_token_invalid`, 403 `google_email_unverified`, 503 `google_not_configured`, 403 `auth_method_disabled`. See [[module-auth]].
 
 ## clients (🧍)
 | Method | Path | Description |
