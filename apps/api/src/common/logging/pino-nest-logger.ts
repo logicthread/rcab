@@ -10,7 +10,10 @@ type Level = 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal';
  * registering this via `app.useLogger` puts them on stdout (and into Loki).
  *
  * Nest passes the context as the LAST string argument, and for `error()` an
- * optional stack string before it.
+ * optional stack string before it. Most call sites use the pino shape
+ * `log.warn({ ...fields }, 'message')`; Nest hands that over as
+ * (fields, 'message', context), so a leading string after an object message is
+ * the message text, unless it is a stack trace on `error()`/`fatal()`.
  */
 export class PinoNestLogger implements LoggerService {
   constructor(private readonly pino: PinoLogger = defaultLogger) {}
@@ -42,7 +45,13 @@ export class PinoNestLogger implements LoggerService {
     }
     const fields: Record<string, unknown> = {};
     if (context) fields.context = context;
-    if (withStack && rest.length > 0 && typeof rest[0] === 'string') fields.stack = rest.shift();
+    const objectMessage = typeof message === 'object' && message !== null && !(message instanceof Error);
+    let text: string | undefined;
+    if (rest.length > 0 && typeof rest[0] === 'string') {
+      const first = rest[0] as string;
+      if (withStack && (!objectMessage || isStack(first))) fields.stack = rest.shift();
+      else if (objectMessage) text = rest.shift() as string;
+    }
 
     let msg: string;
     if (message instanceof Error) {
@@ -51,10 +60,14 @@ export class PinoNestLogger implements LoggerService {
     } else if (typeof message === 'object' && message !== null) {
       Object.assign(fields, message);
       const m = (message as { message?: unknown }).message;
-      msg = typeof m === 'string' ? m : '';
+      msg = text ?? (typeof m === 'string' ? m : '');
     } else {
       msg = String(message);
     }
     this.pino[level](fields, msg);
   }
+}
+
+function isStack(s: string): boolean {
+  return /\n\s+at /.test(s);
 }
