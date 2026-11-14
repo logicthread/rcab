@@ -279,7 +279,8 @@ codegraph/      graph.json + graph.md   (queryable code graph — `/code-graph`,
 ## 11. Config (`.env.dev`, auto-created by `pnpm dev:up`)
 
 Key vars: `POSTGRES_USER/PASSWORD/DB` (rcab/rcab/rcab), `OSM_PBF_URL` (OSRM region),
-`FIREBASE_PROJECT_ID`, `FIREBASE_SERVICE_ACCOUNT_JSON`, `CORS_ORIGINS` (required outside dev/test), `FIREBASE_PHONE_TEST_TOKEN`
+`GOOGLE_CLIENT_IDS`, `AUTH_ENABLED_METHODS` (default `google`), `CORS_ORIGINS` (required outside dev/test), `FIREBASE_PROJECT_ID` +
+`FIREBASE_SERVICE_ACCOUNT_JSON` (needed only while `phone` is enabled; the api boots without them when Google-only), `FIREBASE_PHONE_TEST_TOKEN`
 (pre-minted test ID token to skip the SMS round-trip in smoke tests), `JWT_SECRET` (>=32 bytes, no placeholder, required unless `NODE_ENV` is development/test),
 `NEXT_PUBLIC_API_URL`. Tunables read via `ConfigService` include
 `SCHEDULED_WAKE_LEAD_MS`, `MATCHING_POOL_TIMEOUT_MS`, `SCHEDULED_DISPATCH_CONCURRENCY`.

@@ -6,7 +6,7 @@ Audience: engineering or delivery manager taking over rcab. Plain-language, no c
 
 rcab is a ride-hailing platform for one city pilot: passengers book on a web app, drivers use an Android app, an API matches them, and an operations stack watches it all. Everything runs on one server (Phase-0, ADR-0009).
 
-Working end to end: phone sign-in, driver go-online, normal rides (quote, book, offers to nearby drivers, ride steps, cancellation, rating), shared rides (several passengers pooled into one trip with stops), scheduled rides (book 15 min to 24 h ahead, the system starts looking 10 minutes before pickup and keeps trying up to 30 minutes after pickup time), live tracking, dashboards, backups and a release pipeline.
+Working end to end: Google sign-in (phone OTP disabled until launch), driver go-online, normal rides (quote, book, offers to nearby drivers, ride steps, cancellation, rating), shared rides (several passengers pooled into one trip with stops), scheduled rides (book 15 min to 24 h ahead, the system starts looking 10 minutes before pickup and keeps trying up to 30 minutes after pickup time), live tracking, dashboards, backups and a release pipeline.
 
 Not yet there: driver earnings and history screens, rating averages and moderation (E7), working alerts to a chat channel, security/TLS audit, pilot runbooks (E8/E9). Payments are not in the product: fares are shown, collection is outside the system.
 
@@ -70,6 +70,7 @@ Phase-1 (multi-host, iOS and so on) is deliberately out of scope; triggers are i
 | Alert channel (Slack webhook or other) | Alerts exist for 5xx and latency but go nowhere. | `80-infrastructure/observability.md` |
 | Pool edge cases (member cancel, fallback to solo, early assignment for scheduled) | Behaviour undefined in product terms. | `docs/remediation/stage-c-contract.md` section 9 |
 | Demo 5 sign-off walk | Epic E6 cannot be declared complete. | `docs/manual-testing/demo-walkthrough.md` |
+| Launch OTP provider (Firebase, MSG91 or another) and when to re-enable phone sign-in | Sign-in is Google-only until launch; phone sign-in stays off until chosen (DLT/SMS setup deferred). | `99-decisions/ADR-0003-otp-firebase.md` (amendment 2026-11-10) |
 | Cancellation fees | Phase-0 has none; confirm for pilot. | `docs/POLICY.md` |
 
 ## 7. Risk register

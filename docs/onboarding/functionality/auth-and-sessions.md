@@ -1,28 +1,47 @@
 # Auth and sessions
 
-Phone-OTP identity (Firebase) exchanged for first-party JWTs, with single-use refresh-token rotation. Two session contracts share one service: a **web** contract (HttpOnly cookie + CSRF check) and a **native** contract (JSON tokens in secure storage) used by the driver app.
+**Google-only until launch (RCAB-E8.S15, owner decision 2026-11-10).** A Google ID token, verified directly with Google, is exchanged for first-party JWTs, with single-use refresh-token rotation. Two session contracts share one service: a **web** contract (HttpOnly cookie + CSRF check) and a **native** contract (JSON tokens in secure storage) used by the driver app.
 
 Back to [README](../README.md) · system context in [01-system-overview](../01-system-overview.md) · session state diagram in [state-machines](../state-machines.md).
 
-## What it does
+## Sign-in methods (current)
+
+- Policy knob `auth.enabledMethods` (env `AUTH_ENABLED_METHODS`, comma list over `google`, `phone`; default `google`) decides what is allowed. Clients read `GET /v1/auth/config` (public) -> `{ methods, google: { clientId } }` and render only enabled methods.
+- **Google (enabled):** web `POST /v1/auth/google` (sets the refresh cookie) and native `POST /v1/auth/native/google` take `{ id_token }`. Any Google account with `email_verified=true` is accepted; the audience must be in `GOOGLE_CLIENT_IDS`. Login is by `google_sub`; an unknown sub registers a `client` (never auto-linked by email). The driver role is still provisioned out of band. Errors: `google_token_invalid` (401), `google_email_unverified` (403), `google_not_configured` (503, dev without a client id), `account_disabled` (403).
+- **Phone OTP (disabled, not deleted):** while `phone` is not enabled both `firebase-exchange` routes return 403 `auth_method_disabled`. The section below describes that path; it returns when the launch OTP provider (Firebase, MSG91 or other) is chosen. See ADR-0003 amendment.
+- Users no longer always have a phone: `phone_e164` is nullable (migration 0018), with a check that a phone or a `google_sub` exists.
+
+## What it does (phone path, disabled until launch)
 
 1. The client proves phone ownership to **Firebase** (SMS code) and gets a Firebase ID token.
 2. The API verifies the ID token with `firebase-admin`, upserts the user and mints an **access JWT** (15 min) plus an opaque **refresh token** (30 days).
 3. The access token goes in `Authorization: Bearer` on every REST call and in the Socket.IO handshake. The refresh token is rotated on every use.
 4. Logout revokes the refresh token. Replaying an old refresh token revokes the whole session family.
 
-A Google account can be linked to an existing phone account and later used to log in (`google/link`, `google/login`). Nothing in the shipped clients calls these two routes; they are API-only.
+`google/login` is folded into `POST /v1/auth/google`; `google/link` stays for the phone-enabled era and is not called by the clients.
 
 ## User-visible behaviour
 
 | Surface | Behaviour |
 |---|---|
-| Web `/signin` | Two steps: phone number in E.164 (`+91XXXXXXXXXX`) then 6-digit code. An invisible reCAPTCHA protects the send. On success the user lands on `/book`. Errors appear in a `role="alert"` line. Already signed in: redirected to `/book`. Videos W02, W01 |
+| Web `/signin` | "Continue with Google" (Google Identity Services), rendered from `GET /v1/auth/config`; the phone-then-code form (invisible reCAPTCHA) appears only if `phone` is enabled. On success the user lands on `/book`. Errors appear in a `role="alert"` line. Already signed in: redirected to `/book`. Videos W02, W01 |
 | Web reload | The access token lives **in memory only** (Zustand). On reload `withAuth` calls `POST /v1/auth/refresh` with the cookie; no cookie or a rejected refresh sends the user to `/signin`. Video W09 |
 | Web sign out | Local state is cleared first, then the server revokes the refresh token and clears the cookie. A refresh is done first if the access token is expired, because logout itself needs a valid bearer. Video W10 |
-| Driver app sign-in | Phone + SMS code screen (`lib/features/auth/sign_in_screen.dart`). Tokens go to `flutter_secure_storage`. A rejected refresh signs the driver out. Video D01 |
+| Driver app sign-in | "Continue with Google" screen driven by `/v1/auth/config` (`lib/features/auth/sign_in_screen.dart`); a signed-in account whose role is not `driver` lands on "Not registered as a driver yet" (`not_a_driver_screen.dart`: shows the email, Sign out, Retry), see Provisioning a driver below. Tokens go to `flutter_secure_storage`. A rejected refresh signs the driver out. Video D01 |
 
 Scene IDs: web [W01, W02, W09, W10](../videos/web/INDEX.md), driver app [D01](../videos/driver/INDEX.md).
+
+## Provisioning a driver
+
+A Google sign-in always registers a `client`, so a driver account is enabled by an operator after the person has signed in once with Google:
+
+```bash
+scripts/provision-driver.sh driver@example.com --vehicle-reg AS01AB1234 --dry-run   # preview
+scripts/provision-driver.sh driver@example.com --vehicle-reg AS01AB1234             # dev compose postgres
+scripts/provision-driver.sh driver@example.com --database-url postgres://...        # any other database
+```
+
+It matches `app_user.email` case-insensitively, refuses an unknown, ambiguous (several accounts share the email) or non-active account, sets `role='driver'`, inserts the `driver` row, removes the unused `client` row (kept when the user has rides as a passenger) and optionally creates a starter vehicle. It is idempotent. The role reaches the user at the **next token refresh**: `POST /v1/auth/native/refresh` (and the web refresh) read `app_user.role` from the database, so the driver taps **Retry** on the "Not registered as a driver yet" screen, or waits up to 15 minutes for the access token to expire; an access token already issued keeps the old `role` claim until then. Follow-up (not built): an admin endpoint to do this without database access.
 
 ## API endpoints
 
@@ -37,7 +56,7 @@ Scene IDs: web [W01, W02, W09, W10](../videos/web/INDEX.md), driver app [D01](..
 | `POST /v1/auth/google/login` | public | Body `{ google_id_token }`; 401 `not_found` if no account is linked |
 | `POST /v1/auth/google/link` | Bearer | Links a Google `sub` + email; 409 `google_already_linked` if linked to another user |
 
-Error codes: `invalid_firebase_token`, `invalid_refresh_token`, `account_disabled` (403 on exchange, 401 on refresh), `csrf_rejected` (403), `unauthorized`, `google_already_linked`, `not_found`. The envelope is always `{ "error": { "code", "message", "request_id" } }`.
+Error codes: `google_token_invalid`, `google_email_unverified`, `google_not_configured`, `auth_method_disabled`, `invalid_firebase_token`, `invalid_refresh_token`, `account_disabled` (403 on exchange, 401 on refresh), `csrf_rejected` (403), `unauthorized`, `google_already_linked`, `not_found`. The envelope is always `{ "error": { "code", "message", "request_id" } }`.
 
 Contract fixture shared by API and driver app: `apps/api/test/fixtures/native-auth-contract.json` and `apps/driver-app/test/fixtures/native_auth_contract.json` (kept in step by `native-contract-parity.spec.ts`).
 
@@ -89,7 +108,8 @@ Socket.IO authenticates in `handleConnection`: token from `handshake.auth.token`
 
 ## Operating notes
 
-- Without SMS (dev, demos): add **test phone numbers** with fixed codes in the Firebase console, or use a pre-minted `FIREBASE_PHONE_TEST_TOKEN` for curl-only checks ([RUN-GUIDE](../../manual-testing/RUN-GUIDE.md) section 3). Seeded fixture users have synthetic `firebase_uid`s and cannot sign in.
+- Dev sign-in (current): Google only. Create an OAuth client and set `GOOGLE_CLIENT_IDS` / `NEXT_PUBLIC_GOOGLE_CLIENT_ID`, see [RUN-GUIDE](../../manual-testing/RUN-GUIDE.md) section 3. Without a client id the api returns 503 `google_not_configured`.
+- Phone path, only when re-enabled and without SMS (dev, demos): add **test phone numbers** with fixed codes in the Firebase console, or use a pre-minted `FIREBASE_PHONE_TEST_TOKEN` for curl-only checks ([RUN-GUIDE](../../manual-testing/RUN-GUIDE.md) section 3). Seeded fixture users have synthetic `firebase_uid`s and cannot sign in.
 - Suspend a user: `UPDATE app_user SET status = 'suspended' WHERE id = ...`. Their next refresh fails and revokes their tokens; an access token already issued stays valid until it expires (at most 15 min).
 
 ## Known gaps

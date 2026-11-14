@@ -393,7 +393,7 @@ tokens live `REFRESH_TOKEN_TTL_MS` (30 days). Web and native use parallel routes
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Live: login (firebase-exchange / google login) INSERT, new family
+    [*] --> Live: login (google sign-in; firebase-exchange only when `phone` is enabled) INSERT, new family
     Live --> Rotated: POST refresh, UPDATE revoked_at=now() and INSERT successor in same family
     Rotated --> GraceReject: presented again within REFRESH_REUSE_GRACE_S (10 s)
     GraceReject --> Rotated: rejected 401, family untouched (concurrent or retried refresh)
@@ -415,7 +415,7 @@ stateDiagram-v2
 | Live | refresh for a user now `suspended`/`deleted` | `BLOCKED_USER_STATUSES` | Revoked (all of that user's live tokens) | no successor | 401 `account_disabled` | `#refresh` |
 | Live | `POST …/logout` / `native/logout` (possession of the token is the credential) | — | Revoked | idempotent, silent | — | `#revoke`, `#revokePresented` |
 
-Google link / login (`/v1/auth/google/*`) mints sessions with `auth_method='google'` using the same machine.
+Google sign-in (`POST /v1/auth/google`, `/v1/auth/native/google`) mints sessions with `auth_method='google'` using the same machine. It is the only enabled sign-in until launch (`auth.enabledMethods`); the firebase-exchange row above applies only when `phone` is re-enabled.
 Refresh-token revocation lives in Postgres, **not Redis**. **Videos:** [W01](videos/web/INDEX.md#w01) /
 [W02](videos/web/INDEX.md#w02) (sign-in UI), [W10](videos/web/INDEX.md#w10) (sign out), [D01](videos/driver/INDEX.md#d01).
 Reuse/rotation is proved by `test/integration/auth.int.spec.ts`.

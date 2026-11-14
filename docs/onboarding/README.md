@@ -4,7 +4,7 @@ Start here. This pack lets a new team take over rcab: what the system is, how ev
 
 ## What rcab is
 
-rcab is a Phase-0 ride-hailing platform for tier-2/3 Indian cities. Passengers book on a **web app** (private, shared or scheduled rides), drivers work in a **Flutter Android app**, and one **NestJS API** matches, dispatches and tracks trips over **Postgres** (system of record), **Redis** (geo index, queues, projections) and a self-hosted **OSRM** router, with Firebase phone-OTP for identity. Everything runs on one VPS under one docker-compose (ADR-0009). Metrics, logs, dashboards and uptime checks are part of the stack.
+rcab is a Phase-0 ride-hailing platform for tier-2/3 Indian cities. Passengers book on a **web app** (private, shared or scheduled rides), drivers work in a **Flutter Android app**, and one **NestJS API** matches, dispatches and tracks trips over **Postgres** (system of record), **Redis** (geo index, queues, projections) and a self-hosted **OSRM** router, with Google-only sign-in for identity until launch (phone OTP is disabled behind a policy flag; the launch OTP provider is undecided). Everything runs on one VPS under one docker-compose (ADR-0009). Metrics, logs, dashboards and uptime checks are part of the stack.
 
 Status in one line: epics E1 to E6 shipped (Demo 5 sign-off walk still owed), E7 (rating aggregation, history, earnings) and E9 (pilot) not started, E8 (hardening) in flight. `95-delivery/stories-index.md` is the source of truth.
 
@@ -47,7 +47,7 @@ Each page states what the area does, user-visible behaviour, API and socket surf
 
 | Page | Area |
 |---|---|
-| [auth-and-sessions](functionality/auth-and-sessions.md) | Phone OTP, access and refresh tokens, web cookie vs native contract, rotation, logout, account status |
+| [auth-and-sessions](functionality/auth-and-sessions.md) | Google-only sign-in (phone OTP disabled until launch), access and refresh tokens, web cookie vs native contract, rotation, logout, account status |
 | [driver-onboarding-and-presence](functionality/driver-onboarding-and-presence.md) | Making a driver, vehicles, online toggle, geo index, auto-offline sweep |
 | [quoting-and-pricing](functionality/quoting-and-pricing.md) | Solo fare formula, quote tokens, shared seat pricing, the fixed-at-join stand-in (E8.S9 pending) |
 | [normal-booking](functionality/normal-booking.md) | The private-ride path end to end |

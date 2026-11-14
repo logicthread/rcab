@@ -28,12 +28,13 @@ rebuilds the stack. Simulated drivers stay in **Guwahati Area A** (26.1445, 91.7
 | `lib/overlay.ts` | In-page caption bar with the state-machine chips, title card and a visible cursor (the ffmpeg build has no `drawtext`) |
 | `lib/driver-sim.ts` | The scripted driver: online + heartbeat, offer policy (accept / decline / ignore), `driveTo`, state transitions, cancel, no-show, shared stop confirms |
 | `lib/devstack.ts` | **Test-harness-only** dev-stack access: guards, `psql` / `redis-cli` via `docker compose exec`, access-token and refresh-token minting, wake-job promotion |
+| `lib/google-stub.ts` | Recording-browser stand-in for Google sign-in (config, GIS script, refused `/v1/auth/google`); used by W01, W02, W10 |
 | `lib/fixtures.ts` | Fixture riders and drivers (`firebase_uid LIKE 'webrec-%'`, ids `...0074NN` / `...0075NN` / `...0076NN`) and their cleanup |
 | `lib/booking-ui.ts`, `lib/map.ts` | Booking-page helpers: tap a lat/lng on the Leaflet map, wait for the quote, choose Private / Share |
 
 ## Sessions (how the scenes get past sign-in)
 
-Both apps sign in with a real Firebase phone OTP, which a recording must not trigger. W02 therefore shows the sign-in **UI only**.
+Both apps sign in with Google only until launch (RCAB-E8.S15; phone OTP is off via policy `auth.enabledMethods`), and a recording must not talk to Google. W02 therefore shows the sign-in **UI only**: `lib/google-stub.ts` replaces, in the recording browser only, `GET /v1/auth/config` (the dev API has no Google client id yet), the Google Identity Services script and `POST /v1/auth/google` (always an error, never a session). W01 and W10 end on the sign-in screen and use the same stub.
 For W03-W10 the harness creates a session for a fixture rider the way `infra/load/prepare-dev.mjs` does for load users:
 
 1. `lib/devstack.ts` refuses to run against a non-loopback API, `NODE_ENV=production`, a missing `.env.dev`, or a compose project that

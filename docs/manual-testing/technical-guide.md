@@ -14,7 +14,7 @@ Read this alongside [`demo-walkthrough.md`](./demo-walkthrough.md). This doc exp
 
 ```
                                 ┌──────────────┐
-                                │  Firebase    │  (phone OTP only)
+                                │  Google IdP  │  (Google-only sign-in)
                                 │   Auth       │
                                 └──────┬───────┘
                                        │ ID token
@@ -74,7 +74,7 @@ Located in `apps/api/src/modules/`. Each module is a NestJS module: controller (
 | Module | What it does | Built in | Key endpoints / events |
 |---|---|---|---|
 | `health` | Liveness + readiness probes, Prometheus metrics | E1 | `GET /v1/health/live`, `GET /v1/health/ready`, `GET /metrics` |
-| `auth` | Firebase ID-token exchange → rcab JWT; refresh + revocation; Google link/login | E2 | `POST /v1/auth/firebase-exchange`, `POST /v1/auth/refresh`, `POST /v1/auth/logout`, `POST /v1/auth/google/{login,link}` |
+| `auth` | Google ID-token sign-in/registration (Firebase phone exchange gated off until launch) → rcab JWT; refresh + revocation; Google link/login | E2 | `POST /v1/auth/google`, `POST /v1/auth/native/google`, `GET /v1/auth/config`, `POST /v1/auth/refresh`, `POST /v1/auth/logout`, `POST /v1/auth/google/{login,link}` |
 | `vehicles` | Vehicle CRUD per driver | E3 | `POST /v1/vehicles`, `GET /v1/vehicles`, `PATCH /v1/vehicles/:id` |
 | `drivers` | Online/offline toggle, vehicle update, presence-write side effect | E3 | `POST /v1/drivers/online`, `POST /v1/drivers/offline`, `PATCH /v1/drivers/me/vehicle` |
 | `realtime` | Socket.IO gateway for driver location stream, ride subscription, offer responses, stop confirmations | E3, E4, E5 | WS events: `driver:location`, `ride:subscribe`, `ride_offer_response`, `stop:pickup_confirmed`, `stop:drop_confirmed` |
@@ -190,7 +190,7 @@ Pages live under `apps/web/src/app/`:
 | Route | Purpose |
 |---|---|
 | `/` | Landing / signed-in home |
-| `/signin` | Firebase OTP flow (reCAPTCHA + verify) |
+| `/signin` | Continue with Google (phone OTP only if `phone` is enabled) |
 | `/book` | Map (Leaflet + OSM tiles), pick/drop, fetch quote, request ride, watch live state |
 
 Client state via React hooks; API access via `@rcab/api-client`; WS via `socket.io-client`.
@@ -211,7 +211,7 @@ Things to test on the web side:
 
 | Screen | Purpose |
 |---|---|
-| `auth/sign_in_screen.dart` | Phone-OTP |
+| `auth/sign_in_screen.dart` | Continue with Google; `auth/not_a_driver_screen.dart` for non-driver roles |
 | `profile/vehicle_form_screen.dart` | Register / edit vehicle |
 | `profile/profile_screen.dart` | Profile view |
 | `home/home_screen.dart` | Online/offline toggle + earnings glimpse |
@@ -235,32 +235,28 @@ Things to test on the driver side:
 ## 8. Auth flow (end-to-end)
 
 ```
-Web/Driver app                 API                    Firebase
-     │                          │                        │
-     │ signInWithPhoneNumber    │                        │
-     ├─────────────────────────────────────────────────► │
-     │                          │                        │
-     │ ID token                 │                        │
-     │◄─────────────────────────────────────────────────┤
-     │                          │                        │
-     │ POST /v1/auth/           │                        │
-     │   firebase-exchange      │                        │
-     ├─────────────────────────►│                        │
-     │                          │  verify ID token       │
-     │                          ├───────────────────────►│
-     │                          │◄───────────────────────┤
-     │                          │  upsert user           │
-     │                          │  mint rcab JWT pair    │
-     │ {access, refresh-cookie} │                        │
-     │◄─────────────────────────┤                        │
-     │                          │                        │
-     │ ... access expires ...   │                        │
-     │                          │                        │
-     │ POST /v1/auth/refresh    │                        │
-     │ (cookie auto-sent)       │                        │
-     ├─────────────────────────►│                        │
-     │ new {access}             │                        │
-     │◄─────────────────────────┤                        │
+Web/Driver app                 API                    Google
+     |                          |                        |
+     | Google sign-in (GIS / google_sign_in) ----------->|
+     |<------------------------ ID token ----------------|
+     |                          |                        |
+     | POST /v1/auth/google     |                        |
+     |   (native: /native/google)                        |
+     |   {id_token}             |                        |
+     |------------------------->|  verify signature, iss,|
+     |                          |  exp, aud, email_verified
+     |                          |  login by google_sub, or
+     |                          |  register a client     |
+     |                          |  mint rcab JWT pair    |
+     | {access, refresh-cookie} |                        |
+     |<-------------------------|                        |
+     |                          |                        |
+     | ... access expires ...   |                        |
+     |                          |                        |
+     | POST /v1/auth/refresh    |  re-reads app_user.role|
+     | (cookie auto-sent)       |  from the database     |
+     |------------------------->|                        |
+     | new {access}             |                        |
 ```
 
 JWT details:
@@ -346,7 +342,7 @@ What's **not** covered yet:
 Environment files:
 - `.env.dev` — local stack defaults (auto-created by `pnpm dev:up`).
 - `.env.dev.example` — committed template; diff yours against it with `/env-validate`.
-- `apps/web/.env.local` — Next.js public Firebase config.
+- `apps/web/.env.local` — Next.js public config (`NEXT_PUBLIC_GOOGLE_CLIENT_ID`; `NEXT_PUBLIC_FIREBASE_*` only if `phone` is enabled).
 
 Key knobs you'll touch during testing:
 

@@ -12,7 +12,7 @@ ride lifecycle, sessions, rate limits, realtime cadence, the outbox loop, and th
   (one deployment), then run `pnpm policy:doc`. "Code-fixed" knobs have no env var: change them in the schema.
 - **Clients:** `apps/web/src/config/policy.ts` and `apps/driver-app/lib/core/config/policy.dart`.
 
-67 server knobs (64 env-overridable) in 13 categories, 10 cross-field rules, 11 web and 11 driver-app knobs.
+68 server knobs (65 env-overridable) in 14 categories, 11 cross-field rules, 11 web and 11 driver-app knobs.
 
 ## Contents
 
@@ -24,6 +24,7 @@ ride lifecycle, sessions, rate limits, realtime cadence, the outbox loop, and th
 - Driver presence (2)
 - Realtime (2)
 - Sessions & auth (4)
+- Sign-in methods (1)
 - Idempotency (1)
 - Rate limits (4)
 - Outbox relay & reconciler (9)
@@ -132,6 +133,14 @@ Token lifetimes and refresh rotation grace.
 | `sessions.refreshReuseGraceS` | `REFRESH_REUSE_GRACE_S` | 10 | integer ≥ 0 | s | A just-rotated refresh token reused within this window gets a plain 401, not a family revoke. | RCAB-E8.S7 (sessions remediation): 10 s reuse grace for racing clients. |
 | `sessions.firebaseTokenMaxAgeS` | `FIREBASE_TOKEN_MAX_AGE_S` | 3600 | integer ≥ 60 | s | Reject a Firebase ID token whose iat is older than this at exchange. | RCAB-E2.S1: matches Firebase ID-token lifetime (1 h). |
 
+## Sign-in methods
+
+Which sign-in / registration methods are enabled.
+
+| Key | Env var | Default | Allowed | Unit | Description | Decision |
+| --- | --- | --- | --- | --- | --- | --- |
+| `auth.enabledMethods` | `AUTH_ENABLED_METHODS` | `google` | subset of `google`, `phone` | methods | Sign-in / registration methods the API accepts and GET /v1/auth/config advertises (comma list, at least one). A disabled method answers 403 auth_method_disabled. | owner 2026-11-10: Google-only until launch; OTP provider TBD (RCAB-E8.S15, ADR-0003 amendment). |
+
 ## Idempotency
 
 Create-request claim reclaim.
@@ -206,6 +215,7 @@ Checked at boot after every single knob is valid.
 | last_seen is refreshed through the geo gate, so it must be shorter than the stale cutoff | `REALTIME_GEO_INDEX_GATE_MS`, `DRIVER_STALE_AFTER_MS` |
 | the p95 budget cannot exceed the p99 budget (apiP95Ms ≤ apiP99Ms) | `PERF_BUDGET_API_P95_MS`, `PERF_BUDGET_API_P99_MS` |
 | an access token never outlives its refresh session (accessTokenTtlS × 1000 < refreshTokenTtlMs) | `ACCESS_TOKEN_TTL_S`, `REFRESH_TOKEN_TTL_MS` |
+| at least one sign-in method must stay enabled (auth.enabledMethods non-empty) | `AUTH_ENABLED_METHODS` |
 
 ## Client knobs
 

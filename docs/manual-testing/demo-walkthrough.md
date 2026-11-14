@@ -24,7 +24,7 @@ Companion: [`technical-guide.md`](./technical-guide.md) explains the architectur
 
 ## Test environment
 
-Single laptop. No remote services needed except Firebase Auth (phone OTP).
+Single laptop. No remote services needed except Google sign-in (an OAuth web client id; sign-in is Google-only until launch, see RUN-GUIDE section 0).
 
 | Service | URL | Purpose |
 |---|---|---|
@@ -56,7 +56,7 @@ flutter pub get
 flutter run -d <device-id>   # set API_BASE_URL via --dart-define=API_BASE_URL=http://<LAN-IP>:3000
 ```
 
-If `dev:smoke` fails: `pnpm dev:logs` and look for the red service. Most common: Firebase service-account env var missing (Demo 1+).
+If `dev:smoke` fails: `pnpm dev:logs` and look for the red service. Most common for Demo 1+: `GOOGLE_CLIENT_IDS` unset (Google sign-in answers 503 `google_not_configured`). Firebase values are not needed while Google-only.
 
 ### Test-data shortcuts
 
@@ -123,50 +123,42 @@ Or via skill: `/seed-db --reset --scenario=default`.
 
 ## Demo 1 — I am a real user (epic E2)
 
-**Proves:** end-to-end phone-OTP signup in the web app; refresh tokens; logout.
+**Proves:** end-to-end Google sign-in/registration in the web app; refresh tokens; logout.
 
 ### Pre-flight
 - Demo 0 passed.
-- Firebase project configured: `FIREBASE_SERVICE_ACCOUNT_JSON` in `.env.dev` and matching web client config in `apps/web/.env.local` (`NEXT_PUBLIC_FIREBASE_*`).
-- A real phone you can receive SMS on (Firebase free tier permits low volume).
+- Google OAuth web client id configured: `GOOGLE_CLIENT_IDS` in `.env.dev` and `NEXT_PUBLIC_GOOGLE_CLIENT_ID` for the web build (RUN-GUIDE section 0). `curl localhost:3000/v1/auth/config` lists `google`.
+- A Google account with a verified email.
 
 ### Steps
-1. Open http://localhost:3001 → click **Sign in**.
-2. Enter phone number with country code (e.g. `+91XXXXXXXXXX`).
-3. Solve the reCAPTCHA, click **Send OTP**.
-4. Enter the 6-digit OTP from SMS, click **Verify**.
-5. Confirm you land back on `/` as a signed-in user (name/phone visible in header).
-6. Open DevTools → Application → Cookies. Confirm the `refresh_token` cookie is set, `HttpOnly`, `SameSite=Lax`, path `/v1/auth`.
-7. In a new terminal:
+1. Open http://localhost:3002/signin.
+2. Click **Continue with Google** and pick the account.
+3. Confirm you land on `/book` as a signed-in user (email visible under "Signed in as").
+4. Open DevTools -> Application -> Cookies. Confirm the `refresh_token` cookie is set, `HttpOnly`, `SameSite=Lax`, path `/v1/auth`.
+5. In a new terminal:
    ```bash
-   # Find your user row
-   psql postgres://postgres:postgres@localhost:5432/rcab -c \
-     "SELECT id, phone, created_at FROM users ORDER BY created_at DESC LIMIT 5;"
+   docker compose --env-file .env.dev -f infra/docker/docker-compose.dev.yml exec -T postgres \
+     psql -U rcab -d rcab -c "SELECT id, phone_e164, email, google_sub, role FROM app_user ORDER BY created_at DESC LIMIT 5;"
    ```
-8. Hard-refresh the page. You should stay signed in (refresh-token flow kicked).
-9. Click **Sign out**. Confirm cookie cleared and you're back at the public page.
-10. Try to use the old access token in DevTools:
-    ```bash
-    curl -H "Authorization: Bearer <expired-token>" localhost:3000/v1/rides/quote -d '{}' -H "Content-Type: application/json"
-    ```
-    → expect `401 Unauthorized` (token revoked on logout).
+6. Hard-refresh the page. You should stay signed in (refresh-token flow).
+7. Click **Sign out**. Confirm cookie cleared and you're back at the public page.
+8. Sign in again with the same account: still one `app_user` row.
 
 ### Pass criteria
-- OTP arrives within 30 s.
-- User row in `users` table after first sign-in; **not** duplicated on subsequent sign-ins.
-- Refresh cookie is `HttpOnly` + `SameSite=Strict` + `Secure` (in prod build).
-- Sign-out revokes the JWT (next API call with the stale access token → 401).
+- One `app_user` row per `google_sub` (role `client`, `phone_e164` NULL), not duplicated on re-sign-in.
+- Sign-out revokes the session (the old refresh token is rejected).
 
 ### Common failures
-- **`auth/captcha-check-failed`** → reCAPTCHA site key in `NEXT_PUBLIC_FIREBASE_*` doesn't match Firebase console.
-- **OTP never arrives** → check Firebase Auth → Sign-in method → Phone is enabled, and the test number isn't in the whitelist.
-- **`401` on first call after OTP** → API can't reach Firebase Admin; check `FIREBASE_SERVICE_ACCOUNT_JSON` is valid one-line JSON.
+- **503 `google_not_configured`** -> `GOOGLE_CLIENT_IDS` is empty; set it and restart the api.
+- **`google_token_invalid`** -> the web client id in the browser differs from the one in `GOOGLE_CLIENT_IDS`.
+- **`google_email_unverified`** -> the Google account's email is not verified.
 
 ---
 
+
 ## Demo 2 — The driver is online (epic E3)
 
-**Proves:** driver app phone-OTP, vehicle registration, online toggle, location stream to Redis.
+**Proves:** driver app Google sign-in, driver provisioning, vehicle registration, online toggle, location stream to Redis.
 
 ### Pre-flight
 - Demos 0–1 pass.
@@ -176,8 +168,8 @@ Or via skill: `/seed-db --reset --scenario=default`.
 
 ### Steps
 1. Driver app launches → **Sign in** screen.
-2. Phone-OTP (same Firebase project as web).
-3. After OTP, app routes to **Vehicle registration**:
+2. **Continue with Google**. A first sign-in registers a client, so the app shows **Not registered as a driver yet**. Enable it: `scripts/provision-driver.sh <your-google-email>` (add `--dry-run` to preview), then tap **Retry**.
+3. The app routes to Home; add a vehicle (profile -> add vehicle) if you did not pass `--vehicle-reg`:
    - Enter plate, make, model, color, seats.
    - Submit.
 4. Lands on **Home** with **Offline / Online** toggle.
@@ -194,7 +186,7 @@ Or via skill: `/seed-db --reset --scenario=default`.
 8. Toggle **Offline**. Within 5 s the driver disappears from `drivers:geo`.
 
 ### Pass criteria
-- Driver row in `drivers` table after OTP.
+- Driver row in the `driver` table after provisioning (role `driver`, no `client` row).
 - Vehicle row linked to driver in `vehicles` table.
 - `drivers:geo` ZSET contains the driver while online, removed while offline.
 - Foreground service survives the screen turning off for at least 2 minutes (re-check redis).

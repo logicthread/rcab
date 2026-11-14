@@ -30,7 +30,7 @@ None.
    ```bash
    grep -rn 'NEXT_PUBLIC_' apps/web/src/ 2>/dev/null
    ```
-   Flag any that contain SECRET, PASSWORD, KEY (except public API keys that are meant to be client-side, like Firebase config).
+   Flag any that contain SECRET, PASSWORD, KEY (except public identifiers meant to be client-side: `NEXT_PUBLIC_GOOGLE_CLIENT_ID`, and `NEXT_PUBLIC_FIREBASE_*` which is only used if `phone` is re-enabled).
 
 4. **Check for common OWASP patterns.**
    - SQL injection: raw SQL without parameterization
@@ -44,6 +44,13 @@ None.
    - Open redirects: unvalidated redirect URLs
      ```bash
      grep -rn --include='*.ts' 'res.redirect.*req\.' apps/api/src/ 2>/dev/null
+     ```
+
+   - Auth (Google-only sign-in until launch, RCAB-E8.S15): the Google ID token must be verified server-side and never logged or stored; sign-in must never link accounts by email; phone must stay gated by `auth.enabledMethods`.
+     ```bash
+     grep -rniE 'console\.log|logger\.(info|debug).*(id_?token|idToken)' apps/api/src/modules/auth apps/api/src/infra/google 2>/dev/null
+     grep -rn 'email' apps/api/src/modules/auth/auth.service.ts | grep -iE 'WHERE|ON CONFLICT' 2>/dev/null   # lookups must be by google_sub, not email
+     grep -rn 'AUTH_ENABLED_METHODS' infra/docker/env.example/ 2>/dev/null   # expect google only (no phone) in prod
      ```
 
 5. **Check dependency versions for known CVEs.** Look for pinned versions with known issues:
@@ -66,7 +73,7 @@ None.
    | Outdated deps (major) | 3        | info     |
    
    **Action items:**
-   - [ ] Review NEXT_PUBLIC_FIREBASE_API_KEY exposure (expected, but verify)
+   - [ ] Review NEXT_PUBLIC_GOOGLE_CLIENT_ID exposure (public by design; verify it is the web client id only)
    - [ ] Update express from 4.18 → 4.21 (CVE-xxx)
    ```
 

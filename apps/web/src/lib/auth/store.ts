@@ -11,7 +11,9 @@ export const TOKEN_EXPIRY_SKEW_MS = WEB_POLICY.auth.tokenRefreshMarginMs;
 export interface AuthUser {
   id: string;
   role: string;
-  phone_e164: string;
+  /** Null for Google-only accounts (RCAB-E8.S15). */
+  phone_e164: string | null;
+  email?: string | null;
 }
 
 interface AuthState {

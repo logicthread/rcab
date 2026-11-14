@@ -24,14 +24,15 @@
 - **Seeding:** `./scripts/seed-dev.sh [--reset] [--drivers N] [--offline] [--keepalive]` (or `/seed-db`)
   upserts fixture drivers/clients/vehicles and puts the drivers in the Redis geo index
   around Guwahati. Caveat: seeded users have synthetic `firebase_uid`s, so they **cannot
-  sign in via OTP**, and they never answer an offer — accepting still needs a real driver
+  sign in**, and they never answer an offer — accepting still needs a real driver
   on the Flutter app. `test-fixtures` `seedPilotCity` remains an empty stub.
 - **⚠ Migrations are not auto-applied** on `dev:up`/restart. Apply them explicitly (§1.3). Latest is `0017_pool_member_agreed_fare`; **apply all pending ones** (the runner skips what is already applied) before testing sign-in or booking.
 - **Dev runner:** the api dev container runs `node --watch` with an SWC loader (emits decorator metadata), not `tsx watch`. Dev defaults apply only when `NODE_ENV=development`; any other value requires a strong `JWT_SECRET` (>=32 bytes) and `CORS_ORIGINS` or the api refuses to start.
-- **Firebase phone auth:** the web/driver sign-in uses real Firebase phone OTP. For
-  testing without SMS, add **test phone numbers with fixed codes in the Firebase console**
-  (Authentication → Sign-in method → Phone → Test numbers). `FIREBASE_PHONE_TEST_TOKEN`
-  in `.env.dev` is a pre-minted ID token for curl-only client checks (§3, Demo 1-alt).
+- **Sign-in is Google-only until launch** (RCAB-E8.S15, ADR-0003 amendment 2026-11-10). Phone OTP is disabled by the policy knob `auth.enabledMethods` (`AUTH_ENABLED_METHODS`, default `google`); `firebase-exchange` returns 403 `auth_method_disabled`. One-time setup (owner, Google Cloud Console -> APIs & Services -> Credentials):
+  1. Create an **OAuth client ID, type Web application**, with **Authorized JavaScript origin `http://localhost:3002`** (no redirect URI is needed for the ID-token flow). Copy its client id.
+  2. Create an **OAuth client ID, type Android** (package name of the driver app, SHA-1 of the **debug keystore**: `keytool -list -v -keystore ~/.android/debug.keystore -alias androiddebugkey -storepass android -keypass android`). The Android client has no secret to copy; the app uses the **web** client id as `serverClientId` so the ID token's audience is the web client.
+  3. Set `GOOGLE_CLIENT_IDS=<web client id>` in `.env.dev` (api; comma list for more; `GOOGLE_CLIENT_ID` is a back-compat alias), `NEXT_PUBLIC_GOOGLE_CLIENT_ID=<web client id>` for the web app, and pass `--dart-define=GOOGLE_SERVER_CLIENT_ID=<web client id>` when building the driver app. Restart the api and web containers (the web value is inlined at build time).
+  4. Check: `curl -s localhost:3000/v1/auth/config` returns `{"methods":["google"],"google":{"clientId":"..."}}`. With no client id configured the api still boots and Google sign-in returns 503 `google_not_configured`.
 
 ---
 
@@ -100,29 +101,28 @@ extracting (`docker compose … logs osrm-extract`); stale pg volume → `pnpm d
 
 ## 3. Demo 1 — "I am a real user" (E2, web auth)
 
-**Proves:** phone-OTP signup, JWT issue, refresh, logout.
+**Proves:** Google sign-in/registration, JWT issue, refresh, logout.
 
-1. Open `http://localhost:3002/signin`.
-2. Enter a **Firebase test phone number** (configured in the Firebase console), solve the
-   invisible reCAPTCHA, **Send OTP**.
-3. Enter the fixed test code → **Verify** → you land on `/book` as a signed-in client.
+1. Open `http://localhost:3002/signin` (needs the §0 Google setup).
+2. Click **Sign in with Google** and pick an account (any Gmail or Workspace account with a verified email).
+3. First sign-in registers you as a `client`; you land on `/book` signed in.
 4. DevTools → Application → Cookies → confirm `refresh_token` is `HttpOnly`, `SameSite=Lax`, path `/v1/auth`.
 5. Inspect the user row:
    ```bash
    docker compose --env-file .env.dev -f infra/docker/docker-compose.dev.yml exec -T postgres \
-     psql -U rcab -d rcab -c "SELECT id, phone_e164, role FROM app_user ORDER BY created_at DESC LIMIT 5;"
+     psql -U rcab -d rcab -c "SELECT id, phone_e164, email, google_sub, role FROM app_user ORDER BY created_at DESC LIMIT 5;"
    ```
 6. Hard-refresh → still signed in (refresh flow). **Sign out** → cookie cleared; a stale
    access token now returns 401.
 
-**Demo 1-alt (curl only, no browser):** if `.env.dev` has a valid `FIREBASE_PHONE_TEST_TOKEN`:
+**Demo 1-alt (curl only, no browser):** with a Google ID token minted for your web client id (for example via the Google OAuth Playground configured with your own client id):
 ```bash
-curl -s localhost:3000/v1/auth/firebase-exchange -H 'Content-Type: application/json' \
-  -d "{\"id_token\":\"$FIREBASE_PHONE_TEST_TOKEN\"}" | jq   # → {access_token, user}
+curl -s localhost:3000/v1/auth/native/google -H 'Content-Type: application/json' \
+  -d "{\"id_token\":\"$GOOGLE_ID_TOKEN\"}" | jq   # → {access_token, refresh_token, user}
 ```
 Use that `access_token` as `Authorization: Bearer …` for the API-only checks below.
 
-**Pass:** one `app_user` row per phone (no dup on re-signin); logout revokes the JWT.
+**Pass:** one `app_user` row per `google_sub` (no dup on re-signin); logout revokes the JWT.
 
 ---
 
@@ -130,7 +130,7 @@ Use that `access_token` as `Authorization: Bearer …` for the API-only checks b
 
 **Proves:** driver signs in, registers a vehicle, goes online, streams location → Redis geo.
 
-1. Launch the driver app (§1.4). Sign in with a **driver** test phone number.
+1. Launch the driver app (§1.4). Sign in with Google. A first sign-in registers a `client`, so the app shows **Not registered as a driver yet** (with the email, Sign out and Retry). Enable the account: `scripts/provision-driver.sh <your-google-email> --vehicle-reg AS01DEMO1` (preview with `--dry-run`; see §8), then tap **Retry** (the refresh re-reads the role from the database) and the app moves to Home.
 2. Register a vehicle (type, reg no, seats) → `POST /v1/vehicles`.
 3. Toggle **Online** → `POST /v1/drivers/online` (foreground service notification appears).
 4. The app streams `driver:location` over WS. Verify presence:
@@ -234,13 +234,20 @@ completion; pre-wake cancel removes the job (verify the `bull:scheduled-dispatch
 
 ## 8. Manual data setup (since seeding is a stub)
 
+**Provision a real Google account as a driver** (the normal path; the person signs in once first):
+```bash
+scripts/provision-driver.sh you@gmail.com --vehicle-reg AS01DEMO1 --dry-run   # preview
+scripts/provision-driver.sh you@gmail.com --vehicle-reg AS01DEMO1
+```
+It finds `app_user` by email, sets `role='driver'`, inserts the `driver` row, removes the unused `client` row and creates a starter vehicle. Idempotent; refuses unknown, ambiguous or non-active accounts; `--database-url postgres://...` targets a database other than the dev compose. The new role reaches the app at its next token refresh (Retry on the not-a-driver screen). To go online with a fixture instead, see the SQL below.
+
 To place a driver in the geo index for inspection (note: completing an *accept* still needs
 a real authed driver app — this is for seeing dispatch fan-out and presence):
 ```bash
 # a driver user + vehicle, online (psql)
 docker compose … exec -T postgres psql -U rcab -d rcab <<'SQL'
-INSERT INTO app_user (id, firebase_uid, phone_e164, role, status)
-  VALUES (gen_random_uuid(), 'fb-demo-drv', '+919990000002', 'driver', 'active')
+INSERT INTO app_user (id, firebase_uid, phone_e164, google_sub, email, role, status)
+  VALUES (gen_random_uuid(), 'fb-demo-drv', '+919990000002', 'google-sub-of-the-driver-account', 'driver@example.com', 'driver', 'active')
   RETURNING id;   -- note the id → :DID
 SQL
 # then (substitute :DID):

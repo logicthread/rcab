@@ -19,6 +19,9 @@ audience: both
 - [x] Refresh tokens stored hashed in DB; revoked on logout. *(SHA-256 digests, migration 0012; web and native logout revoke server-side)*
 - [ ] Role enforcement via `RolesGuard` on every driver-only / client-only route.
 - [ ] Firebase ID token never persisted server-side.
+- [ ] Google ID token never persisted or logged; verified server-side for signature, issuer, expiry, audience in `GOOGLE_CLIENT_IDS` and `email_verified=true`. *(RCAB-E8.S15)*
+- [ ] Google sign-in never auto-links to an existing account by email; identity is `google_sub`. *(RCAB-E8.S15)*
+- [ ] Disabled auth methods are enforced server-side (`auth.enabledMethods`), not only hidden in the client. *(RCAB-E8.S15)*
 - [x] Production fails closed on weak/missing `JWT_SECRET` and invalid `CORS_ORIGINS`; access tokens validate `iss`/`aud`/`typ`. *(RCAB-E8.S7)*
 - [x] Suspended/deleted accounts cannot sign in or refresh; their refresh tokens are revoked. *(RCAB-E8.S7)*
 - [x] Idempotency keys are scoped per account + operation and bound to a request fingerprint. *(RCAB-E8.S7)*

@@ -10,6 +10,10 @@ audience: both
 
 # Client OTP signup
 
+> **Suspended 2026-11-10 (RCAB-E8.S15):** sign-in and registration are Google-only until launch ([[ADR-0003-otp-firebase]] amendment). The journey below is retained but **disabled** behind `auth.enabledMethods` (`phone` not enabled); the Firebase exchange endpoints return 403 `auth_method_disabled`. Re-enable when the launch OTP provider is chosen.
+
+> Current first-time flow: [[journey-client-google-link]] (Google sign-in registers the account).
+
 *First-time login via phone number + OTP, powered by Firebase Phone Auth.*
 
 ## Happy path

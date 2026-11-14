@@ -23,8 +23,10 @@ export const appUser = pgTable(
   'app_user',
   {
     id: uuid('id').primaryKey(),
-    firebaseUid: text('firebase_uid').notNull().unique(),
-    phoneE164: text('phone_e164').notNull().unique(),
+    // Nullable since 0018 (RCAB-E8.S15): Google-registered accounts have
+    // neither; app_user_identity_check keeps phone or google_sub present.
+    firebaseUid: text('firebase_uid').unique(),
+    phoneE164: text('phone_e164').unique(),
     googleSub: text('google_sub').unique(),
     email: text('email'),
     displayName: text('display_name'),
@@ -37,6 +39,7 @@ export const appUser = pgTable(
     index('app_user_phone_idx').on(t.phoneE164),
     check('app_user_role_check', sql`${t.role} IN ('client','driver')`),
     check('app_user_status_check', sql`${t.status} IN ('active','suspended','deleted')`),
+    check('app_user_identity_check', sql`${t.phoneE164} IS NOT NULL OR ${t.googleSub} IS NOT NULL`),
   ],
 );
 

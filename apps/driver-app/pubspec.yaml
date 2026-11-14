@@ -23,7 +23,13 @@ dependencies:
   # Realtime (Socket.IO v4)
   socket_io_client: ^2.0.3+1
 
-  # Firebase
+  # Google sign-in (RCAB-E8.S15): the only login method until launch. The
+  # Google ID token goes to POST /v1/auth/native/google; Firebase Auth is not
+  # in the login path while auth.enabledMethods excludes 'phone'.
+  google_sign_in: ^6.2.2
+
+  # Firebase (firebase_core + FCM stay; firebase_auth only backs the phone/OTP
+  # path that is switched off by policy until the OTP provider decision)
   firebase_core: ^2.32.0
   firebase_auth: ^4.20.0
   firebase_messaging: ^14.9.4

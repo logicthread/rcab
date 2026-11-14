@@ -54,12 +54,14 @@ scene.
 
 ## Sessions
 
-Both apps sign in with real Firebase phone OTP, which a recording cannot do. D01 records the sign-in
-screen as UI only (no OTP is requested). Every other scene starts signed in:
+Both apps sign in with Google only until launch (RCAB-E8.S15; phone OTP is switched off by policy), which a
+recording cannot complete (Google's account picker and consent). D01 records the sign-in screen as UI only
+(the Continue with Google button is drawn from the live `GET /v1/auth/config`, never pressed). Every other
+scene starts signed in:
 
 1. `host/fixtures.mjs` mints an access token with the same claims as `AuthService.signAccessToken`,
    signed with the dev stack's own `JWT_SECRET` from `.env.dev`, and inserts the SHA-256 digest of a
-   random refresh token into `auth_refresh_token`, exactly as the API stores one after a Firebase
+   random refresh token into `auth_refresh_token`, exactly as the API stores one after a sign-in
    exchange. Refresh, possession-based logout (D08) and revocation behave normally.
 2. The scene writes both tokens through the app's own `TokenStore` (flutter_secure_storage) before
    the app starts; `AuthNotifier` then restores the session as on any cold start.

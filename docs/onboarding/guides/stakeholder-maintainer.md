@@ -26,7 +26,8 @@ Smoke checks for developers: `pnpm dev:smoke` (dev) and `scripts/prod-smoke.sh` 
 
 | Report | Meaning | Resolution |
 |---|---|---|
-| "I cannot sign in" | SMS not delivered, wrong code, or more than 10 attempts in a minute | Ask them to wait a minute and retry; if SMS never arrives, it is a Firebase issue: escalate. |
+| "I cannot sign in" | Sign-in is Google-only until launch: Google account not email-verified, more than 10 attempts in a minute, or the account is suspended | Ask them to wait a minute and retry with a verified Google account; otherwise escalate. |
+| Driver: "Not registered as a driver yet" | A first Google sign-in creates a client; an operator must enable the driver account | Run the provisioning script (section 3a), then ask the driver to tap Retry. |
 | Passenger: "No driver available" | No driver accepted in about a minute | Check active drivers on Grafana. If zero, ask drivers to go online. Passenger can rebook or schedule. |
 | Driver: "I get no offers" | Offline, no active vehicle, vehicle too small, or already on a ride | Run through the driver guide's troubleshooting table. |
 | Driver shows offline though app is open | No location update for 60 s (battery optimisation or no signal) | Re-toggle online; OEM settings from the onboarding sheet. |
@@ -37,6 +38,16 @@ Smoke checks for developers: `pnpm dev:smoke` (dev) and `scripts/prod-smoke.sh` 
 | Rating not showing | Ratings are stored, display is a future feature (E7) | Explain. |
 
 When investigating, ask for the time and the ride id; developers can follow one request end to end by request id in Loki logs (M03).
+
+### 3a. Enabling a driver account
+
+After the driver has signed in once with Google, ask the developer on duty to run, against the right database:
+
+```bash
+scripts/provision-driver.sh <driver-email> [--vehicle-reg <reg>] [--dry-run] [--database-url <url>]
+```
+
+Run with `--dry-run` first: it prints the account it found and what it would change. It refuses when no account, several accounts or a suspended account match, so a refusal is a prompt to check the email, not an error to work around. It is safe to re-run. The driver taps **Retry** on the app's "Not registered as a driver yet" screen (or waits up to 15 minutes); no reinstall or fresh sign-in is needed.
 
 ## 4. Configuration knobs and who may change them
 

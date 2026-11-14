@@ -1,5 +1,6 @@
-import { describe, it, expect } from 'vitest';
-import { parseServiceAccountJson } from './firebase-admin.service';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { FirebaseAdminService, parseServiceAccountJson } from './firebase-admin.service';
+import { defaultPolicy } from '../../config/policy/policy';
 
 const PRIVATE_KEY = '-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASC\n-----END PRIVATE KEY-----\n';
 
@@ -49,5 +50,34 @@ describe('parseServiceAccountJson (F11)', () => {
   it('treats empty strings as missing', () => {
     const json = JSON.stringify({ project_id: '', client_email: '', private_key: '' });
     expect(() => parseServiceAccountJson(json)).toThrow(/project_id, client_email, private_key/);
+  });
+});
+
+describe('FirebaseAdminService boot behaviour (RCAB-E8.S15)', () => {
+  const saved = { project: process.env.FIREBASE_PROJECT_ID, json: process.env.FIREBASE_SERVICE_ACCOUNT_JSON };
+
+  beforeEach(() => {
+    delete process.env.FIREBASE_PROJECT_ID;
+    delete process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
+  });
+
+  afterEach(() => {
+    if (saved.project !== undefined) process.env.FIREBASE_PROJECT_ID = saved.project;
+    if (saved.json !== undefined) process.env.FIREBASE_SERVICE_ACCOUNT_JSON = saved.json;
+  });
+
+  it('boots without Firebase credentials while phone is disabled (Google-only default)', () => {
+    expect(() => new FirebaseAdminService(defaultPolicy())).not.toThrow();
+  });
+
+  it('a later phone verification still fails loudly on the missing credentials', () => {
+    const service = new FirebaseAdminService(defaultPolicy());
+    expect(() => service.verifyIdToken('t')).toThrow(/FIREBASE_PROJECT_ID and FIREBASE_SERVICE_ACCOUNT_JSON must be set/);
+  });
+
+  it('still fails startup on missing credentials while phone is enabled (F11)', () => {
+    expect(() => new FirebaseAdminService(defaultPolicy({ auth: { enabledMethods: ['phone'] } }))).toThrow(
+      /must be set/,
+    );
   });
 });

@@ -67,10 +67,10 @@ services:
         RCAB_VERSION: ${RCAB_VERSION:?}
         RCAB_BUILT_AT: ${RCAB_BUILT_AT:-unknown}
         NEXT_PUBLIC_API_URL: https://api.rcab.example
-        NEXT_PUBLIC_FIREBASE_API_KEY: ci-placeholder-api-key
-        NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: rcab-ci.example
-        NEXT_PUBLIC_FIREBASE_PROJECT_ID: rcab-ci
-        NEXT_PUBLIC_FIREBASE_APP_ID: ci-placeholder-app-id
+        # Google-only sign-in (RCAB-E8.S15): no Firebase values are needed while
+        # phone OTP is off. Set WEB_AUTH_PHONE_ENABLED: "true" + the four
+        # NEXT_PUBLIC_FIREBASE_* build args to build the phone-enabled variant.
+        WEB_AUTH_PHONE_ENABLED: "false"
     environment:
       NODE_ENV: production
       PORT: "3000"

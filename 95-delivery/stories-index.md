@@ -130,6 +130,7 @@ audience: both
 | RCAB-E8.S12 | [[story-rcab-e8-s12-business-metrics-load]] — Business metrics + realistic load scenarios | ▶ |
 | RCAB-E8.S13 | [[story-rcab-e8-s13-scheduled-cutoff-searching-ui]] — Scheduled retry cutoff + passenger searching state (+ optimistic shared pricing) | ▶ |
 | RCAB-E8.S14 | [[story-rcab-e8-s14-team-onboarding-pack]] — Team onboarding pack (walkthrough, state machines, role guides, demo videos) | ▶ |
+| RCAB-E8.S15 | [[story-rcab-e8-s15-google-only-sign-in]] — Google-only sign-in and registration until launch (phone OTP behind a policy flag) | ▶ |
 
 ## E9 — Pilot rollout → Demo 8 · "Real drivers, real city"
 *Closed pilot, observation, iteration to Phase-0 scale.* See [[epic-e9-pilot-rollout]].

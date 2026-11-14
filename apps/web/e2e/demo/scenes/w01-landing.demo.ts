@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { Scene } from '../lib/scene';
+import { stubGoogleSignIn } from '../lib/google-stub';
 
 test('W01 landing page', async ({ browser }) => {
   const scene = new Scene(
@@ -10,10 +11,12 @@ test('W01 landing page', async ({ browser }) => {
       shows: 'The public landing page, its two entry points, and the booking page bouncing an anonymous visitor to sign-in.',
       chips: ['/', '/book (anonymous)', '/signin'],
       transitions: 'No ride states. Anonymous visitor: / -> /book -> redirected to /signin (withAuth route guard).',
+      notes: 'The /signin screen at the end shows the Google button through the recording-only stub in lib/google-stub.ts (no Google client id is configured on the dev API); the redirect itself is the shipped route guard.',
     },
     browser,
   );
   const page = await scene.open('visitor');
+  await stubGoogleSignIn(page); // the /signin screen it ends on shows the Google button (see lib/google-stub.ts)
   await scene.intro(page, 2800);
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'rcab' })).toBeVisible();

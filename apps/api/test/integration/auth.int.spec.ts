@@ -20,9 +20,17 @@ import { PG_POOL } from '../../src/infra/db/drizzle.module';
 import { REDIS } from '../../src/infra/redis/redis.module';
 import { FirebaseAdminService } from '../../src/infra/firebase/firebase-admin.service';
 import { GoogleVerifierService } from '../../src/infra/google/google-verifier.service';
+import { POLICY, defaultPolicy } from '../../src/config/policy/policy';
 import type { auth } from 'firebase-admin';
 
 const skip = process.env.RCAB_INT_SKIPPED === '1';
+
+/**
+ * This suite exercises the phone (Firebase) path, which is off by default
+ * since RCAB-E8.S15 (Google-only until launch), so it boots with both methods
+ * on. The Google-only default is covered by auth-google.int.spec.ts.
+ */
+const BOTH_METHODS = defaultPolicy({ auth: { enabledMethods: ['google', 'phone'] } });
 
 const REFRESH_TOKEN_RE = /^[A-Za-z0-9_-]{43}$/; // 32 random bytes, base64url
 const MIGRATIONS_DIR = join(__dirname, '../../migrations');
@@ -126,6 +134,7 @@ beforeAll(async () => {
     .overrideProvider(REDIS).useValue(mockRedis)
     .overrideProvider(FirebaseAdminService).useValue(mockFirebase)
     .overrideProvider(GoogleVerifierService).useValue(mockGoogle)
+    .overrideProvider(POLICY).useValue(BOTH_METHODS)
     .overrideGuard(ThrottlerGuard).useValue({ canActivate: () => true })
     .compile();
 
@@ -426,15 +435,18 @@ describe.skipIf(skip)('negative — refresh token', () => {
 // ─── negative: Google auth ────────────────────────────────────────────────────
 
 describe.skipIf(skip)('negative — Google auth', () => {
-  it('Google login for unregistered google_sub → 401 not_found', async () => {
-    mockGoogle.verifyIdToken.mockResolvedValue(makeGooglePayload(randomUUID()));
+  it('legacy Google login for an unregistered google_sub now registers a client (folded into /google)', async () => {
+    const sub = randomUUID();
+    mockGoogle.verifyIdToken.mockResolvedValue(makeGooglePayload(sub));
 
     const res = await supertest(app.getHttpServer())
       .post('/v1/auth/google/login')
       .send({ google_id_token: 'g-token' });
 
-    expect(res.status).toBe(401);
-    expect(res.body.error?.code).toBe('not_found');
+    expect(res.status).toBe(201);
+    expect(res.body.user).toMatchObject({ role: 'client', phone_e164: null, email: `${sub}@test.example.com` });
+    const rows = await pool.query('SELECT id FROM app_user WHERE google_sub = $1', [sub]);
+    expect(rows.rows).toHaveLength(1);
   });
 
   it('Google link conflict (same google_sub linked to another user) → 409', async () => {
@@ -999,6 +1011,7 @@ describe.skipIf(skip)('rate limiting', () => {
       .overrideProvider(REDIS).useValue(mockRedis)
       .overrideProvider(FirebaseAdminService).useValue(mockFb)
       .overrideProvider(GoogleVerifierService).useValue({ verifyIdToken: vi.fn() })
+      .overrideProvider(POLICY).useValue(BOTH_METHODS)
       .compile();
 
     throttleApp = ref.createNestApplication();

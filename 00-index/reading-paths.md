@@ -16,7 +16,7 @@ If your task does not match any path here, add a new one before starting work.
 ## Backend implementation
 
 ### `path:implement-otp-signup`
-Implement Firebase Phone Auth → JWT exchange → user create.
+Implement Firebase Phone Auth → JWT exchange → user create. *(Suspended 2026-11-10: Google-only until launch, see [[story-rcab-e8-s15-google-only-sign-in]].)*
 - [[journey-client-otp-signup]]
 - [[integration-firebase-phone-auth]]
 - [[module-auth]]
@@ -26,7 +26,7 @@ Implement Firebase Phone Auth → JWT exchange → user create.
 - [[ADR-0003-otp-firebase]]
 
 ### `path:implement-google-account-link`
-Link a verified-phone user to a Google account for subsequent logins.
+Google sign-in/registration (active, Google-only until launch) and linking for phone users.
 - [[journey-client-google-link]]
 - [[integration-google-account-link]]
 - [[module-auth]]
