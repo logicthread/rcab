@@ -1,0 +1,15 @@
+<section id="w08" data-transition="fade" style="background:#15202B;color:#ECEAE4;font-family:Inter, Arial, sans-serif;padding:96px 128px 160px;display:flex;flex-direction:column;gap:36px">
+<p style="font-size:24px;letter-spacing:3px;text-transform:uppercase;color:#F0A93B;font-weight:600">Passenger app · W08 · 31 s</p>
+<h2 style="font-family:'Space Grotesk', Arial, sans-serif;font-size:60px;font-weight:600;line-height:1.1">Schedule a ride for later, then cancel</h2>
+<div style="display:flex;gap:56px">
+<img src="/_blob/f72c8d0bf47f51b3f926d5d93b024015" data-video="/_blob/65e518fd078aab1822a8a95daef2f26b" alt="W08: rider books for later, the wake starts the search, the rider sees the searching state and cancels" style="width:1088px;height:612px;object-fit:contain;border-radius:16px;background:#0E151C">
+<div style="flex:1;display:flex;flex-direction:column;gap:20px">
+<h3 style="font-family:'Space Grotesk', Arial, sans-serif;font-size:32px;font-weight:600;color:#F0A93B">States</h3>
+<p style="font-size:26px;line-height:1.5">scheduled → wake at T−10 min → searching (4 min windows, retried) → cancelled</p>
+<h3 style="font-family:'Space Grotesk', Arial, sans-serif;font-size:32px;font-weight:600;color:#F0A93B">New</h3>
+<p style="font-size:26px;line-height:1.5;color:#A9B4BF">The Now/Later picker was added while recording this scene.</p>
+</div>
+</div>
+<p style="position:absolute;left:128px;bottom:64px;font-size:24px;color:#8995A2">functionality/scheduled-rides.md · POLICY: scheduled.*</p>
+<aside>Retries stop 30 minutes after the pickup time (scheduled.retryCutoffAfterPickupMs), and the ride then ends as no_driver. The harness promotes the delayed wake job so the scene does not wait ten real minutes; everything after that is the real worker.</aside>
+</section>

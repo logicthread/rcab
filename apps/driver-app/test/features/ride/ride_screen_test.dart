@@ -3,9 +3,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 
+import 'package:driver_app/di/providers.dart';
+import 'package:driver_app/features/home/driver_notice.dart';
 import 'package:driver_app/features/ride/ride_models.dart';
 import 'package:driver_app/features/ride/ride_provider.dart';
 import 'package:driver_app/features/ride/ride_screen.dart';
+
+import '../../support/fake_realtime_socket.dart';
 
 class _FakeRideService implements RideService {
   _FakeRideService(this.status, {this.advanceTo, this.cancelTo, this.noShowTo, this.arrivedAt});
@@ -49,7 +53,7 @@ class _FakeRideService implements RideService {
   }
 }
 
-Future<({_FakeRideService svc, List<Uri> launched})> _pump(
+Future<({_FakeRideService svc, List<Uri> launched, FakeRealtimeSocket socket, ProviderContainer container})> _pump(
   WidgetTester tester, {
   required String status,
   String? advanceTo,
@@ -66,22 +70,26 @@ Future<({_FakeRideService svc, List<Uri> launched})> _pump(
     arrivedAt: arrivedAt,
   );
   final launched = <Uri>[];
+  final socket = FakeRealtimeSocket();
+  final container = ProviderContainer(overrides: [
+    realtimeSocketProvider.overrideWithValue(socket),
+    rideServiceProvider.overrideWithValue(svc),
+    mapsLauncherProvider.overrideWithValue((Uri uri) async {
+      launched.add(uri);
+      return true;
+    }),
+  ]);
+  addTearDown(container.dispose);
   await tester.pumpWidget(
-    ProviderScope(
-      overrides: [
-        rideServiceProvider.overrideWithValue(svc),
-        mapsLauncherProvider.overrideWithValue((Uri uri) async {
-          launched.add(uri);
-          return true;
-        }),
-      ],
+    UncontrolledProviderScope(
+      container: container,
       child: router == null
           ? const MaterialApp(home: RideScreen(rideId: 'r-1'))
           : MaterialApp.router(routerConfig: router),
     ),
   );
   await tester.pumpAndSettle();
-  return (svc: svc, launched: launched);
+  return (svc: svc, launched: launched, socket: socket, container: container);
 }
 
 void main() {
@@ -182,6 +190,36 @@ void main() {
     await tester.pumpAndSettle();
     expect(r.svc.noShowCalls, 1);
     expect(find.byKey(const Key('home_marker')), findsOneWidget);
+  });
+  // ── RCAB-E8.S14 regressions ────────────────────────────────────────────────
+
+  testWidgets('follows the ride over the socket on mount', (tester) async {
+    final r = await _pump(tester, status: 'accepted');
+    expect(r.socket.rideSubscriptions, contains('r-1'));
+  });
+
+  testWidgets('a server-side en_route reaches the screen without a tap', (tester) async {
+    final r = await _pump(tester, status: 'accepted');
+    r.socket.emitRideState({'rideId': 'r-1', 'state': 'en_route', 'by': 'driver'});
+    await tester.pumpAndSettle();
+    expect(find.text('En route to pickup'), findsOneWidget);
+    expect(find.text("I've arrived"), findsOneWidget);
+  });
+
+  testWidgets('passenger cancel routes home with a notice', (tester) async {
+    final r = await _pump(tester, status: 'en_route', router: _routerWithHome());
+    r.socket.emitRideState({'rideId': 'r-1', 'state': 'cancelled', 'by': 'client'});
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('home_marker')), findsOneWidget);
+    expect(r.container.read(driverNoticeProvider), 'The passenger cancelled this ride');
+  });
+
+  testWidgets('events for another ride and stale states are ignored', (tester) async {
+    final r = await _pump(tester, status: 'arrived', arrivedAt: DateTime.now());
+    r.socket.emitRideState({'rideId': 'other', 'state': 'cancelled', 'by': 'client'});
+    r.socket.emitRideState({'rideId': 'r-1', 'state': 'en_route', 'by': 'driver'});
+    await tester.pumpAndSettle();
+    expect(find.text('Arrived at pickup'), findsOneWidget);
   });
 }
 

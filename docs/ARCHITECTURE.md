@@ -30,7 +30,7 @@ docker-compose**. No Kubernetes, no managed cloud services. Deliberate.
   host :3002                                   │        API  :3000         │
                                                │   NestJS 10 (HTTP + WS)   │
   Driver app (Flutter) ──HTTP + Socket.IO──►   │                           │
-                                               │  ┌── 12 feature modules ──┐│
+                                               │  ┌── 14 feature modules ──┐│
                                                └──┼────────────┬──────────┼┘
                                      Postgres 16 ◄┘   Redis 7 ◄┘   OSRM ◄──┘ HTTP
                                         :5432           :6379       :5000
@@ -56,7 +56,7 @@ laptop LAN IP, not `localhost`.
 
 ---
 
-## 3. API surface — all 22 routes
+## 3. API surface — all routes
 
 All under `/v1` except `/` and `/metrics`. Auth = first-party JWT `Authorization: Bearer`
 via `AuthGuard`, except the public health/auth-entry routes. `POST /v1/auth/refresh` is
@@ -70,7 +70,8 @@ Access JWTs are HS256 with `iss=rcab`, `aud=rcab-api`, `typ=access`. `JWT_SECRET
 | `GET /` | health | public | alias of readiness |
 | `GET /v1/health/live` | health | public | liveness probe |
 | `GET /v1/health/ready` | health | public | readiness (checks pg/redis/osrm) |
-| `GET /metrics` | health | public | Prometheus metrics |
+| `GET /v1/health/version` | health | public | running build identity `{version, builtAt}` (commit SHA in release images, `dev` locally; RCAB-E8.S11) |
+| `GET /metrics` | health | unauthenticated in the API; 404 on the public nginx vhost (f581d09) | Prometheus metrics |
 | `POST /v1/auth/firebase-exchange` | auth | public | Firebase ID token → rcab JWT pair + refresh cookie |
 | `POST /v1/auth/refresh` | auth | cookie+CSRF | single-use rotation of the refresh cookie; replay revokes the session family |
 | `POST /v1/auth/native/*` | auth | public / JWT (logout) | native exchange/refresh/logout, JSON tokens |
@@ -128,7 +129,7 @@ Gateway: `apps/api/src/modules/realtime/realtime.gateway.ts`. Rooms: `user:<id>`
 
 ## 5. Data model — Postgres (Drizzle, `apps/api/src/db/schema.ts`)
 
-**10 tables** (incl. `idempotency_record`, shared-create claims). FKs shown with →. (Stage C added `dispatch_offer`, `driver_active_assignment`, `outbox`, `pool_member` and `migration_conflict` (migrations 0014-0017) — offers, assignment and pool membership are authoritative in Postgres, not Redis. No `ride_events`/`jwt_revocations`
+**15 tables** in `schema.ts` (the tables below, plus `idempotency_record` and the Stage C tables `migration_conflict`, `dispatch_offer`, `driver_active_assignment`, `outbox`, `pool_member`). FKs shown with →. (Stage C added `dispatch_offer`, `driver_active_assignment`, `outbox`, `pool_member` and `migration_conflict` (migrations 0014-0017) — offers, assignment and pool membership are authoritative in Postgres, not Redis. No `ride_events`/`jwt_revocations`
 tables exist. Refresh-token revocation is the
 `auth_refresh_token.revoked_at` column, **not** a Redis set.)
 
@@ -148,8 +149,8 @@ tables exist. Refresh-token revocation is the
 completed, cancelled, no_driver, no_show`.
 
 ### Migrations
-Hand-authored SQL in `apps/api/migrations/` (`0001`…`0013`), applied in order by a
-custom runner `apps/api/src/migrate.ts` (tracks applied files in `_rcab_migrations`).
+Hand-authored SQL in `apps/api/migrations/` (`0001`…`0017`), applied in order by a
+custom runner `apps/api/src/migrate.ts` (tracks applied files in `_rcab_migrations`; serialised by a Postgres advisory lock).
 **Not auto-applied on `pnpm dev` / container restart** — run the runner explicitly:
 ```bash
 docker compose --env-file .env.dev -f infra/docker/docker-compose.dev.yml exec api npx tsx src/migrate.ts
@@ -176,18 +177,19 @@ Inspect with `/redis-inspect` (geo/queues/projections) and `/pool-inspect` (shar
 
 ## 7. Modules & flows
 
-**12 NestJS feature modules** (`apps/api/src/modules/`), plus infra modules
+**14 NestJS module directories** (`apps/api/src/modules/`: the 12 listed below plus `outbox` and `metrics`; `dispatch-runner.module.ts` lives in `dispatch/`), plus the global `PolicyModule` (`config/policy/`) and infra modules
 (`infra/`: drizzle, redis, firebase, google). See `40-backend/module-map.md` (kept in
 sync by `pnpm code:graph:check`) and `codegraph/graph.md` for the live DI graph.
 
 `auth · vehicles · drivers · realtime · pricing · rides · dispatch · ride-lifecycle ·
-matching · rating · health · scheduled`
+matching · rating · health · scheduled · outbox · metrics`
 
 ### Solo ride lifecycle (state machine — `rides.status`)
 ```
-requested → dispatching → accepted → en_route → arrived → in_progress → completed
+requested → accepted → en_route → arrived → in_progress → completed
      └──────────────► no_driver            (any pre-complete) └► cancelled / no_show
 ```
+(`dispatching` is allowed by the `rides.status` CHECK but no code writes it: a ride stays `requested` for its whole search.)
 - **Dispatch** (`dispatch` module, Postgres outbox + BullMQ timers): the booking commit
   writes an `outbox` (`ride.dispatch.requested`) in the same transaction;
   `OutboxRelay` → `DispatchStartService` → `dispatchSolo` → geo top-K on `active_drivers`
@@ -199,7 +201,7 @@ requested → dispatching → accepted → en_route → arrived → in_progress 
   (assigned/lost/expired/revoked/rejected). No accept → wave-2 (K2/R2) → hard-fail →
   `no_driver` + notify passenger. `DispatchReconciler` re-arms anything committed but
   never started; the in-memory `ride.requested` event no longer exists.
-- **Lifecycle** (`ride-lifecycle` / `RideStateMachine`): driver drives the forward
+- **Lifecycle** (`rides` module, `RideStateMachine`; shared-trip stop confirmation is `ride-lifecycle`): driver drives the forward
   transitions via `POST /v1/rides/:id/state` (SELECT … FOR UPDATE guarded). Cancel /
   no-show via `POST /v1/rides/:id/cancel` (role-aware; no fee in Phase-0).
 
@@ -219,8 +221,9 @@ on `scheduled-dispatch` (fires 10 min before pickup) **instead of** dispatching 
 wake the same outbox-driven solo dispatch path runs (`dispatchSolo` guards
 `status='requested'`, so a cancelled ride is safely skipped), but with a **4-minute**
 accept window (`SCHEDULED_DISPATCH_WINDOW_MS=240000`). An unanswered scheduled ride is
-re-armed with a new generation (no cap) and the passenger is told once
-(`ride_dispatch_retry`). Cancel before wake drops the delayed job.
+re-armed with a new generation (no retry-count cap, but bounded in time: once
+`scheduled_for + SCHEDULED_RETRY_CUTOFF_AFTER_PICKUP_MS`, 30 min, the first window to close ends the
+ride as `no_driver`) and the passenger is told once (`ride_dispatch_retry`). Cancel before wake drops the delayed job.
 
 ---
 
@@ -230,7 +233,7 @@ re-armed with a new generation (no cap) and the passenger is told once
 app → Firebase signInWithPhoneNumber → ID token
 app → POST /v1/auth/firebase-exchange {id_token}
      API verifies via firebase-admin → upserts app_user → mints:
-        access JWT (Bearer, ~15 min)  +  refresh token (HttpOnly cookie `rcab_refresh`)
+        access JWT (Bearer, ~15 min)  +  refresh token (HttpOnly cookie `refresh_token`, `SameSite=Lax`, path `/v1/auth`; the JSON body carries no refresh token)
 ... access expires ...
 app → POST /v1/auth/refresh (cookie auto-sent, Origin/CSRF-checked) → new access JWT
 logout → refresh token marked revoked (Postgres `auth_refresh_token.revoked_at`)

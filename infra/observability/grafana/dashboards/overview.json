@@ -33,7 +33,7 @@
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
         {
-          "expr": "sum(rate(http_request_duration_seconds_count{status_code=~\"5..\"}[5m])) / sum(rate(http_request_duration_seconds_count[5m]))",
+          "expr": "(sum(rate(http_request_duration_seconds_count{status_code=~\"5..\"}[5m])) or vector(0)) / sum(rate(http_request_duration_seconds_count[5m]))",
           "legendFormat": "5xx rate",
           "refId": "A"
         }
@@ -41,7 +41,8 @@
       "fieldConfig": {
         "defaults": {
           "unit": "percentunit",
-          "custom": { "drawStyle": "line", "fillOpacity": 10 },
+          "min": 0,
+          "custom": { "drawStyle": "line", "fillOpacity": 10, "axisSoftMax": 0.02 },
           "thresholds": {
             "mode": "absolute",
             "steps": [

@@ -66,6 +66,7 @@ describe.skipIf(skip)('RealtimeGateway — location streaming (real Redis)', () 
     const driverId = `test-driver-throttle`;
     const gateway = moduleRef.get(RealtimeGateway);
     const client = fakeSocket(driverId);
+    await redis.hset(`driver:state:${driverId}`, { availability: 'online' });
 
     const t0 = 1_000_000_000;
     const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(t0);
@@ -89,6 +90,7 @@ describe.skipIf(skip)('RealtimeGateway — location streaming (real Redis)', () 
     const driverId = `test-driver-after-throttle`;
     const gateway = moduleRef.get(RealtimeGateway);
     const client = fakeSocket(driverId);
+    await redis.hset(`driver:state:${driverId}`, { availability: 'online' });
 
     const t0 = 2_000_000_000;
     const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(t0);
@@ -104,6 +106,19 @@ describe.skipIf(skip)('RealtimeGateway — location streaming (real Redis)', () 
     const [lngStr, latStr] = pos[0] as [string, string];
     expect(parseFloat(lngStr)).toBeCloseTo(103.90, 1);
     expect(parseFloat(latStr)).toBeCloseTo(1.40, 1);
+  });
+
+  it('a late packet after goOffline does not re-add the driver to the geo index or recreate state', async () => {
+    const driverId = `test-driver-late-packet`;
+    const gateway = moduleRef.get(RealtimeGateway);
+    // offline: state hash deleted, not in geo set
+    await redis.zrem('active_drivers', driverId);
+    await redis.del(`driver:state:${driverId}`);
+
+    await gateway.handleDriverLocation({ lat: 1.30, lng: 103.80, heading: 0, speed: 0 }, fakeSocket(driverId));
+
+    expect(await redis.zscore('active_drivers', driverId)).toBeNull();
+    expect(await redis.exists(`driver:state:${driverId}`)).toBe(0);
   });
 
   it('reconnect: _replayDriverState emits driver_state when Redis hash exists', async () => {

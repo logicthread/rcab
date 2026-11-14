@@ -324,3 +324,40 @@ describe('useBookingStore', () => {
     expect(useBookingStore.getState().rated).toBe(false);
   });
 });
+
+describe('scheduled pickup time (RCAB-E8.S14)', () => {
+  beforeEach(() => useBookingStore.getState().reset());
+
+  it('setScheduledFor keeps the current quote (a quote is priced by route only)', () => {
+    const st = useBookingStore.getState();
+    st.setQuote({
+      type: 'normal',
+      distanceM: 1,
+      durationS: 1,
+      soloFare: { amount: 100, currency: 'INR' },
+      quoteToken: 'q',
+      geometry: { type: 'LineString', coordinates: [] },
+    });
+    st.setScheduledFor('2026-11-10T09:30:00.000Z');
+    expect(useBookingStore.getState().scheduledFor).toBe('2026-11-10T09:30:00.000Z');
+    expect(useBookingStore.getState().quote?.quoteToken).toBe('q');
+  });
+
+  it('switching to a shared ride drops the chosen time', () => {
+    const st = useBookingStore.getState();
+    st.setRideType('private');
+    st.setScheduledFor('2026-11-10T09:30:00.000Z');
+    st.setRideType('shared');
+    expect(useBookingStore.getState().scheduledFor).toBeNull();
+  });
+
+  it('setSoloRequested records the scheduled time for the tracking banner; reset clears it', () => {
+    useBookingStore.getState().setSoloRequested('r1', 'requested', '2026-11-10T09:30:00.000Z');
+    expect(useBookingStore.getState().scheduledFor).toBe('2026-11-10T09:30:00.000Z');
+    useBookingStore.getState().setSoloRequested('r2', 'requested');
+    expect(useBookingStore.getState().scheduledFor).toBeNull();
+    useBookingStore.getState().setSoloRequested('r3', 'requested', '2026-11-10T09:30:00.000Z');
+    useBookingStore.getState().reset();
+    expect(useBookingStore.getState().scheduledFor).toBeNull();
+  });
+});

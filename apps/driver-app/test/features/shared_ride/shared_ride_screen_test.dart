@@ -8,6 +8,7 @@ import 'package:driver_app/features/offer/offer_models.dart';
 import 'package:driver_app/features/offer/offer_provider.dart';
 import 'package:driver_app/features/shared_ride/shared_ride_models.dart';
 import 'package:driver_app/features/shared_ride/shared_ride_provider.dart';
+import 'package:driver_app/features/home/driver_notice.dart';
 import 'package:driver_app/features/shared_ride/shared_ride_screen.dart';
 
 class _RecordingSender implements StopConfirmSender {
@@ -87,6 +88,10 @@ GoRouter _router(String ride) {
         builder: (_, st) => Scaffold(
           body: Center(child: Text('rating-${st.pathParameters['id']}')),
         ),
+      ),
+      GoRoute(
+        path: '/home',
+        builder: (_, __) => const Scaffold(body: Center(child: Text('home'))),
       ),
     ],
   );
@@ -213,7 +218,10 @@ void main() {
     expect(find.textContaining('Dropped off'), findsOneWidget);
   });
 
-  testWidgets('navigates to /rating/:id when ride completes', (tester) async {
+  // A shared pool is not a `rides` row, so POST /v1/rides/<poolId>/ratings is
+  // always 404: the old rating prompt could never be submitted (RCAB-E8.S14).
+  testWidgets('returns home with a completion notice when the pool completes (no rating prompt)',
+      (tester) async {
     final sender = _RecordingSender();
     final container = ProviderContainer(
       overrides: [sharedRideSenderProvider.overrideWithValue(sender)],
@@ -238,6 +246,8 @@ void main() {
     }
     await tester.pumpAndSettle();
 
-    expect(find.text('rating-ride-1'), findsOneWidget);
+    expect(find.text('rating-ride-1'), findsNothing);
+    expect(find.text('home'), findsOneWidget);
+    expect(container.read(driverNoticeProvider), 'Shared ride complete · 2 passengers dropped off');
   });
 }

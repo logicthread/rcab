@@ -22,16 +22,15 @@ audience: both
 
 ## Filesystem layout
 
+*As deployed by `scripts/deploy/deploy.sh` (see `scripts/deploy/README.md`, "Host layout"). Postgres, Redis, OSRM, certbot, Loki, Prometheus, Grafana and Uptime Kuma data live in Docker **named volumes** (`pg-data`, `redis-data`, `osrm-data`, ...), not bind-mounted host directories.*
+
 ```
 /opt/rcab/
-  compose/                # docker-compose.yml + env files
-  data/
-    postgres/             # named volume mount
-    redis/                # AOF
-    osrm/                 # PBF + index
-  backups/                # local pg_dump staging
-  certs/                  # certbot dir
-/var/log/rcab/            # application logs
+  infra/{docker,observability}/   # written by deploy.sh --sync-infra (do not hand-edit)
+  compose/.env                    # REDIS_PASSWORD, RCAB_VERSION, RCAB_REGISTRY ... (compose.env.example)
+  compose/env/*.env               # api / postgres / grafana / backup env files (secrets; owner-managed)
+  secrets/                        # age.key (public recipient), firebase-admin.json, ...
+  backups/                        # encrypted nightly dumps + manifests (backup container)
 ```
 
 ## Users

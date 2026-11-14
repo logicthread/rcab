@@ -4,6 +4,7 @@ import {
   RIDE_OFFER_RESPONSE_EVENT,
   STOP_CONFIRM_REQUEST_EVENT,
   DRIVER_FIRST_LOCATION_EVENT,
+  socketOriginCheck,
 } from './realtime.gateway';
 import type { RealtimeSnapshotService } from './realtime-snapshot.service';
 import { JwtService } from '@nestjs/jwt';
@@ -16,11 +17,16 @@ const DRIVER_ID = 'driver-uuid-1';
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 
+/** Field-aware HGET over a fake `driver:state:<id>` hash (default: an online driver, no ride). */
+function stateHget(state: Record<string, string | null>) {
+  return vi.fn(async (_key: string, field: string) => state[field] ?? null);
+}
+
 function buildRedis() {
   return {
     geoadd: vi.fn().mockResolvedValue(1),
     hset: vi.fn().mockResolvedValue(1),
-    hget: vi.fn().mockResolvedValue(null),
+    hget: stateHget({ availability: 'online' }),
     duplicate: vi.fn().mockReturnThis(),
   };
 }
@@ -139,6 +145,16 @@ describe('RealtimeGateway — driver:location handler', () => {
       newLoc.lat,
       DRIVER_ID,
     );
+  });
+
+  it.each([
+    ['availability is offline', { availability: 'offline' }],
+    ['the state hash is gone (explicit goOffline / sweep)', {}],
+  ])('ignores location for an offline driver: %s', async (_name, state) => {
+    redis.hget = stateHget(state);
+    await gateway.handleDriverLocation(LOCATION, makeSocket());
+    expect(redis.geoadd).not.toHaveBeenCalled();
+    expect(redis.hset).not.toHaveBeenCalled();
   });
 
   it('ignores events from non-driver sockets', async () => {
@@ -368,7 +384,7 @@ describe('RealtimeGateway — driver_location fan-out', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     redis = buildRedis();
-    redis.hget.mockResolvedValue(RIDE_ID); // driver is on an active ride
+    redis.hget = stateHget({ availability: 'on_ride', current_ride_id: RIDE_ID }); // driver is on an active ride
     bus = buildBus();
     gateway = new RealtimeGateway(buildJwt(), bus, buildEvents(), redis as never, buildSnapshots() as never);
   });
@@ -404,7 +420,7 @@ describe('RealtimeGateway — driver_location fan-out', () => {
   });
 
   it('does NOT fan out when the driver is not on a ride', async () => {
-    redis.hget.mockResolvedValue(null);
+    redis.hget = stateHget({ availability: 'online' });
     await gateway.handleDriverLocation(LOCATION, makeSocket());
     expect(bus.toRide).not.toHaveBeenCalled();
   });
@@ -428,7 +444,7 @@ describe('RealtimeGateway — implicit start_en_route on first location', () => 
   beforeEach(() => {
     events = new EventEmitter2();
     redis = buildRedis();
-    redis.hget.mockResolvedValue(RIDE_ID);
+    redis.hget = stateHget({ availability: 'on_ride', current_ride_id: RIDE_ID });
     gateway = new RealtimeGateway(buildJwt(), buildBus(), events, redis as never, buildSnapshots() as never);
   });
 
@@ -445,7 +461,7 @@ describe('RealtimeGateway — implicit start_en_route on first location', () => 
   });
 
   it('does not emit when the driver is not on a ride', async () => {
-    redis.hget.mockResolvedValue(null);
+    redis.hget = stateHget({ availability: 'online' });
     const seen = vi.fn();
     events.on(DRIVER_FIRST_LOCATION_EVENT, seen);
     await gateway.handleDriverLocation(LOCATION, makeSocket());
@@ -637,5 +653,23 @@ describe('RealtimeGateway — driver assignment snapshot', () => {
       ok: false,
       reason: 'unavailable',
     });
+  });
+});
+
+describe('RealtimeGateway — socket CORS allowlist', () => {
+  const check = (origin: string | undefined) => {
+    let out: boolean | undefined;
+    socketOriginCheck(origin, (_e, allow) => { out = allow; });
+    return out;
+  };
+
+  it('allows native clients that send no Origin (driver app)', () => {
+    expect(check(undefined)).toBe(true);
+  });
+
+  it('allows the configured/dev browser origins and rejects others (no wildcard)', () => {
+    expect(check('http://localhost:3002')).toBe(true);
+    expect(check('https://evil.example')).toBe(false);
+    expect(check('*')).toBe(false);
   });
 });

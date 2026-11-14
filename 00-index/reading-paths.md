@@ -128,6 +128,13 @@ Work on or verify the repository-review fixes (auth sessions, config, idempotenc
 - [[module-auth]] · [[module-rides]]
 - [[rest-endpoints]] · [[security-checklist]]
 
+### `path:onboarding`
+New team member orienting on the whole system (any role).
+- `docs/onboarding/README.md` (routes each role to its guide) · `docs/onboarding/01-system-overview.md`
+- `docs/onboarding/state-machines.md` · `docs/onboarding/workflows/` · `docs/onboarding/functionality/`
+- `docs/onboarding/videos/{web,driver,ops}/INDEX.md` (recorded walkthroughs)
+- [[story-rcab-e8-s14-team-onboarding-pack]]
+
 ### `path:recovery-ops`
 Backups, restore drill, Redis loss, migration_conflict resolution, release/rollback.
 - `docs/operations/recovery-runbook.md` · `scripts/recovery/` · `scripts/deploy/README.md`

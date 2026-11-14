@@ -167,3 +167,35 @@ describe('RideTrackingPanel scheduled searching state (RCAB-E8.S13)', () => {
     expect(screen.getByTestId('tracking-status')).toHaveTextContent('Driver assigned');
   });
 });
+
+describe('RideTrackingPanel scheduled ride (RCAB-E8.S14)', () => {
+  const inMin = (m: number) => new Date(Date.now() + m * 60_000).toISOString();
+
+  it('before the wake it says "Scheduled for ..." instead of "Finding your driver" and keeps Cancel', () => {
+    render(panel({ status: 'requested', scheduledFor: inMin(120) }));
+    expect(screen.getByTestId('tracking-status')).toHaveTextContent(/^Scheduled for /);
+    expect(screen.getByTestId('tracking-scheduled-hint')).toHaveTextContent(/10 minutes before pickup/);
+    expect(screen.getByTestId('tracking-cancel')).toBeInTheDocument();
+  });
+
+  it('inside the wake lead (searching has started) the normal banner returns', () => {
+    render(panel({ status: 'requested', scheduledFor: inMin(5) }));
+    expect(screen.getByTestId('tracking-status')).toHaveTextContent('Finding your driver…');
+    expect(screen.queryByTestId('tracking-scheduled-hint')).not.toBeInTheDocument();
+  });
+
+  it('a re-armed search keeps its own "still looking" banner', () => {
+    render(panel({ status: 'requested', scheduledFor: inMin(-20), searchRetry: { retryUntil: null } }));
+    expect(screen.getByTestId('tracking-status')).toHaveTextContent(/Still looking for a driver/);
+  });
+
+  it('a driver assignment overrides the scheduled banner', () => {
+    render(panel({ status: 'accepted', scheduledFor: inMin(120) }));
+    expect(screen.getByTestId('tracking-status')).toHaveTextContent('Driver assigned');
+  });
+
+  it('a normal ride (no scheduledFor) is unchanged', () => {
+    render(panel({ status: 'requested' }));
+    expect(screen.getByTestId('tracking-status')).toHaveTextContent('Finding your driver…');
+  });
+});

@@ -18,14 +18,15 @@ audience: both
 |---|---|---|---|
 | `active_drivers` | GEO | online drivers' positions; `GEOADD` on goOnline and each accepted `driver:location` WS event; `ZREM` on offline | none |
 | `driver:state:<id>` | HASH | `{availability, last_seen, current_ride_id}`; `current_ride_id` is a **projection** of Postgres `driver_active_assignment`, reconciled at boot and periodically; `last_seen` updated by goOnline and by each accepted location event; read on WS reconnect for state replay | none |
-| `request:<request_id>:dispatch` | HASH | retry counter, wave, last_tried_at | 10 min |
-| `bull:scheduled-dispatch:*` | BullMQ keys | scheduled-booking jobs | per-job |
+| `request:<request_id>:dispatch` | HASH | **Not built** (dispatch retry state lives in `dispatch_offer` + the outbox + BullMQ job ids, in Postgres/BullMQ). Kept here only so the old design name is not reused. | — |
+| `bull:scheduled-dispatch:*` | BullMQ keys | delayed `scheduled:wake` jobs, id `scheduled-wake-<rideId>-g<g>` (published from the `ride.wake.schedule` outbox row) | per-job |
 | `socketio:*` | Socket.IO adapter | pub/sub for multi-node (kept since day 1) | n/a |
-| `cache:user:<id>:dashboard` | STRING JSON | client/driver dashboard read cache | 60s |
+| `cache:user:<id>:dashboard` | STRING JSON | **Not built** (dashboards are E7). | — |
 | `osrm:poly:<orig_geohash7>:<dest_geohash7>` | STRING JSON | OSRM polyline coords for a single O→D pair; used by `RouteSimilarityService` (E5.S1) | 1h |
+| `pricing:dist:<orig_geohash7>:<dest_geohash7>` | STRING JSON | `{ distanceM, durationS }` OSRM route metrics for a single O→D pair; used by `PricingService.getRouteMetrics` | 1h |
 | `pool:<ride_id>` | HASH | **Projection** of the Postgres pool (`shared_rides` + `pool_member`) for low-latency reads; fields `state`, `seat_count`, `max_seats`, `version`; rebuilt from Postgres at boot and periodically. Never authoritative. | 10 min |
-| `bull:matching:*` | BullMQ keys | `matching` queue — currently carries `pool:expire:<ride_id>` delayed jobs (E5.S3) | per-job |
-| `bull:dispatch:*` | BullMQ keys | `dispatch` queue — wave-2 timeout (`dispatch:wave2-timeout:<ride_id>`) and hard-fail (`dispatch:hard-fail:<ride_id>`) jobs (E5.S4) | per-job |
+| `bull:matching:*` | BullMQ keys | `matching` queue — currently carries `pool:expire` delayed jobs, job id `pool-expire-<poolId>` (E5.S3; published from the `pool.expire.schedule` outbox row) | per-job |
+| `bull:dispatch:*` | BullMQ keys | `dispatch` queue — job `dispatch:start` (`dispatch-start-<trip>-g<g>`), wave-2 timeout (`dispatch-wave2-<trip>-g<g>`) and hard-fail (`dispatch-hardfail-<trip>-g<g>`); ids are generation-scoped and colon-free (E5.S4, Stage C) | per-job |
 
 ## Removed (Stage C)
 

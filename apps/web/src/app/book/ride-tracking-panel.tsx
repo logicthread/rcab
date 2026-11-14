@@ -1,7 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { RideStatus } from '../../lib/booking/types';
+import { formatScheduled, isBeforeWake } from '../../lib/booking/schedule';
 import type { DriverPosition } from '../../lib/booking/store';
 import { WEB_POLICY } from '../../config/policy';
 
@@ -43,6 +44,8 @@ export interface RideTrackingPanelProps {
   status: RideStatus;
   /** Scheduled ride still searching after a re-arm; null/absent for every other ride. */
   searchRetry?: { retryUntil: string | null } | null;
+  /** Scheduled rides: requested pickup instant (ISO). Drives the "Scheduled for ..." banner until the wake. */
+  scheduledFor?: string | null;
   driver: DriverPosition | null;
   onNewBooking: () => void;
   /** Cancel the active ride. Shown only before the trip starts (a rider cannot
@@ -63,6 +66,7 @@ export interface RideTrackingPanelProps {
 export function RideTrackingPanel({
   status,
   searchRetry = null,
+  scheduledFor = null,
   driver,
   onNewBooking,
   onCancel,
@@ -75,6 +79,15 @@ export function RideTrackingPanel({
   // server rejects a client cancel, so hide the control.
   const canCancel = !terminal && status !== 'in_progress';
   const searching = searchRetry !== null && (status === 'requested' || status === 'dispatching');
+  // A scheduled ride sits in `requested` until the server wakes the search (T-10 min); say so instead of
+  // "Finding your driver…". Re-evaluated every 30 s so the banner flips at the wake without a socket event.
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    if (!scheduledFor) return;
+    const t = setInterval(() => setNow(new Date()), 30_000);
+    return () => clearInterval(t);
+  }, [scheduledFor]);
+  const waitingForWake = status === 'requested' && !searching && isBeforeWake(scheduledFor, now);
   return (
     <section
       data-testid="tracking-panel"
@@ -87,8 +100,18 @@ export function RideTrackingPanel({
       }}
     >
       <div data-testid="tracking-status" style={{ fontSize: 16, fontWeight: 700 }}>
-        {searching ? searchingBanner(searchRetry.retryUntil) : BANNER[status]}
+        {searching
+          ? searchingBanner(searchRetry.retryUntil)
+          : waitingForWake && scheduledFor
+            ? `Scheduled for ${formatScheduled(scheduledFor)}`
+            : BANNER[status]}
       </div>
+      {waitingForWake && (
+        <div data-testid="tracking-scheduled-hint" style={{ fontSize: 12, color: '#525252', marginTop: 6 }}>
+          We start finding your driver about {Math.round(WEB_POLICY.booking.scheduleWakeLeadMs / 60_000)}{' '}
+          minutes before pickup. You can cancel until the trip starts.
+        </div>
+      )}
       {driver && !terminal && (
         <div data-testid="tracking-live" style={{ fontSize: 12, color: '#2563eb', marginTop: 6 }}>
           ● Live · following your driver

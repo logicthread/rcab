@@ -91,6 +91,8 @@ export interface SoloRideResponse {
   passengerId: string;
   status: string;
   fare: Money;
+  /** Scheduled rides only: requested pickup instant (ISO-8601). */
+  scheduledFor?: string;
 }
 
 /** Forward solo lifecycle states the rider's tracking view reacts to (RCAB-E4.S7). */
@@ -160,6 +162,8 @@ export interface RideDetailResponse {
   fare: Money;
   origin: { lat: number; lng: number };
   dropoff: { lat: number; lng: number };
+  /** Scheduled rides: requested pickup instant (ISO-8601); null/absent for a normal ride. */
+  scheduledFor?: string | null;
 }
 
 /** A point chosen on the map / via search, with a human-readable label. */

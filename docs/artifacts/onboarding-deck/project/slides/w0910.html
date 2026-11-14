@@ -1,0 +1,16 @@
+<section id="w0910" data-transition="fade" style="background:#15202B;color:#ECEAE4;font-family:Inter, Arial, sans-serif;padding:96px 128px 160px;display:flex;flex-direction:column;gap:36px">
+<p style="font-size:24px;letter-spacing:3px;text-transform:uppercase;color:#F0A93B;font-weight:600">Passenger app · W09, W10</p>
+<h2 style="font-family:'Space Grotesk', Arial, sans-serif;font-size:60px;font-weight:600;line-height:1.1">Recovery and sign-out</h2>
+<div style="display:flex;gap:64px">
+<div style="flex:1;display:flex;flex-direction:column;gap:20px">
+<img src="/_blob/bbaef04200d55af15c91d566dc34e10f" data-video="/_blob/27dcd12851dad2c48bf7b18d6cbf5da8" alt="W09: page reload and a dropped connection both recover the true ride state" style="width:800px;height:450px;object-fit:contain;border-radius:16px;background:#0E151C">
+<p style="font-size:26px;color:#A9B4BF"><b style="color:#ECEAE4">W09</b> · 51 s · reload and reconnect restore tracking from a snapshot</p>
+</div>
+<div style="flex:1;display:flex;flex-direction:column;gap:20px">
+<img src="/_blob/c830699bd7f310e85cbef3d6621d75e3" data-video="/_blob/c7160ae01264fff3985a294491770991" alt="W10: rider signs out and cannot silently sign back in" style="width:800px;height:450px;object-fit:contain;border-radius:16px;background:#0E151C">
+<p style="font-size:26px;color:#A9B4BF"><b style="color:#ECEAE4">W10</b> · 18 s · logout revokes the refresh token on the server</p>
+</div>
+</div>
+<p style="position:absolute;left:128px;bottom:64px;font-size:24px;color:#8995A2">functionality/realtime-protocol.md · functionality/auth-and-sessions.md</p>
+<aside>On reconnect the client re-subscribes and the server sends a versioned snapshot from Postgres; any event older than what the client already applied is dropped. Sign-out calls the logout endpoint, so a reload cannot silently restore the session.</aside>
+</section>

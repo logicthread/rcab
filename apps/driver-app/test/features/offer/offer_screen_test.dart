@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 
 import 'package:driver_app/features/offer/offer_models.dart';
 import 'package:driver_app/features/offer/offer_provider.dart';
@@ -93,5 +94,28 @@ void main() {
     await pump(tester, seed: false);
     expect(find.byKey(const Key('offer_screen')), findsOneWidget);
     expect(find.text('Waiting for an offer…'), findsOneWidget);
+  });
+
+  // Regression (RCAB-E8.S14): Decline left the driver on a blank
+  // "Waiting for an offer…" screen with no way back.
+  testWidgets('Decline returns the driver to /home', (tester) async {
+    final sender = _CaptureSender();
+    final container = ProviderContainer(
+      overrides: [offerResponseSenderProvider.overrideWithValue(sender)],
+    );
+    addTearDown(container.dispose);
+    container.read(offerProvider.notifier).applyOffer(_offer());
+    final router = GoRouter(initialLocation: '/offer/o-1', routes: [
+      GoRoute(path: '/offer/:id', builder: (_, s) => OfferScreen(offerId: s.pathParameters['id']!)),
+      GoRoute(path: '/home', builder: (_, __) => const Scaffold(body: Text('HOME', key: Key('home_marker')))),
+    ]);
+    await tester.pumpWidget(UncontrolledProviderScope(
+      container: container,
+      child: MaterialApp.router(routerConfig: router),
+    ));
+    await tester.tap(find.byKey(const Key('offer_decline_button')));
+    await tester.pumpAndSettle();
+    expect(sender.sent.single.accept, isFalse);
+    expect(find.byKey(const Key('home_marker')), findsOneWidget);
   });
 }

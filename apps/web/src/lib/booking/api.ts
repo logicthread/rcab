@@ -183,6 +183,25 @@ export function createNormalRide(
   );
 }
 
+/**
+ * Create a scheduled (future) ride: same quote-locked, idempotent flow as a normal
+ * ride, plus the requested pickup instant. The server wakes the search shortly
+ * before `scheduledFor` (RCAB-E6). `scheduledFor` is an ISO-8601 instant.
+ */
+export function createScheduledRide(
+  pickup: Place,
+  dropoff: Place,
+  quoteToken: string,
+  scheduledFor: string,
+  idempotencyKey: string,
+): Promise<SoloRideResponse> {
+  return postIdempotent<SoloRideResponse>(
+    '/v1/rides',
+    { ...routeBody(pickup, dropoff, 'scheduled'), quoteToken, scheduledFor },
+    idempotencyKey,
+  );
+}
+
 /** Fetch a ride's current state — used to rehydrate the tracking view on reload. */
 export function fetchRide(rideId: string): Promise<RideDetailResponse> {
   return getJson<RideDetailResponse>(`/v1/rides/${rideId}`);

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/driver/driver_state.dart';
 import '../../di/providers.dart';
 import 'models/vehicle.dart';
 
@@ -14,7 +15,17 @@ class ProfileScreen extends ConsumerWidget {
 
     return Scaffold(
       key: const Key('profile_screen'),
-      appBar: AppBar(title: const Text('Profile')),
+      appBar: AppBar(
+        title: const Text('Profile'),
+        actions: [
+          IconButton(
+            key: const Key('sign_out_button'),
+            icon: const Icon(Icons.logout),
+            tooltip: 'Sign out',
+            onPressed: () => _confirmSignOut(context, ref),
+          ),
+        ],
+      ),
       body: vehiclesAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => Center(child: Text('Failed to load vehicles: $e')),
@@ -30,6 +41,37 @@ class ProfileScreen extends ConsumerWidget {
     );
   }
 }
+
+/// Sign out (RCAB-E8.S14): the app had no way to end a session. Goes offline
+/// first (best effort), then `AuthNotifier.signOut` revokes the refresh token
+/// server-side and clears secure storage; the router returns to /sign-in.
+Future<void> _confirmSignOut(BuildContext context, WidgetRef ref) async {
+  final ok = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      key: const Key('sign_out_dialog'),
+      title: const Text('Sign out?'),
+      content: const Text('You will go offline and stop receiving ride offers.'),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+        FilledButton(
+          key: const Key('sign_out_confirm'),
+          onPressed: () => Navigator.pop(ctx, true),
+          child: const Text('Sign out'),
+        ),
+      ],
+    ),
+  );
+  if (ok != true) return;
+  if (ref.read(driverStateProvider) is DriverOnline) {
+    await ref.read(driverStateProvider.notifier).goOffline();
+  }
+  await ref.read(authProvider.notifier).signOut();
+}
+
+/// The vehicle picked on this screen during this app session. The server
+/// stores the current vehicle; this only drives the "Selected" marker.
+final selectedVehicleIdProvider = StateProvider<String?>((_) => null);
 
 class _EmptyState extends StatelessWidget {
   const _EmptyState({required this.onAdd});
@@ -88,6 +130,17 @@ class _VehicleRowState extends ConsumerState<_VehicleRow> {
     try {
       final dio = ref.read(apiClientProvider);
       await dio.patch('/v1/drivers/me/vehicle', data: {'vehicle_id': widget.vehicle.id});
+      // Keep the driver state in step with the server's current vehicle.
+      ref.read(driverStateProvider.notifier).updateVehicleId(widget.vehicle.id);
+      ref.read(selectedVehicleIdProvider.notifier).state = widget.vehicle.id;
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            key: const Key('vehicle_selected_snackbar'),
+            content: Text('${widget.vehicle.regNo} is now your current vehicle'),
+          ),
+        );
+      }
       ref.invalidate(vehiclesProvider);
     } catch (e) {
       if (mounted) {
@@ -102,17 +155,24 @@ class _VehicleRowState extends ConsumerState<_VehicleRow> {
 
   @override
   Widget build(BuildContext context) {
+    final selected = ref.watch(selectedVehicleIdProvider) == widget.vehicle.id;
     return ListTile(
       key: Key('vehicle_row_${widget.vehicle.id}'),
       title: Text('${widget.vehicle.type} · ${widget.vehicle.regNo}'),
       subtitle: Text('${widget.vehicle.make ?? ''} ${widget.vehicle.model ?? ''}'.trim()),
       trailing: _loading
           ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2))
-          : ElevatedButton(
-              key: Key('select_vehicle_${widget.vehicle.id}'),
-              onPressed: _select,
-              child: const Text('Select'),
-            ),
+          : selected
+              ? Chip(
+                  key: Key('selected_vehicle_${widget.vehicle.id}'),
+                  avatar: const Icon(Icons.check, size: 18),
+                  label: const Text('Selected'),
+                )
+              : ElevatedButton(
+                  key: Key('select_vehicle_${widget.vehicle.id}'),
+                  onPressed: _select,
+                  child: const Text('Select'),
+                ),
     );
   }
 }

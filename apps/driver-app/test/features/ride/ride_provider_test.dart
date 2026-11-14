@@ -204,4 +204,31 @@ void main() {
       expect(n.state.busy, isFalse);
     });
   });
+
+  // ── RCAB-E8.S14 regressions ──────────────────────────────────────────────
+  group('RideNotifier arrival + server pushes', () {
+    test('advance to arrived re-reads the ride so the no-show wait can start', () async {
+      final at = DateTime.utc(2026, 11, 9, 12);
+      final svc = _FakeRideService()
+        ..advanceResult = 'arrived'
+        ..detail = _detail('arrived', arrivedAt: at);
+      final n = RideNotifier(svc, 'r-1');
+      await n.advance('mark_arrived');
+      expect(n.state.status, RideStatus.arrived);
+      expect(n.state.arrivedAt, at);
+      expect(svc.getCalls, 1);
+    });
+
+    test('applyServerStatus only moves forward', () async {
+      final svc = _FakeRideService()..detail = _detail('en_route');
+      final n = RideNotifier(svc, 'r-1');
+      await n.load();
+      await n.applyServerStatus('accepted');
+      expect(n.state.status, RideStatus.enRoute);
+      await n.applyServerStatus('cancelled');
+      expect(n.state.status, RideStatus.cancelled);
+      await n.applyServerStatus('in_progress');
+      expect(n.state.status, RideStatus.cancelled);
+    });
+  });
 }

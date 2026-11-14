@@ -8,7 +8,10 @@ final class DriverOffline extends DriverState {
 
 final class DriverOnline extends DriverState {
   const DriverOnline({required this.vehicleId, required this.sessionId});
-  final String vehicleId;
+
+  /// The vehicle picked in this app session, if any (the server holds the
+  /// authoritative current vehicle).
+  final String? vehicleId;
   final String sessionId;
 }
 

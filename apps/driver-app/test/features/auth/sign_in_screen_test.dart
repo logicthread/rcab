@@ -6,7 +6,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 
 import 'package:driver_app/core/auth/auth_notifier.dart';
-import 'package:driver_app/core/auth/auth_state.dart';
 import 'package:driver_app/core/auth/token_store.dart';
 import 'package:driver_app/di/providers.dart';
 import 'package:driver_app/features/auth/sign_in_screen.dart';
@@ -129,5 +128,21 @@ void main() {
     expect(find.text('Enter a valid E.164 number (e.g. +1234567890)'),
         findsOneWidget);
     expect(find.byKey(const Key('code_field')), findsNothing);
+  });
+
+  // RCAB-E8.S14 (seen recording D01): after a rejected Send OTP, the
+  // "Enter a valid E.164 number" error stayed under a corrected number until
+  // the next tap.
+  testWidgets('the phone error clears once the number is corrected', (tester) async {
+    await tester.pumpWidget(_buildScreen(mockFb));
+    await tester.enterText(find.byKey(const Key('phone_field')), '98300 70001');
+    await tester.tap(find.byKey(const Key('send_otp_button')));
+    await tester.pumpAndSettle();
+    expect(find.text('Enter a valid E.164 number (e.g. +1234567890)'), findsOneWidget);
+
+    await tester.enterText(find.byKey(const Key('phone_field')), '+919830070001');
+    await tester.pump();
+
+    expect(find.text('Enter a valid E.164 number (e.g. +1234567890)'), findsNothing);
   });
 }

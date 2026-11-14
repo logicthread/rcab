@@ -9,7 +9,7 @@
     {
       "title": "Application Logs",
       "type": "logs",
-      "gridPos": { "h": 20, "w": 24, "x": 0, "y": 0 },
+      "gridPos": { "h": 16, "w": 24, "x": 0, "y": 10 },
       "datasource": { "type": "loki", "uid": "loki" },
       "targets": [
         {
@@ -28,9 +28,9 @@
       }
     },
     {
-      "title": "Logs by Request ID",
+      "title": "Logs by Request ID (type an id in the box above)",
       "type": "logs",
-      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 20 },
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 0 },
       "datasource": { "type": "loki", "uid": "loki" },
       "targets": [
         {

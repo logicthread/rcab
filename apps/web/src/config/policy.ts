@@ -20,6 +20,9 @@ export const WEB_POLICY = {
   booking: {
     idempotencyInProgressRetryMs: 1_000,
     ratingCommentMaxLength: 1_000,
+    scheduleMinLeadMs: 900_000,
+    scheduleMaxLeadMs: 86_400_000,
+    scheduleWakeLeadMs: 600_000,
   },
   realtime: {
     subscribeMaxTries: 5,
@@ -64,6 +67,24 @@ export const WEB_POLICY_META: Readonly<Record<WebPolicyKey, ClientKnobMeta>> = {
     source: 'server-mirror',
     description: 'Max rating comment length (server DTO @MaxLength(1000) re-validates).',
     decision: 'RCAB-E4.S9 rating prompts.',
+  },
+  'booking.scheduleMinLeadMs': {
+    unit: 'ms',
+    source: 'server-mirror',
+    description: 'Earliest pickup the "Later" picker offers, from now (server scheduled.minLeadMs re-validates).',
+    decision: 'RCAB-E8.S14 web scheduled booking: mirrors scheduled.minLeadMs (15 min).',
+  },
+  'booking.scheduleMaxLeadMs': {
+    unit: 'ms',
+    source: 'server-mirror',
+    description: 'Latest pickup the "Later" picker offers, from now (server scheduled.maxLeadMs re-validates).',
+    decision: 'RCAB-E8.S14 web scheduled booking: mirrors scheduled.maxLeadMs (24 h).',
+  },
+  'booking.scheduleWakeLeadMs': {
+    unit: 'ms',
+    source: 'server-mirror',
+    description: 'How long before pickup the server starts looking for a driver; until then the tracking banner says "Scheduled for ...".',
+    decision: 'RCAB-E8.S14 web scheduled booking: mirrors scheduled.wakeLeadMs (T-10 min).',
   },
   'realtime.subscribeMaxTries': {
     unit: 'attempts',

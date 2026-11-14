@@ -3,6 +3,7 @@ import { eq, and } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { DRIZZLE_DB, type DrizzleDb } from '../../infra/db/drizzle.module';
 import { vehicle } from '../../db/schema';
+import { Constraint, PG_UNIQUE_VIOLATION, pgConstraintViolation } from '../../db/constraints';
 import type { CreateVehicleDto } from './dto/create-vehicle.dto';
 import type { UpdateVehicleDto } from './dto/update-vehicle.dto';
 
@@ -24,21 +25,24 @@ export class VehiclesService {
       });
     }
 
-    const [created] = await this.db
-      .insert(vehicle)
-      .values({
-        id: randomUUID(),
-        driverId,
-        type: dto.type,
-        regNo: dto.reg_no,
-        make: dto.make,
-        model: dto.model,
-        color: dto.color,
-        seats: dto.seats,
-      })
-      .returning();
-
-    return created;
+    try {
+      const [created] = await this.db
+        .insert(vehicle)
+        .values({
+          id: randomUUID(),
+          driverId,
+          type: dto.type,
+          regNo: dto.reg_no,
+          make: dto.make,
+          model: dto.model,
+          color: dto.color,
+          seats: dto.seats,
+        })
+        .returning();
+      return created;
+    } catch (err) {
+      throw this.mapRegNoConflict(err);
+    }
   }
 
   async findAllForDriver(driverId: string) {
@@ -71,12 +75,27 @@ export class VehiclesService {
     if (dto.color !== undefined) updates['color'] = dto.color;
     if (dto.seats !== undefined) updates['seats'] = dto.seats;
 
-    const [updated] = await this.db
-      .update(vehicle)
-      .set(updates)
-      .where(eq(vehicle.id, id))
-      .returning();
+    try {
+      const [updated] = await this.db
+        .update(vehicle)
+        .set(updates)
+        .where(eq(vehicle.id, id))
+        .returning();
+      return updated;
+    } catch (err) {
+      throw this.mapRegNoConflict(err);
+    }
+  }
 
-    return updated;
+  /** reg_no is globally UNIQUE: another driver's plate must be a 409, not a 500. */
+  private mapRegNoConflict(err: unknown): unknown {
+    const v = pgConstraintViolation(err);
+    if (v?.code === PG_UNIQUE_VIOLATION && v.constraint === Constraint.VehicleRegNo) {
+      return new ConflictException({
+        code: 'vehicle_reg_exists',
+        message: 'A vehicle with that registration number is already registered',
+      });
+    }
+    return err;
   }
 }

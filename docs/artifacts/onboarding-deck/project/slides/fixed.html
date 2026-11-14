@@ -1,0 +1,18 @@
+<section id="fixed" data-transition="fade" style="background:#15202B;color:#ECEAE4;font-family:Inter, Arial, sans-serif;padding:128px 128px 160px;display:flex;flex-direction:column;gap:44px">
+<p style="font-size:26px;letter-spacing:3px;text-transform:uppercase;color:#F0A93B;font-weight:600">Found while recording</p>
+<div style="display:flex;gap:96px;align-items:center">
+<div style="display:flex;flex-direction:column;gap:8px">
+<p style="font-family:'Space Grotesk', Arial, sans-serif;font-size:200px;font-weight:700;line-height:1.0;color:#F0A93B">30+</p>
+<p style="font-size:30px;color:#A9B4BF;width:420px">bugs fixed, each with a regression test</p>
+</div>
+<table style="font-size:26px;color:#ECEAE4">
+<tr><th style="width:24%;text-align:left">Area</th><th style="width:76%;text-align:left">Examples</th></tr>
+<tr><td>Driver app</td><td>No location service, so online drivers were swept after 60 s; no sign-out; offers lost after going offline once</td></tr>
+<tr><td>Passenger web</td><td>No way to book a scheduled ride; raw pool enum shown to riders; no_show resumed after reload</td></tr>
+<tr><td>API</td><td>All Nest warnings dropped from logs; validation errors reported as internal_error; duplicate plate gave 500</td></tr>
+<tr><td>Ops</td><td>Empty Redis and Postgres dashboards; /metrics public through nginx; socket CORS wider than REST</td></tr>
+</table>
+</div>
+<p style="position:absolute;left:128px;bottom:64px;font-size:24px;color:#8995A2">Each video INDEX.md lists what its recording found · branch onboarding/walkthrough</p>
+<aside>This is why recording real workflows was worth it: the unit and integration suites were green while the driver app could not stay online for more than a minute. The harnesses stay in the repo, so the team can re-record after changes and use the recordings as end-to-end smoke checks.</aside>
+</section>

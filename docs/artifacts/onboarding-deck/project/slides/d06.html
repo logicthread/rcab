@@ -1,0 +1,13 @@
+<section id="d06" data-transition="fade" style="background:#15202B;color:#ECEAE4;font-family:Inter, Arial, sans-serif;padding:96px 128px 160px;display:flex;gap:96px">
+<div style="flex:1;display:flex;flex-direction:column;gap:28px">
+<p style="font-size:24px;letter-spacing:3px;text-transform:uppercase;color:#F0A93B;font-weight:600">Driver app · D06 · 59 s</p>
+<h2 style="font-family:'Space Grotesk', Arial, sans-serif;font-size:60px;font-weight:600;line-height:1.1">Shared ride: pool to stops</h2>
+<h3 style="font-family:'Space Grotesk', Arial, sans-serif;font-size:32px;font-weight:600;color:#F0A93B">States</h3>
+<p style="font-size:28px;line-height:1.5">open → closed_full (3rd seat) → claimed → closed_started → completed</p>
+<h3 style="font-family:'Space Grotesk', Arial, sans-serif;font-size:32px;font-weight:600;color:#F0A93B">Watch for</h3>
+<p style="font-size:28px;line-height:1.5;color:#A9B4BF">The pool is offered as one trip with its itinerary, then 3 pickups and 3 drop-offs in order.</p>
+</div>
+<img src="/_blob/9cc30ceb4946b47a8a617ed363d53dd8" data-video="/_blob/bbfc10985bbaf23bdb8093af2e1b6976" alt="D06: driver accepts a three-passenger pool and confirms every pickup and drop-off" style="width:432px;height:768px;object-fit:contain;border-radius:24px;background:#0E151C">
+<p style="position:absolute;left:128px;bottom:64px;font-size:24px;color:#8995A2">functionality/shared-rides.md · state-machines.md §3</p>
+<aside>Every confirmed stop bumps the pool version and broadcasts a versioned pool update, so passengers see the trip start and finish, and a late snapshot can never rewind confirmed stops. Fixed while recording: stops showed raw passenger ids, and after a pool the app tried to open a rating screen that could never be submitted.</aside>
+</section>

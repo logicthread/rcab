@@ -9,6 +9,7 @@ import '../core/auth/token_store.dart';
 import '../core/api/api_client.dart';
 import '../core/driver/driver_state.dart';
 import '../core/driver/driver_state_notifier.dart';
+import '../core/location/driver_locator.dart';
 import '../core/location/foreground_service.dart';
 import '../core/realtime/realtime_socket.dart';
 import '../features/profile/models/vehicle.dart';
@@ -83,6 +84,10 @@ final driverStateProvider =
     foregroundService: ref.read(_foregroundServiceProvider),
   );
 });
+
+// ── Go-online position (permission + fix) ─────────────────────────────────────
+
+final driverLocatorProvider = Provider<DriverLocator>((_) => DriverLocator());
 
 // ── Location stream (local UI position dot) ───────────────────────────────────
 

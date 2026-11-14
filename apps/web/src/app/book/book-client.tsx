@@ -17,6 +17,7 @@ import {
   BookingApiError,
   cancelRide,
   createNormalRide,
+  createScheduledRide,
   createSharedRide,
   fetchQuote,
   fetchRide,
@@ -26,12 +27,19 @@ import { connectBookingSocket } from '../../lib/booking/ws';
 import { createIntentKeyTracker } from '../../lib/booking/intent';
 import { reverseGeocode } from '../../lib/geo/nominatim';
 import { AddressSearch } from './address-search';
+import { validateSchedule } from '../../lib/booking/schedule';
 import { RideTypeToggle } from './ride-type-toggle';
+import { SchedulePicker } from './schedule-picker';
 import { PoolBadge } from './pool-badge';
+import { poolStatusLabel } from '../../lib/booking/pool-status';
 import { SoloFallbackBanner } from './solo-fallback-banner';
 import { RideTrackingPanel } from './ride-tracking-panel';
 
 const ACTIVE_RIDE_KEY = 'rcab_active_ride';
+// Terminal solo statuses: the persisted active-ride marker is dropped (and a reload
+// does not resume tracking) once the ride reaches any of them. `no_show` is a terminal
+// state the driver can put a ride into after the wait, so it must be here too.
+const TERMINAL_RIDE_STATUSES: readonly string[] = ['completed', 'no_driver', 'cancelled', 'no_show'];
 
 // Leaflet touches `window`, so the map is client-only (no SSR).
 const MapPicker = dynamic(() => import('./map-picker').then((m) => m.MapPicker), {
@@ -96,6 +104,8 @@ function BookPage() {
     searchRetry,
     driver,
     rated,
+    scheduledFor,
+    setScheduledFor,
     setRideType,
     setActiveField,
     setPoint,
@@ -245,7 +255,7 @@ function BookPage() {
     fetchRide(saved)
       .then((r) => {
         if (cancelled) return;
-        if (['completed', 'no_driver', 'cancelled'].includes(r.status)) {
+        if (TERMINAL_RIDE_STATUSES.includes(r.status)) {
           window.localStorage.removeItem(ACTIVE_RIDE_KEY);
           return;
         }
@@ -254,7 +264,7 @@ function BookPage() {
           dropoff: { lat: r.dropoff.lat, lng: r.dropoff.lng, label: 'Dropoff' },
           rideType: 'private',
         });
-        setSoloRequested(r.rideId, r.status);
+        setSoloRequested(r.rideId, r.status, r.scheduledFor);
       })
       .catch(() => {
         /* stale / unauthorized — drop it */
@@ -271,7 +281,7 @@ function BookPage() {
   useEffect(() => {
     if (
       rideStatus &&
-      ['completed', 'no_driver', 'cancelled'].includes(rideStatus) &&
+      TERMINAL_RIDE_STATUSES.includes(rideStatus) &&
       typeof window !== 'undefined'
     ) {
       window.localStorage.removeItem(ACTIVE_RIDE_KEY);
@@ -280,13 +290,24 @@ function BookPage() {
 
   const submitSolo = useCallback(async () => {
     if (!authed || rideType !== 'private' || !pickup || !dropoff || !quote?.quoteToken) return;
+    if (scheduledFor) {
+      const invalid = validateSchedule(scheduledFor);
+      if (invalid) {
+        setRequestError(invalid);
+        return;
+      }
+    }
     startRequest();
     try {
-      const key = intentKeys.keyFor(quoteKey);
-      const res = await createNormalRide(pickup, dropoff, quote.quoteToken, key);
+      // A "Later" booking is a different intent (and a different server idempotency scope) than
+      // "Now", and each pickup time is its own intent: the key follows both.
+      const key = intentKeys.keyFor(scheduledFor ? `${quoteKey}|${scheduledFor}` : quoteKey);
+      const res = scheduledFor
+        ? await createScheduledRide(pickup, dropoff, quote.quoteToken, scheduledFor, key)
+        : await createNormalRide(pickup, dropoff, quote.quoteToken, key);
       intentKeys.clear();
       if (typeof window !== 'undefined') window.localStorage.setItem(ACTIVE_RIDE_KEY, res.rideId);
-      setSoloRequested(res.rideId, res.status);
+      setSoloRequested(res.rideId, res.status, res.scheduledFor ?? scheduledFor);
     } catch (err) {
       setRequestError(createErrorMessage(err));
     }
@@ -297,6 +318,7 @@ function BookPage() {
     dropoff,
     quote,
     quoteKey,
+    scheduledFor,
     intentKeys,
     startRequest,
     setSoloRequested,
@@ -429,6 +451,7 @@ function BookPage() {
           <RideTrackingPanel
             status={rideStatus ?? 'requested'}
             searchRetry={searchRetry}
+            scheduledFor={scheduledFor}
             driver={driver}
             onNewBooking={clearActiveRide}
             onCancel={cancelActiveRide}
@@ -516,6 +539,19 @@ function BookPage() {
               />
             </div>
           </section>
+
+          {rideType === 'private' && (
+            <section style={{ marginTop: 16 }}>
+              <label style={{ fontSize: 13, fontWeight: 600 }}>Pickup time</label>
+              <div style={{ marginTop: 6 }}>
+                <SchedulePicker
+                  value={scheduledFor}
+                  onChange={setScheduledFor}
+                  disabled={stage === 'requesting'}
+                />
+              </div>
+            </section>
+          )}
 
           <section
             data-testid="quote-panel"
@@ -612,7 +648,7 @@ function BookPage() {
                   cursor: 'pointer',
                 }}
               >
-                {stage === 'requesting' ? 'Requesting…' : 'Book'}
+                {stage === 'requesting' ? 'Requesting…' : scheduledFor ? 'Schedule ride' : 'Book'}
               </button>
             )}
             {requestError && (
@@ -622,10 +658,15 @@ function BookPage() {
 
           {sharedRideId && (
             <section style={{ marginTop: 16 }}>
-              <div style={{ fontSize: 13, color: '#525252' }}>
-                Pool: {sharedRideId.slice(0, 8)}…{' · '}seat {seatCount}
+              <div
+                style={{ fontSize: 13, color: '#525252' }}
+                data-testid="pool-status"
+                data-pool-status={poolStatus ?? 'pending'}
+                data-seat-count={seatCount}
+              >
+                Shared ride · {seatCount} {seatCount === 1 ? 'seat' : 'seats'} taken
                 {' · '}
-                {poolStatus ?? 'pending'}
+                {poolStatusLabel(poolStatus)}
               </div>
               {agreedFare && (
                 <div style={{ fontSize: 14, marginTop: 6 }} data-testid="agreed-fare">

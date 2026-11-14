@@ -91,13 +91,42 @@ class RideNotifier extends StateNotifier<RideState> {
     if (state.busy) return;
     state = state.copyWith(busy: true);
     try {
-      final newStatus = await _service.advance(state.rideId, event);
-      state = state.copyWith(status: RideStatus.parse(newStatus), busy: false);
+      final newStatus = RideStatus.parse(await _service.advance(state.rideId, event));
+      state = state.copyWith(status: newStatus, busy: false);
+      // The transition response carries no timestamps: fetch `arrivedAt`, or
+      // the no-show button never unlocks on this screen (RCAB-E8.S14).
+      if (newStatus == RideStatus.arrived) await load();
     } catch (_) {
       state = state.copyWith(busy: false);
       await load();
     }
   }
+
+  /// A server-pushed status (`ride_state_changed` / subscribe snapshot), e.g.
+  /// the passenger cancelled or the server moved the ride `en_route` on the
+  /// first location packet. Applied only when it moves the ride forward
+  /// (same rank order as the server's `rideStatusVersion`).
+  Future<void> applyServerStatus(String raw) async {
+    final next = RideStatus.parse(raw);
+    if (next == RideStatus.unknown || _rank(next) <= _rank(state.status)) return;
+    state = state.copyWith(status: next);
+    if (next == RideStatus.arrived && state.arrivedAt == null) await load();
+  }
+
+  static int _rank(RideStatus s) => switch (s) {
+        RideStatus.requested => 1,
+        RideStatus.dispatching => 2,
+        RideStatus.accepted => 3,
+        RideStatus.enRoute => 4,
+        RideStatus.arrived => 5,
+        RideStatus.inProgress => 6,
+        RideStatus.completed ||
+        RideStatus.cancelled ||
+        RideStatus.noDriver ||
+        RideStatus.noShow =>
+          10,
+        RideStatus.unknown => 0,
+      };
 
   /// Cancel the ride with a reason. On error (e.g. the state moved) re-sync from
   /// the server. RCAB-E4.S8.

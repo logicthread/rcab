@@ -1,0 +1,16 @@
+<section id="w0102" data-transition="fade" style="background:#15202B;color:#ECEAE4;font-family:Inter, Arial, sans-serif;padding:96px 128px 160px;display:flex;flex-direction:column;gap:36px">
+<p style="font-size:24px;letter-spacing:3px;text-transform:uppercase;color:#F0A93B;font-weight:600">Passenger app · W01, W02</p>
+<h2 style="font-family:'Space Grotesk', Arial, sans-serif;font-size:60px;font-weight:600;line-height:1.1">Landing, route guard and the sign-in screen</h2>
+<div style="display:flex;gap:64px">
+<div style="flex:1;display:flex;flex-direction:column;gap:20px">
+<img src="/_blob/6f5e4f96172c0dc1bed13f681e34f6d9" data-video="/_blob/f7f83c789a5f685c92abcd5c77a62fee" alt="W01: landing page; opening /book while signed out redirects to sign-in" style="width:800px;height:450px;object-fit:contain;border-radius:16px;background:#0E151C">
+<p style="font-size:26px;color:#A9B4BF"><b style="color:#ECEAE4">W01</b> · 19 s · / → /book → redirected to /signin</p>
+</div>
+<div style="flex:1;display:flex;flex-direction:column;gap:20px">
+<img src="/_blob/0d8c90c2fddf489503a2a542ed73f5f9" data-video="/_blob/3e014424ab9e42f738e4bc3d083a9496" alt="W02: phone-number sign-in form with client-side validation" style="width:800px;height:450px;object-fit:contain;border-radius:16px;background:#0E151C">
+<p style="font-size:26px;color:#A9B4BF"><b style="color:#ECEAE4">W02</b> · 21 s · phone OTP form, UI only</p>
+</div>
+</div>
+<p style="position:absolute;left:128px;bottom:64px;font-size:24px;color:#8995A2">functionality/auth-and-sessions.md · videos/web/INDEX.md#w01</p>
+<aside>Sign-in is real Firebase phone OTP, exchanged at POST /v1/auth/firebase-exchange for an access token plus an HttpOnly refresh cookie. The OTP step needs a real SMS, so W02 shows the form only. Every later scene starts from a session the recording harness creates for a fixture user; nothing like that exists in the shipped app.</aside>
+</section>

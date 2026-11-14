@@ -179,7 +179,7 @@ Inspect with `/redis-inspect`.
 |---|---|---|---|
 | Driver geo | `ZSET drivers:geo` (geo-encoded score), `HASH driver:<id>:presence` | E3 location stream; E4/E5 dispatch candidate pick | Pruned on offline, stale entries swept by background sweeper |
 | BullMQ queues | `bull:dispatch:*`, `bull:offers:*`, `bull:no-show:*` | E4 dispatch + offers + no-show timer; E5 pool close | Per-job, BullMQ-managed |
-| JWT revocation | `SET jwt:revoked:<jti>` | E2 logout / refresh-bumping | TTL = remaining token lifetime |
+| Refresh-token revocation | not in Redis: Postgres `auth_refresh_token.revoked_at` | E2 logout / rotation | n/a |
 
 ---
 
@@ -265,8 +265,8 @@ Web/Driver app                 API                    Firebase
 
 JWT details:
 - **Access token** in `Authorization: Bearer …`. Short TTL (default 15 min).
-- **Refresh token** in `rcab_refresh` cookie (`HttpOnly`, `SameSite=Strict`). Longer TTL (default 30 d).
-- **Logout** writes `jti` to `jwt:revoked:<jti>` in Redis. Guard checks Redis on every request.
+- **Refresh token** in the `refresh_token` cookie (`HttpOnly`, `SameSite=Lax`, path `/v1/auth`). Longer TTL (default 30 d). Only its SHA-256 digest is stored.
+- **Logout** sets `auth_refresh_token.revoked_at` in Postgres (single-use rotation). There is no Redis revocation list; an already-issued access token stays valid until it expires.
 
 Test:
 - Sign in → curl `/v1/rides/quote` with `Authorization: Bearer …` → 200.
@@ -421,8 +421,8 @@ watch -n1 'docker compose --env-file .env.dev -f infra/docker/docker-compose.dev
 # Tail API logs only
 docker logs -f rcab_api_dev
 
-# Force a JWT to be revoked (test 401)
-redis-cli SET jwt:revoked:<jti> 1 EX 3600
+# Revoke a refresh token (test 401 on next refresh): there is no Redis revocation list
+psql -c "UPDATE auth_refresh_token SET revoked_at = now() WHERE user_id = '<uuid>' AND revoked_at IS NULL"
 
 # Snapshot Postgres for a manual diff
 docker exec rcab_postgres_dev pg_dump -U postgres rcab > /tmp/before.sql

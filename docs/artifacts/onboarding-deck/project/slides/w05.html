@@ -1,0 +1,15 @@
+<section id="w05" data-transition="fade" style="background:#15202B;color:#ECEAE4;font-family:Inter, Arial, sans-serif;padding:96px 128px 160px;display:flex;flex-direction:column;gap:36px">
+<p style="font-size:24px;letter-spacing:3px;text-transform:uppercase;color:#F0A93B;font-weight:600">Passenger app · W05 · 53 s</p>
+<h2 style="font-family:'Space Grotesk', Arial, sans-serif;font-size:60px;font-weight:600;line-height:1.1">Driver cancels, then reports a no-show</h2>
+<div style="display:flex;gap:56px">
+<img src="/_blob/0b2c48ca024332b0bb1f6235d60780cc" data-video="/_blob/a741ff8bfcf0f5bade48f30498870eb0" alt="W05: two rides; the driver cancels one en route and reports a no-show on the other" style="width:1088px;height:612px;object-fit:contain;border-radius:16px;background:#0E151C">
+<div style="flex:1;display:flex;flex-direction:column;gap:20px">
+<h3 style="font-family:'Space Grotesk', Arial, sans-serif;font-size:32px;font-weight:600;color:#F0A93B">States</h3>
+<p style="font-size:26px;line-height:1.5">Ride 1: en_route → cancelled (by driver)<br>Ride 2: arrived → no_show</p>
+<h3 style="font-family:'Space Grotesk', Arial, sans-serif;font-size:32px;font-weight:600;color:#F0A93B">Rule</h3>
+<p style="font-size:26px;line-height:1.5;color:#A9B4BF">No-show unlocks 5 minutes after arrival (rides.noShowWaitMs).</p>
+</div>
+</div>
+<p style="position:absolute;left:128px;bottom:64px;font-size:24px;color:#8995A2">Fixed while recording: no_show now counts as terminal on reload (fd8b2ca)</p>
+<aside>To keep the video short, the harness back-dates arrived_at by six minutes in the dev database instead of waiting five real minutes. The server still checks the wait itself. Recording this scene found that a no_show ride was resumed as tracking after a reload; that is fixed with a test.</aside>
+</section>

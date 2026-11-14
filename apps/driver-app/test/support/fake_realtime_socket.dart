@@ -14,6 +14,8 @@ class FakeRealtimeSocket implements IRealtimeSocket {
   final _driverState = StreamController<Map<String, dynamic>>.broadcast(sync: true);
   final _outcome = StreamController<Map<String, dynamic>>.broadcast(sync: true);
   final _assignment = StreamController<Map<String, dynamic>>.broadcast(sync: true);
+  final _rideState = StreamController<Map<String, dynamic>>.broadcast(sync: true);
+  final Set<String> rideSubscriptions = <String>{};
 
   final List<({String event, Map<String, dynamic> data})> sent = [];
   int snapshotRequests = 0;
@@ -36,6 +38,13 @@ class FakeRealtimeSocket implements IRealtimeSocket {
   Stream<Map<String, dynamic>> get rideOfferOutcome => _outcome.stream;
   @override
   Stream<Map<String, dynamic>> get driverAssignment => _assignment.stream;
+  @override
+  Stream<Map<String, dynamic>> get rideStateChanged => _rideState.stream;
+
+  @override
+  void subscribeRide(String rideId) => rideSubscriptions.add(rideId);
+  @override
+  void unsubscribeRide(String rideId) => rideSubscriptions.remove(rideId);
 
   @override
   Future<void> connect() async {}
@@ -67,7 +76,7 @@ class FakeRealtimeSocket implements IRealtimeSocket {
     await Future.wait([
       _rideOffer.close(), _rideOfferAccepted.close(), _rideOfferRevoked.close(),
       _stopPickup.close(), _stopDrop.close(), _rideCompleted.close(),
-      _driverState.close(), _outcome.close(), _assignment.close(),
+      _driverState.close(), _outcome.close(), _assignment.close(), _rideState.close(),
     ]);
   }
 
@@ -80,4 +89,5 @@ class FakeRealtimeSocket implements IRealtimeSocket {
   void emitDriverState(Map<String, dynamic> p) => _driverState.add(p);
   void emitOutcome(Map<String, dynamic> p) => _outcome.add(p);
   void emitAssignment(Map<String, dynamic> p) => _assignment.add(p);
+  void emitRideState(Map<String, dynamic> p) => _rideState.add(p);
 }

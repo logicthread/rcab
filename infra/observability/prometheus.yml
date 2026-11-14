@@ -10,6 +10,11 @@ alerting:
     - static_configs:
         - targets: ['alertmanager:9093']
 
+# Extra scrape jobs live in drop-in files. The dev compose mounts exporters.yml here (redis / postgres
+# exporters feed the Redis and Postgres Grafana dashboards); a stack that mounts nothing scrapes only `api`.
+scrape_config_files:
+  - /etc/prometheus/scrape.d/*.yml
+
 scrape_configs:
   - job_name: api
     static_configs:

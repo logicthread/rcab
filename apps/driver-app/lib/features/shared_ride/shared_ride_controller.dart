@@ -7,6 +7,7 @@ import '../../core/realtime/driver_assignment.dart';
 import '../../core/realtime/offer_outcome.dart';
 import '../../core/realtime/realtime_socket.dart';
 import '../../di/providers.dart';
+import '../home/driver_notice.dart';
 import 'shared_ride_models.dart';
 import 'shared_ride_provider.dart';
 import '../../core/config/policy.dart';
@@ -127,6 +128,7 @@ class SharedRideController {
       _cancelTicker();
       _cancelAckTimer();
       _notifier.reset();
+      _notice(outcome.reason ?? outcome.kind.name);
       _navigate('/home');
     }
   }
@@ -232,12 +234,16 @@ class SharedRideController {
       if (s.phase == SharedRidePhase.expired) {
         _cancelTicker();
         _notifier.reset();
+        _notice('expired');
         _navigate('/home');
       } else if (!s.isOffer) {
         _cancelTicker();
       }
     });
   }
+
+  void _notice(String reason) =>
+      container.read(driverNoticeProvider.notifier).state = offerEndedNotice(reason);
 
   void _cancelTicker() {
     _ticker?.cancel();

@@ -9,6 +9,8 @@ export const PG_CHECK_VIOLATION = '23514';
 export const PG_FOREIGN_KEY_VIOLATION = '23503';
 
 export const Constraint = {
+  /** 23505 — vehicle.reg_no is globally unique (any driver). */
+  VehicleRegNo: 'vehicle_reg_no_key',
   /** 23505 — the driver already has an active trip (solo or shared). */
   AssignmentDriverBusy: 'driver_active_assignment_pkey',
   /** 23505 — the solo ride already has an assigned driver. */

@@ -86,14 +86,18 @@ export function inventoryHost() {
 // ---------------------------------------------------------------------------
 // Port availability
 // ---------------------------------------------------------------------------
-const DEV_PORTS = { api: 3000, loki: 3001, grafana: 3002, uptime_kuma: 3003, prometheus: 9090 };
+// Host ports published by docker-compose.dev.yml (api/web/redis/postgres always; grafana/kuma/prometheus under the
+// `obs` profile). Loki, Alertmanager and OSRM publish no host port.
+const DEV_PORTS = { api: 3000, grafana: 3001, web: 3002, uptime_kuma: 3003, prometheus: 9090, redis: 6379, postgres: 55432 };
 
 function checkPort(port) {
   return new Promise(res => {
     const srv = createServer();
     srv.once('error', () => res(false));
     srv.once('listening', () => { srv.close(); res(true); });
-    srv.listen(port, '127.0.0.1');
+    // Bind the wildcard address: a docker-published port is held on 0.0.0.0/::, and macOS lets a
+    // loopback-only bind succeed beside it, which would wrongly report the port as free.
+    srv.listen(port, '0.0.0.0');
   });
 }
 

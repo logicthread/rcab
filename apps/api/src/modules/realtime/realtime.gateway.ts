@@ -17,6 +17,7 @@ import type Redis from 'ioredis';
 import { REDIS } from '../../infra/redis/redis.module';
 import { getPolicy } from '../../config/policy/policy';
 import { wsConnections } from '../../metrics';
+import { resolveBrowserOrigins } from '../../common/guards/auth-config';
 import { RealtimeBus } from './realtime.bus';
 import { RealtimeSnapshotService, isUuid } from './realtime-snapshot.service';
 import {
@@ -91,6 +92,26 @@ export interface StopConfirmRequestEvent {
   type: 'pickup' | 'dropoff';
 }
 
+let allowedOrigins: string[] | undefined;
+
+/**
+ * Same allowlist as REST CORS / CsrfGuard (resolveBrowserOrigins). Resolved lazily so
+ * importing this module never throws; main.ts validates the list before listening.
+ * Native clients (the driver app) send no Origin header and are always allowed.
+ */
+export function socketOriginCheck(
+  origin: string | undefined,
+  cb: (err: Error | null, allow?: boolean) => void,
+): void {
+  if (!origin) return cb(null, true);
+  try {
+    allowedOrigins ??= resolveBrowserOrigins();
+    cb(null, allowedOrigins.includes(origin));
+  } catch {
+    cb(null, false);
+  }
+}
+
 export interface DriverFirstLocationEvent {
   rideId: string;
   driverId: string;
@@ -102,7 +123,7 @@ export interface RideSubscribeRequestEvent {
   rideId: string;
 }
 
-@WebSocketGateway({ cors: { origin: '*' }, transports: ['websocket'] })
+@WebSocketGateway({ cors: { origin: socketOriginCheck, credentials: true }, transports: ['websocket'] })
 export class RealtimeGateway
   implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect, OnModuleDestroy
 {
@@ -218,6 +239,11 @@ export class RealtimeGateway
         });
       }
     }
+
+    // An offline driver (explicit goOffline / sweep deletes driver:state) must not be
+    // re-added to the geo index nor get last_seen re-created by a late packet.
+    const availability = await this.redis.hget(`driver:state:${driverId}`, 'availability');
+    if (!availability || availability === 'offline') return;
 
     // Geo-index freshness (per-driver, 3 s).
     const lastGeo = this._geoThrottle.get(driverId) ?? 0;

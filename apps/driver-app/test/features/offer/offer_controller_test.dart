@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:driver_app/di/providers.dart';
+import 'package:driver_app/features/home/driver_notice.dart';
 import 'package:driver_app/features/offer/offer_controller.dart';
 import 'package:driver_app/features/offer/offer_models.dart';
 import 'package:driver_app/features/offer/offer_provider.dart';
@@ -168,6 +169,8 @@ void main() {
       await Future<void>.delayed(Duration.zero);
       expect(h.navStack, ['/offer/o-1', '/home']);
       expect(h.container.read(offerProvider).phase, OfferPhase.revoked);
+      // RCAB-E8.S14: home explains why the offer vanished.
+      expect(h.container.read(driverNoticeProvider), 'Another driver accepted this ride');
       h.ctrl.stop();
     });
 
@@ -178,6 +181,7 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 60));
       expect(h.container.read(offerProvider).phase, OfferPhase.expired);
       expect(h.navStack, contains('/home'));
+      expect(h.container.read(driverNoticeProvider), 'The offer expired');
       h.ctrl.stop();
     });
   });

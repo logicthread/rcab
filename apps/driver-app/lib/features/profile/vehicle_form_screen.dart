@@ -2,6 +2,8 @@ import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/api/api_error.dart';
+import '../../core/driver/driver_state_notifier.dart';
 import '../../di/providers.dart';
 
 const _vehicleTypes = ['auto', 'bike', 'cab_hatch', 'cab_sedan'];
@@ -23,6 +25,10 @@ class _VehicleFormScreenState extends ConsumerState<VehicleFormScreen> {
   final _seatsCtrl = TextEditingController();
   bool _submitting = false;
 
+  /// Off until a submit is rejected; then each edit re-validates, so a
+  /// "… required" error clears once the driver fills the field (RCAB-E8.S14).
+  AutovalidateMode _autovalidate = AutovalidateMode.disabled;
+
   @override
   void dispose() {
     _regNoCtrl.dispose();
@@ -34,7 +40,10 @@ class _VehicleFormScreenState extends ConsumerState<VehicleFormScreen> {
   }
 
   Future<void> _submit() async {
-    if (!(_formKey.currentState?.validate() ?? false)) return;
+    if (!(_formKey.currentState?.validate() ?? false)) {
+      setState(() => _autovalidate = AutovalidateMode.onUserInteraction);
+      return;
+    }
     setState(() => _submitting = true);
     try {
       final dio = ref.read(apiClientProvider);
@@ -49,7 +58,7 @@ class _VehicleFormScreenState extends ConsumerState<VehicleFormScreen> {
       ref.invalidate(vehiclesProvider);
       if (mounted) Navigator.of(context).pop();
     } on DioException catch (e) {
-      final code = e.response?.data?['code'] as String?;
+      final code = ApiError.of(e)?.code;
       if (!mounted) return;
       if (code == 'vehicle_reg_exists') {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -60,7 +69,11 @@ class _VehicleFormScreenState extends ConsumerState<VehicleFormScreen> {
         );
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: ${e.message}')),
+          SnackBar(
+            content: Text(
+              DriverStateNotifier.serverErrorMessage(e, fallback: 'Could not save the vehicle. Try again.'),
+            ),
+          ),
         );
       }
     } finally {
@@ -75,13 +88,14 @@ class _VehicleFormScreenState extends ConsumerState<VehicleFormScreen> {
       appBar: AppBar(title: const Text('Add vehicle')),
       body: Form(
         key: _formKey,
+        autovalidateMode: _autovalidate,
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
             DropdownButtonFormField<String>(
               key: const Key('type_dropdown'),
               decoration: const InputDecoration(labelText: 'Vehicle type'),
-              value: _type,
+              initialValue: _type,
               items: _vehicleTypes
                   .map((t) => DropdownMenuItem(value: t, child: Text(t)))
                   .toList(),

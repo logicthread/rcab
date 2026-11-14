@@ -2,9 +2,10 @@
 
 > ⚠️ **Superseded (2026-07-17, re-checked 2026-09-28).** Only covers Demos 0–1 in detail, and
 > its environment details are wrong: web is `:3002`, Grafana `:3001`, tables are `app_user`
-> (not `users`), Postgres creds are `rcab/rcab` and **Postgres + OSRM publish no host port**
-> (no `localhost:5432` / `localhost:5000`), and the dev OSRM graph covers **Guwahati**, not
-> Bengaluru. Use **`docs/manual-testing/RUN-GUIDE.md`** (Demos 0–5, code-verified) instead.
+> (not `users`), Postgres creds are `rcab/rcab` and Postgres publishes host port **55432**
+> (not `5432`) while OSRM publishes no host port (no `localhost:5000`), the refresh cookie is
+> named `refresh_token` (`HttpOnly`, `SameSite=Lax`, path `/v1/auth`), not `rcab_refresh` /
+> `SameSite=Strict`, and the dev OSRM graph covers **Guwahati**, not Bengaluru. Use **`docs/manual-testing/RUN-GUIDE.md`** (Demos 0–5, code-verified) instead.
 > Kept for the demo narrative and acceptance wording.
 
 This guide walks through every demo that is **built and shippable** today (Demos 0–4 — epics E1–E5). It is the first human-facing testing pass for the project; until now everything has been gated by automated tests only.
@@ -135,7 +136,7 @@ Or via skill: `/seed-db --reset --scenario=default`.
 3. Solve the reCAPTCHA, click **Send OTP**.
 4. Enter the 6-digit OTP from SMS, click **Verify**.
 5. Confirm you land back on `/` as a signed-in user (name/phone visible in header).
-6. Open DevTools → Application → Cookies. Confirm `rcab_refresh` cookie set, `HttpOnly`, `SameSite=Strict`.
+6. Open DevTools → Application → Cookies. Confirm the `refresh_token` cookie is set, `HttpOnly`, `SameSite=Lax`, path `/v1/auth`.
 7. In a new terminal:
    ```bash
    # Find your user row

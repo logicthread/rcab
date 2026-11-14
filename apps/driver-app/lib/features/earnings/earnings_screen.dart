@@ -9,7 +9,9 @@ class EarningsScreen extends StatelessWidget {
       appBar: AppBar(title: const Text('Earnings')),
       body: const Center(
         child: Text(
-          'Earnings — coming in E7',
+          // Was the internal tracker reference "coming in E7". There is no
+          // earnings API yet (product gap, Epic E7).
+          'Your trip earnings will appear here soon.',
           key: Key('earnings_screen'),
         ),
       ),

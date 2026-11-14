@@ -1,0 +1,15 @@
+<section id="m03" data-transition="fade" style="background:#15202B;color:#ECEAE4;font-family:Inter, Arial, sans-serif;padding:96px 128px 160px;display:flex;flex-direction:column;gap:36px">
+<p style="font-size:24px;letter-spacing:3px;text-transform:uppercase;color:#F0A93B;font-weight:600">Monitoring · M03 · 45 s</p>
+<h2 style="font-family:'Space Grotesk', Arial, sans-serif;font-size:60px;font-weight:600;line-height:1.1">Trace one request through the logs</h2>
+<div style="display:flex;gap:56px">
+<img src="/_blob/531683dfebf5bb6acd169aa67fad8371" data-video="/_blob/0b5cb3b4d0f8f0dc9bf8f60cb3daeb1c" alt="M03: Grafana Explore on Loki filtering API logs by one request id" style="width:1088px;height:612px;object-fit:contain;border-radius:16px;background:#0E151C">
+<div style="flex:1;display:flex;flex-direction:column;gap:20px">
+<h3 style="font-family:'Space Grotesk', Arial, sans-serif;font-size:32px;font-weight:600;color:#F0A93B">How</h3>
+<p style="font-size:26px;line-height:1.5">Take x-request-id from a response, then filter with | json | request_id</p>
+<h3 style="font-family:'Space Grotesk', Arial, sans-serif;font-size:32px;font-weight:600;color:#F0A93B">Fixed</h3>
+<p style="font-size:26px;line-height:1.5;color:#A9B4BF">Nest warnings and errors now reach Loki at all.</p>
+</div>
+</div>
+<p style="position:absolute;left:128px;bottom:64px;font-size:24px;color:#8995A2">workflows/debugging-and-tooling.md · infra/observability</p>
+<aside>Two fixes came out of this scene. The API booted Nest with its logger switched off, so every dispatch, reconciler and outbox warning was silently dropped; Nest now logs through pino, with secrets redacted. And request_id was a Loki label, which created one stream per request; it is now a parsed JSON field.</aside>
+</section>

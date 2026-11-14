@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../home/driver_notice.dart';
 import 'shared_ride_models.dart';
 import 'shared_ride_provider.dart';
 import 'stop_list_tile.dart';
@@ -16,21 +17,26 @@ class SharedRideScreen extends ConsumerStatefulWidget {
 }
 
 class _SharedRideScreenState extends ConsumerState<SharedRideScreen> {
-  bool _navigatedToRating = false;
+  bool _routedHome = false;
 
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(sharedRideProvider);
 
-    // Auto-navigate to the rating screen when the ride flips to completed.
+    // When the last drop-off completes the pool, return home with a summary.
+    // There is deliberately no rating prompt here: a shared pool is not a
+    // `rides` row, so `POST /v1/rides/<poolId>/ratings` is always 404 and the
+    // prompt this used to open could never be submitted (RCAB-E8.S14).
+    // Per-passenger shared-ride rating is a product gap (Epic E7).
     ref.listen<SharedRideState>(sharedRideProvider, (prev, next) {
-      if (!_navigatedToRating &&
-          next.completed &&
-          next.sharedRideId == widget.rideId) {
-        _navigatedToRating = true;
+      if (!_routedHome && next.completed && next.sharedRideId == widget.rideId) {
+        _routedHome = true;
+        final riders = passengerLabels(next.stops.map((s) => s.stop)).length;
+        ref.read(driverNoticeProvider.notifier).state =
+            'Shared ride complete · $riders passenger${riders == 1 ? '' : 's'} dropped off';
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (!mounted) return;
-          context.go('/rating/${widget.rideId}');
+          context.go('/home');
         });
       }
     });
@@ -53,11 +59,13 @@ class _SharedRideScreenState extends ConsumerState<SharedRideScreen> {
 
     final current = state.currentStop;
     final canConfirm = !state.completed && current?.status == StopStatus.pending;
+    final labels = passengerLabels(state.stops.map((s) => s.stop));
+    final who = current == null ? '' : labels[current.stop.passengerId]!;
     final buttonLabel = current == null
         ? 'Ride complete'
         : current.stop.type == StopType.pickup
-            ? 'Picked up passenger ${current.stop.passengerId}'
-            : 'Dropped off passenger ${current.stop.passengerId}';
+            ? 'Picked up $who'
+            : 'Dropped off $who';
 
     return Scaffold(
       appBar: AppBar(
@@ -83,6 +91,7 @@ class _SharedRideScreenState extends ConsumerState<SharedRideScreen> {
                 return StopListTile(
                   stopState: state.stops[i],
                   isCurrent: i == state.currentStopIndex,
+                  passengerLabel: labels[state.stops[i].stop.passengerId],
                 );
               },
             ),
@@ -158,7 +167,11 @@ class _SharedOfferView extends ConsumerWidget {
               key: const Key('shared_offer_itinerary'),
               itemCount: state.stops.length,
               separatorBuilder: (_, __) => const Divider(height: 1),
-              itemBuilder: (_, i) => StopListTile(stopState: state.stops[i], isCurrent: false),
+              itemBuilder: (_, i) => StopListTile(
+                stopState: state.stops[i],
+                isCurrent: false,
+                passengerLabel: passengerLabels(state.stops.map((s) => s.stop))[state.stops[i].stop.passengerId],
+              ),
             ),
           ),
           SafeArea(
@@ -178,7 +191,10 @@ class _SharedOfferView extends ConsumerWidget {
                         Expanded(
                           child: OutlinedButton(
                             key: const Key('shared_offer_decline_button'),
-                            onPressed: notifier.decline,
+                            onPressed: () {
+                              notifier.decline();
+                              GoRouter.maybeOf(context)?.go('/home');
+                            },
                             child: const Padding(
                               padding: EdgeInsets.symmetric(vertical: 14),
                               child: Text('Decline'),

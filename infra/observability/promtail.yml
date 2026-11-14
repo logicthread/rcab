@@ -21,10 +21,12 @@ scrape_configs:
         target_label: stream
     pipeline_stages:
       - docker: {}
+      # Only LOW-cardinality fields become Loki labels. request_id is unique per request: as a label it
+      # created one stream per request (thousands within hours, past Loki's active-stream limit, so pushes
+      # would start being rejected). Find a request with `| json | request_id = "<id>"` instead (the Logs
+      # dashboard does exactly that).
       - json:
           expressions:
-            request_id: request_id
             level: level
       - labels:
-          request_id:
           level:

@@ -1,0 +1,16 @@
+<section id="m0405" data-transition="fade" style="background:#15202B;color:#ECEAE4;font-family:Inter, Arial, sans-serif;padding:96px 128px 160px;display:flex;flex-direction:column;gap:36px">
+<p style="font-size:24px;letter-spacing:3px;text-transform:uppercase;color:#F0A93B;font-weight:600">Monitoring · M04, M05</p>
+<h2 style="font-family:'Space Grotesk', Arial, sans-serif;font-size:60px;font-weight:600;line-height:1.1">Uptime checks and alert routing</h2>
+<div style="display:flex;gap:64px">
+<div style="flex:1;display:flex;flex-direction:column;gap:20px">
+<img src="/_blob/70a9338e38998238decc6cfd28dd5065" data-video="/_blob/b75eb83a27d7a8d2b324c7e270e692e0" alt="M04: Uptime Kuma monitoring the API readiness endpoint" style="width:800px;height:450px;object-fit:contain;border-radius:16px;background:#0E151C">
+<p style="font-size:26px;color:#A9B4BF"><b style="color:#ECEAE4">M04</b> · 36 s · Uptime Kuma polling /v1/health/ready every 60 s</p>
+</div>
+<div style="flex:1;display:flex;flex-direction:column;gap:20px">
+<img src="/_blob/c48d063ca59bb0deab0c67ccad5f5fc4" data-video="/_blob/e9eacdbcfdd4c3ef4b2e310c076c145a" alt="M05: Prometheus alert rules and Alertmanager" style="width:800px;height:450px;object-fit:contain;border-radius:16px;background:#0E151C">
+<p style="font-size:26px;color:#A9B4BF"><b style="color:#ECEAE4">M05</b> · 49 s · two alert rules; no notifier wired yet</p>
+</div>
+</div>
+<p style="position:absolute;left:128px;bottom:64px;font-size:24px;color:#8995A2">Open: Alertmanager has no Slack or email receiver yet (story E8.S2)</p>
+<aside>Only ApiHighErrorRate and ApiHighP99Latency exist today, and Alertmanager’s single receiver has no notifier, so alerts are visible but nobody is paged. Wiring receivers and more rules is story E8.S2. The Uptime Kuma setup script was fixed while recording; it detected first-run setup wrongly on Kuma 1.x.</aside>
+</section>

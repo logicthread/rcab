@@ -4,8 +4,32 @@ import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:geolocator/geolocator.dart';
 import '../config/policy.dart';
 
-// Allows test injection of a mock position getter.
-typedef GetPositionFn = Future<Position> Function();
+// Allows test injection of a mock position getter. Null = no fix this tick.
+typedef GetPositionFn = Future<Position?> Function();
+
+/// One location fix for the background task, never unbounded: [current] gets
+/// [timeout] (DriverPolicy.locationFixTimeoutMs), then [lastKnown] is used.
+///
+/// Before RCAB-E8.S14 the task awaited `getCurrentPosition` with no limit. In
+/// the foreground-service engine that call can stay pending forever (seen on
+/// the Android emulator after the first fix), so the driver sent one packet,
+/// went silent, and the server swept them offline after drivers.staleAfterMs.
+@visibleForTesting
+Future<Position?> boundedFix({
+  required Future<Position> Function() current,
+  required Future<Position?> Function() lastKnown,
+  Duration timeout = const Duration(milliseconds: DriverPolicy.locationFixTimeoutMs),
+}) async {
+  try {
+    return await current().timeout(timeout);
+  } catch (_) {
+    try {
+      return await lastKnown();
+    } catch (_) {
+      return null;
+    }
+  }
+}
 
 // Top-level entry point required by flutter_foreground_task (separate isolate).
 @pragma('vm:entry-point')
@@ -19,21 +43,38 @@ void startForegroundTask() {
 class LocationTaskHandler extends TaskHandler {
   static const double minMeters = DriverPolicy.locationMinMoveMeters;
 
+  /// Re-send an unchanged position after this long, so a parked driver keeps
+  /// its server presence fresh (see [DriverPolicy.locationHeartbeatMs]).
+  static const Duration heartbeat = Duration(milliseconds: DriverPolicy.locationHeartbeatMs);
+
   Position? lastEmitted;
 
+  /// Task time of the last emit (the `timestamp` passed to [onRepeatEvent]).
+  DateTime? lastEmittedAt;
+
+  /// The service engine reads the platform LocationManager, not the fused
+  /// provider: from this second Flutter engine the fused `getCurrentPosition`
+  /// was observed never to resolve and its last-known fix never advanced
+  /// while the device moved (RCAB-E8.S14, emulator API 29 with Play services).
   @visibleForTesting
-  GetPositionFn getPosition = () => Geolocator.getCurrentPosition(
-    desiredAccuracy: LocationAccuracy.medium,
-  );
+  GetPositionFn getPosition = () => boundedFix(
+        current: () => Geolocator.getCurrentPosition(
+          desiredAccuracy: LocationAccuracy.medium,
+          forceAndroidLocationManager: true,
+        ),
+        lastKnown: () => Geolocator.getLastKnownPosition(forceAndroidLocationManager: true),
+      );
 
   @override
   void onStart(DateTime timestamp, SendPort? sendPort) {}
 
   @override
   Future<void> onRepeatEvent(DateTime timestamp, SendPort? sendPort) async {
-    Position pos;
+    final Position pos;
     try {
-      pos = await getPosition();
+      final fix = await getPosition();
+      if (fix == null) return;
+      pos = fix;
     } catch (_) {
       return;
     }
@@ -44,10 +85,16 @@ class LocationTaskHandler extends TaskHandler {
         prev.latitude, prev.longitude,
         pos.latitude, pos.longitude,
       );
-      if (dist < minMeters) return;
+      // Debounce jitter, but never go silent: the server sweeps a driver
+      // offline after drivers.staleAfterMs without a location packet, so a
+      // driver waiting at a stand used to be dropped after 60 s.
+      final last = lastEmittedAt;
+      final heartbeatDue = last != null && timestamp.difference(last) >= heartbeat;
+      if (dist < minMeters && !heartbeatDue) return;
     }
 
     lastEmitted = pos;
+    lastEmittedAt = timestamp;
     sendPort?.send({
       'lat': pos.latitude,
       'lng': pos.longitude,
@@ -59,6 +106,7 @@ class LocationTaskHandler extends TaskHandler {
   @override
   void onDestroy(DateTime timestamp, SendPort? sendPort) {
     lastEmitted = null;
+    lastEmittedAt = null;
     // Best-effort: record kill time for the home-screen banner.
     // May not fire on hard OS kills; the app-resume health check is the primary path.
     FlutterForegroundTask.saveData(

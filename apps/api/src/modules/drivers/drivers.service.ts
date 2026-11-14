@@ -102,21 +102,26 @@ export class DriversService {
 
   @Cron(AUTO_OFFLINE_SWEEP_CRON)
   async autoOfflineSweep(): Promise<void> {
-    const keys = await this.redis.keys('driver:state:*');
-    if (keys.length === 0) return;
-
     const nowMs = Date.now();
-    for (const key of keys) {
-      const lastSeenStr = await this.redis.hget(key, 'last_seen');
-      if (!lastSeenStr) continue;
-      const age = nowMs - Number(lastSeenStr);
-      if (age < this.policy.drivers.staleAfterMs) continue;
+    // SCAN, not KEYS: KEYS is O(N) and blocks Redis for every other client.
+    let cursor = '0';
+    do {
+      const [next, keys] = await this.redis.scan(cursor, 'MATCH', 'driver:state:*', 'COUNT', 200);
+      cursor = next;
+      for (const key of new Set(keys)) await this.sweepKey(key, nowMs);
+    } while (cursor !== '0');
+  }
 
-      // Extract driver_id from key "driver:state:<id>"
-      const driverId = key.slice('driver:state:'.length);
-      this.log.warn(`Auto-offline: driver ${driverId} silent for ${Math.round(age / 1000)}s`);
-      await this.goOffline(driverId);
-      this.bus.toDriver(driverId, 'force_offline', { reason: 'timeout' });
-    }
+  private async sweepKey(key: string, nowMs: number): Promise<void> {
+    const lastSeenStr = await this.redis.hget(key, 'last_seen');
+    if (!lastSeenStr) return;
+    const age = nowMs - Number(lastSeenStr);
+    if (age < this.policy.drivers.staleAfterMs) return;
+
+    // Extract driver_id from key "driver:state:<id>"
+    const driverId = key.slice('driver:state:'.length);
+    this.log.warn(`Auto-offline: driver ${driverId} silent for ${Math.round(age / 1000)}s`);
+    await this.goOffline(driverId);
+    this.bus.toDriver(driverId, 'force_offline', { reason: 'timeout' });
   }
 }

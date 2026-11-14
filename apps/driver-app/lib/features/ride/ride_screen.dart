@@ -4,6 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/realtime/realtime_socket.dart';
+import '../../di/providers.dart';
+import '../home/driver_notice.dart';
 import 'ride_models.dart';
 import 'ride_provider.dart';
 
@@ -26,20 +29,37 @@ class _RideScreenState extends ConsumerState<RideScreen> {
   static const _cancelReasons = ['Passenger not reachable', 'Vehicle issue', 'Other'];
 
   bool _routedAway = false;
+  bool _driverCancelled = false;
   Timer? _noShowTimer;
+  StreamSubscription<Map<String, dynamic>>? _liveSub;
+  IRealtimeSocket? _socket;
 
   @override
   void initState() {
     super.initState();
-    // Hydrate current state on mount (also covers reconnect-restore).
+    // Hydrate current state on mount (also covers reconnect-restore), then
+    // follow the ride live: a passenger cancel or a server-side transition
+    // used to stay invisible until the driver tapped a button (RCAB-E8.S14).
     Future.microtask(() {
-      if (mounted) ref.read(rideProvider(widget.rideId).notifier).load();
+      if (!mounted) return;
+      final notifier = ref.read(rideProvider(widget.rideId).notifier);
+      notifier.load();
+      final socket = ref.read(realtimeSocketProvider);
+      _socket = socket;
+      _liveSub = socket.rideStateChanged
+          .where((e) => e['rideId'] == widget.rideId && e['state'] is String)
+          .listen((e) {
+        if (mounted) notifier.applyServerStatus(e['state'] as String);
+      });
+      socket.subscribeRide(widget.rideId);
     });
   }
 
   @override
   void dispose() {
     _noShowTimer?.cancel();
+    _liveSub?.cancel();
+    _socket?.unsubscribeRide(widget.rideId);
     super.dispose();
   }
 
@@ -80,6 +100,7 @@ class _RideScreenState extends ConsumerState<RideScreen> {
       ),
     );
     if (reason != null && mounted) {
+      _driverCancelled = true;
       await ref.read(rideProvider(widget.rideId).notifier).cancel(reason);
     }
   }
@@ -100,6 +121,11 @@ class _RideScreenState extends ConsumerState<RideScreen> {
         });
       } else if (next.status == RideStatus.cancelled || next.status == RideStatus.noShow) {
         _routedAway = true;
+        ref.read(driverNoticeProvider.notifier).state = next.status == RideStatus.noShow
+            ? 'Ride closed as a passenger no-show'
+            : _driverCancelled
+                ? 'Ride cancelled'
+                : 'The passenger cancelled this ride';
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted) context.go('/home');
         });

@@ -1,0 +1,15 @@
+<section id="m06" data-transition="fade" style="background:#15202B;color:#ECEAE4;font-family:Inter, Arial, sans-serif;padding:96px 128px 160px;display:flex;flex-direction:column;gap:36px">
+<p style="font-size:24px;letter-spacing:3px;text-transform:uppercase;color:#F0A93B;font-weight:600">Maintenance · M06 · 48 s</p>
+<h2 style="font-family:'Space Grotesk', Arial, sans-serif;font-size:60px;font-weight:600;line-height:1.1">Dev tooling in the terminal</h2>
+<div style="display:flex;gap:56px">
+<img src="/_blob/0ed24f2e027414c5c154471e13c42a25" data-video="/_blob/5c0481bdbbb654306baa7859148f1043" alt="M06: smoke check, system probe, Redis and pool inspection, restore drill and policy doc check" style="width:1088px;height:612px;object-fit:contain;border-radius:16px;background:#0E151C">
+<div style="flex:1;display:flex;flex-direction:column;gap:20px">
+<h3 style="font-family:'Space Grotesk', Arial, sans-serif;font-size:32px;font-weight:600;color:#F0A93B">Commands</h3>
+<p style="font-size:26px;line-height:1.5">pnpm dev:smoke · system:probe · Redis and pool inspect · restore-drill.sh · policy:doc:check</p>
+<h3 style="font-family:'Space Grotesk', Arial, sans-serif;font-size:32px;font-weight:600;color:#F0A93B">Note</h3>
+<p style="font-size:26px;line-height:1.5;color:#A9B4BF">A typed replay of commands run seconds earlier.</p>
+</div>
+</div>
+<p style="position:absolute;left:128px;bottom:64px;font-size:24px;color:#8995A2">workflows/debugging-and-tooling.md · docs/operations/recovery-runbook.md</p>
+<aside>The restore drill restores a backup into a throwaway Postgres, checks migrations and nine invariants, and prints a pass or fail report. Fixed while recording: system-probe reported Docker-published ports as free on macOS, and its port list was stale.</aside>
+</section>
