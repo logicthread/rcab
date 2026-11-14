@@ -31,7 +31,12 @@ import { QuoteRideDto } from './dto/quote-ride.dto';
 import { TransitionRideDto } from './dto/transition-ride.dto';
 import { CancelRideDto } from './dto/cancel-ride.dto';
 import { QuoteTokenService, type QuoteClaims } from './quote-token.service';
-import { RidesRepository, type RideIdempotencyOperation, type RideRow } from './rides.repository';
+import {
+  PassengerHasActiveRideError,
+  RidesRepository,
+  type RideIdempotencyOperation,
+  type RideRow,
+} from './rides.repository';
 import { IdempotencyRepository } from './idempotency.repository';
 import {
   IdempotencyOperation,
@@ -439,21 +444,36 @@ export class RidesController {
     if (replay) return replay;
 
     const claims = this.verifyQuote(dto);
-    const {
-      row,
-      created,
-      requestFingerprint: stored,
-    } = await this.ridesRepo.create({
-      passengerId,
-      originLat: dto.originLat,
-      originLng: dto.originLng,
-      destLat: dto.destLat,
-      destLng: dto.destLng,
-      fareCents: claims.soloFareCents,
-      idempotencyKey: key,
-      idempotencyOperation: operation,
-      requestFingerprint: fingerprint,
-    });
+    // One live immediate ride per passenger (0019): a second tab or a stale
+    // client must not dispatch a second driver. The unique index is the
+    // race-proof backstop for two requests that pass this check together.
+    // A live ride under this same key is a concurrent retry of this request:
+    // let create() resolve it as a replay instead.
+    const live = await this.ridesRepo.findLiveNormalRide(passengerId);
+    if (live && live.idempotencyKey !== key) throw passengerHasActiveRide();
+    let created: boolean;
+    let row: RideRow;
+    let stored: string | null;
+    try {
+      ({
+        row,
+        created,
+        requestFingerprint: stored,
+      } = await this.ridesRepo.create({
+        passengerId,
+        originLat: dto.originLat,
+        originLng: dto.originLng,
+        destLat: dto.destLat,
+        destLng: dto.destLng,
+        fareCents: claims.soloFareCents,
+        idempotencyKey: key,
+        idempotencyOperation: operation,
+        requestFingerprint: fingerprint,
+      }));
+    } catch (err) {
+      if (err instanceof PassengerHasActiveRideError) throw passengerHasActiveRide();
+      throw err;
+    }
     // Lost a concurrent first-use race to a request with a different intent.
     if (!created && !fingerprintMatches(stored, fingerprint)) throw idempotencyKeyConflict();
 
@@ -738,9 +758,14 @@ export class RidesController {
     // guarded UPDATE on status='requested' is the real protection, so a late
     // or already-running wake can't dispatch a cancelled ride (T26).
     if (result.row.type === 'scheduled') {
-      await this.scheduled.cancelWake(rideId).catch((err: unknown) =>
-        this.log.warn({ err, rideId }, 'scheduled wake removal failed; worker status guard applies'),
-      );
+      await this.scheduled
+        .cancelWake(rideId)
+        .catch((err: unknown) =>
+          this.log.warn(
+            { err, rideId },
+            'scheduled wake removal failed; worker status guard applies',
+          ),
+        );
     }
 
     return {
@@ -836,4 +861,11 @@ function coordsMatch(claims: QuoteClaims, dto: CreateRideDto): boolean {
     Math.abs(claims.destLat - dto.destLat) < eps &&
     Math.abs(claims.destLng - dto.destLng) < eps
   );
+}
+
+function passengerHasActiveRide(): ConflictException {
+  return new ConflictException({
+    code: 'passenger_has_active_ride',
+    message: 'You already have a ride in progress',
+  });
 }

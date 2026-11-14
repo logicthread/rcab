@@ -23,7 +23,7 @@ export function PoolBadge({ seatCount }: Props) {
         fontSize: 14,
       }}
     >
-      {others} other {noun} joining — your fare is ready
+      Sharing with {others} other {noun}
     </div>
   );
 }

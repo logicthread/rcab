@@ -71,12 +71,21 @@ describe('VehiclesService', () => {
   });
 
   describe('findAllForDriver', () => {
-    it('returns active vehicles for the driver', async () => {
-      const vehicles = [{ id: VEHICLE_ID, driverId: DRIVER_ID, active: true }];
-      db._whereSelect.mockResolvedValue(vehicles);
+    it('returns active vehicles, marking the current one', async () => {
+      const other = '00000000-0000-4000-8000-0000000000ff';
+      const vehicles = [
+        { id: VEHICLE_ID, driverId: DRIVER_ID, active: true },
+        { id: other, driverId: DRIVER_ID, active: true },
+      ];
+      db._whereSelect.mockReturnValueOnce(Promise.resolve(vehicles) as never).mockReturnValueOnce({
+        limit: vi.fn().mockResolvedValue([{ currentVehicleId: VEHICLE_ID }]),
+      } as never);
 
       const result = await service.findAllForDriver(DRIVER_ID);
-      expect(result).toEqual(vehicles);
+      expect(result).toEqual([
+        { ...vehicles[0], isCurrent: true },
+        { ...vehicles[1], isCurrent: false },
+      ]);
     });
   });
 
@@ -95,13 +104,17 @@ describe('VehiclesService', () => {
     it('throws 404 when vehicle does not exist', async () => {
       db._limit.mockResolvedValue([]);
 
-      await expect(service.update(VEHICLE_ID, DRIVER_ID, { color: 'Red' })).rejects.toThrow(NotFoundException);
+      await expect(service.update(VEHICLE_ID, DRIVER_ID, { color: 'Red' })).rejects.toThrow(
+        NotFoundException,
+      );
     });
 
-    it('throws 403 when updating another driver\'s vehicle', async () => {
+    it("throws 403 when updating another driver's vehicle", async () => {
       db._limit.mockResolvedValue([{ id: VEHICLE_ID, driverId: OTHER_DRIVER_ID }]);
 
-      await expect(service.update(VEHICLE_ID, DRIVER_ID, { color: 'Red' })).rejects.toThrow(ForbiddenException);
+      await expect(service.update(VEHICLE_ID, DRIVER_ID, { color: 'Red' })).rejects.toThrow(
+        ForbiddenException,
+      );
       expect(db.update).not.toHaveBeenCalled();
     });
   });

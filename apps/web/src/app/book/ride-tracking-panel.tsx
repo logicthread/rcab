@@ -137,14 +137,18 @@ export function RideTrackingPanel({
           Cancel ride
         </button>
       )}
-      <button
-        type="button"
-        data-testid="tracking-new-booking"
-        onClick={onNewBooking}
-        style={{ marginTop: 12, fontSize: 13, padding: '6px 10px' }}
-      >
-        New booking
-      </button>
+      {/* Only once the ride is over: leaving a live ride mid-way dropped the
+          passenger out of tracking while the driver was still coming. */}
+      {terminal && (
+        <button
+          type="button"
+          data-testid="tracking-new-booking"
+          onClick={onNewBooking}
+          style={{ marginTop: 12, fontSize: 13, padding: '6px 10px' }}
+        >
+          New booking
+        </button>
+      )}
     </section>
   );
 }

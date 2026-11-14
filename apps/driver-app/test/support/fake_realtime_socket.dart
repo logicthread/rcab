@@ -46,10 +46,13 @@ class FakeRealtimeSocket implements IRealtimeSocket {
   @override
   void unsubscribeRide(String rideId) => rideSubscriptions.remove(rideId);
 
+  int connects = 0;
+  int disconnects = 0;
+
   @override
-  Future<void> connect() async {}
+  Future<void> connect() async => connects++;
   @override
-  void disconnect() {}
+  void disconnect() => disconnects++;
 
   @override
   void sendOfferResponse({required String offerId, required bool accept}) {

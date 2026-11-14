@@ -42,8 +42,8 @@ void main() {
     await demo.say('Driving to pickup: location packets stream, server marks en_route');
     await demo.cue('drive', {'to': 'pickup', 'secs': '14'});
     await demo.wait(3);
-    if (find.text('Start trip').evaluate().isNotEmpty) {
-      await demo.tap(find.text('Start trip'));
+    if (find.text('Head to pickup').evaluate().isNotEmpty) {
+      await demo.tap(find.text('Head to pickup'));
     }
     await demo.waitFor(find.text("I've arrived"), timeout: 20, what: 'en_route');
     s = await demo.cue('ride-status');

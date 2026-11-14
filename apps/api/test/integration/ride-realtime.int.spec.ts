@@ -2,7 +2,7 @@ import { buildPolicy } from '../../src/config/policy/policy';
 import { Pool } from 'pg';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { randomUUID } from 'node:crypto';
-import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from 'vitest';
 import Redis from 'ioredis';
 import * as schema from '../../src/db/schema';
 import { RidesRepository } from '../../src/modules/rides/rides.repository';
@@ -12,6 +12,7 @@ import {
 } from '../../src/modules/rides/ride-state-machine.service';
 import { RidesRealtimeListener } from '../../src/modules/rides/rides-realtime.listener';
 import { guardsFor, seedDriver } from './support/dispatch-fixtures';
+import { retireLiveNormalRides } from './support/dispatch-fixtures';
 
 const skip = process.env.RCAB_INT_SKIPPED === '1';
 
@@ -58,6 +59,8 @@ describe.skipIf(skip)('RidesRealtimeListener + cancellation (real Postgres)', ()
       [passengerId, `fb-${passengerId}`, phone],
     );
   });
+
+  beforeEach(() => retireLiveNormalRides(pool, [passengerId]));
 
   afterAll(async () => {
     await pool.query('DELETE FROM rides WHERE passenger_id = $1', [passengerId]);

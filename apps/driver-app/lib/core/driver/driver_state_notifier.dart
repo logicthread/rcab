@@ -7,6 +7,7 @@ import '../api/api_error.dart';
 import '../auth/token_store.dart';
 import '../location/foreground_service.dart';
 import '../realtime/location_bridge.dart';
+import '../realtime/socket_reauth.dart';
 import 'driver_state.dart';
 
 class DriverStateNotifier extends StateNotifier<DriverState> {
@@ -18,12 +19,17 @@ class DriverStateNotifier extends StateNotifier<DriverState> {
     LocationBridge? locationBridge,
     String? currentVehicleId,
     DriverState? initialState,
+    Future<void> Function()? refreshSession,
   })  : _dio = dio,
         _apiBaseUrl = apiBaseUrl,
         _tokenStore = tokenStore,
         _foregroundService = foregroundService,
         _locationBridge = locationBridge ?? LocationBridge(),
         _currentVehicleId = currentVehicleId,
+        _reauth = SocketReauth(
+          readToken: tokenStore.getJwt,
+          refreshSession: refreshSession ?? () async {},
+        ),
         super(initialState ?? const DriverOffline());
 
   final Dio _dio;
@@ -32,6 +38,7 @@ class DriverStateNotifier extends StateNotifier<DriverState> {
   final ForegroundServiceManager _foregroundService;
   final LocationBridge _locationBridge;
   String? _currentVehicleId;
+  final SocketReauth _reauth;
   io.Socket? _socket;
 
   String? get currentVehicleId => _currentVehicleId;
@@ -95,19 +102,33 @@ class DriverStateNotifier extends StateNotifier<DriverState> {
   /// one offline → online cycle the driver never received another offer until
   /// the app was restarted (RCAB-E8.S14).
   @visibleForTesting
-  static Map<String, dynamic> socketOptions(String jwt) => io.OptionBuilder()
-      .setTransports(['websocket'])
-      .setAuth({'token': jwt})
-      .disableAutoConnect()
-      .enableForceNew()
-      .build();
+  ///
+  /// `authFn` supplies the token on every handshake, so a reconnect after the
+  /// access token expired sends the refreshed one ([SocketReauth]).
+  static Map<String, dynamic> socketOptions(
+    void Function(void Function(Map<dynamic, dynamic> auth) callback) authFn,
+  ) =>
+      io.OptionBuilder()
+          .setTransports(['websocket'])
+          .setAuthFn(authFn)
+          .disableAutoConnect()
+          .enableForceNew()
+          .build();
 
   Future<void> _connectSocket() async {
     final jwt = await _tokenStore.getJwt();
     if (jwt == null) return;
     _socket?.dispose();
-    _socket = io.io(_apiBaseUrl, socketOptions(jwt))
+    final socket = io.io(_apiBaseUrl, socketOptions(_reauth.authFn));
+    _socket = socket;
+    socket
       ..on('force_offline', (_) => _onForceOffline())
+      ..onConnect((_) => _reauth.onConnected())
+      ..onDisconnect((reason) => _reauth.onDisconnect(
+            reason,
+            stillWanted: () => identical(_socket, socket),
+            reconnect: socket.connect,
+          ))
       ..connect();
 
     _locationBridge.start((data) => _socket?.emit('driver:location', data));

@@ -31,6 +31,10 @@ mixin _$Vehicle {
   bool get active => throw _privateConstructorUsedError;
   String get createdAt => throw _privateConstructorUsedError;
 
+  /// The server's current vehicle (`driver.current_vehicle_id`), the one used
+  /// when going online. Older APIs omit it.
+  bool get isCurrent => throw _privateConstructorUsedError;
+
   /// Serializes this Vehicle to a JSON map.
   Map<String, dynamic> toJson() => throw _privateConstructorUsedError;
 
@@ -55,7 +59,8 @@ abstract class $VehicleCopyWith<$Res> {
       String? color,
       int seats,
       bool active,
-      String createdAt});
+      String createdAt,
+      bool isCurrent});
 }
 
 /// @nodoc
@@ -83,6 +88,7 @@ class _$VehicleCopyWithImpl<$Res, $Val extends Vehicle>
     Object? seats = null,
     Object? active = null,
     Object? createdAt = null,
+    Object? isCurrent = null,
   }) {
     return _then(_value.copyWith(
       id: null == id
@@ -125,6 +131,10 @@ class _$VehicleCopyWithImpl<$Res, $Val extends Vehicle>
           ? _value.createdAt
           : createdAt // ignore: cast_nullable_to_non_nullable
               as String,
+      isCurrent: null == isCurrent
+          ? _value.isCurrent
+          : isCurrent // ignore: cast_nullable_to_non_nullable
+              as bool,
     ) as $Val);
   }
 }
@@ -146,7 +156,8 @@ abstract class _$$VehicleImplCopyWith<$Res> implements $VehicleCopyWith<$Res> {
       String? color,
       int seats,
       bool active,
-      String createdAt});
+      String createdAt,
+      bool isCurrent});
 }
 
 /// @nodoc
@@ -172,6 +183,7 @@ class __$$VehicleImplCopyWithImpl<$Res>
     Object? seats = null,
     Object? active = null,
     Object? createdAt = null,
+    Object? isCurrent = null,
   }) {
     return _then(_$VehicleImpl(
       id: null == id
@@ -214,6 +226,10 @@ class __$$VehicleImplCopyWithImpl<$Res>
           ? _value.createdAt
           : createdAt // ignore: cast_nullable_to_non_nullable
               as String,
+      isCurrent: null == isCurrent
+          ? _value.isCurrent
+          : isCurrent // ignore: cast_nullable_to_non_nullable
+              as bool,
     ));
   }
 }
@@ -231,7 +247,8 @@ class _$VehicleImpl implements _Vehicle {
       required this.color,
       required this.seats,
       required this.active,
-      required this.createdAt});
+      required this.createdAt,
+      this.isCurrent = false});
 
   factory _$VehicleImpl.fromJson(Map<String, dynamic> json) =>
       _$$VehicleImplFromJson(json);
@@ -257,9 +274,15 @@ class _$VehicleImpl implements _Vehicle {
   @override
   final String createdAt;
 
+  /// The server's current vehicle (`driver.current_vehicle_id`), the one used
+  /// when going online. Older APIs omit it.
+  @override
+  @JsonKey()
+  final bool isCurrent;
+
   @override
   String toString() {
-    return 'Vehicle(id: $id, driverId: $driverId, type: $type, regNo: $regNo, make: $make, model: $model, color: $color, seats: $seats, active: $active, createdAt: $createdAt)';
+    return 'Vehicle(id: $id, driverId: $driverId, type: $type, regNo: $regNo, make: $make, model: $model, color: $color, seats: $seats, active: $active, createdAt: $createdAt, isCurrent: $isCurrent)';
   }
 
   @override
@@ -278,13 +301,15 @@ class _$VehicleImpl implements _Vehicle {
             (identical(other.seats, seats) || other.seats == seats) &&
             (identical(other.active, active) || other.active == active) &&
             (identical(other.createdAt, createdAt) ||
-                other.createdAt == createdAt));
+                other.createdAt == createdAt) &&
+            (identical(other.isCurrent, isCurrent) ||
+                other.isCurrent == isCurrent));
   }
 
   @JsonKey(includeFromJson: false, includeToJson: false)
   @override
   int get hashCode => Object.hash(runtimeType, id, driverId, type, regNo, make,
-      model, color, seats, active, createdAt);
+      model, color, seats, active, createdAt, isCurrent);
 
   /// Create a copy of Vehicle
   /// with the given fields replaced by the non-null parameter values.
@@ -313,7 +338,8 @@ abstract class _Vehicle implements Vehicle {
       required final String? color,
       required final int seats,
       required final bool active,
-      required final String createdAt}) = _$VehicleImpl;
+      required final String createdAt,
+      final bool isCurrent}) = _$VehicleImpl;
 
   factory _Vehicle.fromJson(Map<String, dynamic> json) = _$VehicleImpl.fromJson;
 
@@ -337,6 +363,11 @@ abstract class _Vehicle implements Vehicle {
   bool get active;
   @override
   String get createdAt;
+
+  /// The server's current vehicle (`driver.current_vehicle_id`), the one used
+  /// when going online. Older APIs omit it.
+  @override
+  bool get isCurrent;
 
   /// Create a copy of Vehicle
   /// with the given fields replaced by the non-null parameter values.

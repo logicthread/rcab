@@ -72,7 +72,7 @@ The inbound `driver:location` stream feeds **two independent gates** (RCAB-E4.S7
 
 ## Reconnect contract
 
-- Client reconnects with the same JWT.
+- The server checks the access token **only in the handshake**; a missing, expired or wrong token gets an `io server disconnect`, which socket.io never retries by itself. Clients therefore read the newest token on every handshake (driver app: `SocketReauth` as the `auth` callback) and, on a server disconnect, refresh the session and reconnect (bounded attempts). Rooms follow the token's identity and role (`driver:<id>` only for a driver token), so the driver app reopens its socket on sign-out, account switch or role change (RCAB-E8.S15 walkthrough: offers never arrived after an operator enabled a driver).
 - Server replays critical state on reconnect: current ride (if any), pending offer (if any), driver state.
 - **Shared rides (RCAB-E5.S7):** the `driver_state` replay carries `current_ride_id`. The driver app then issues `GET /v1/rides/:id/stops` to hydrate stop statuses + `currentStopIndex` deterministically rather than receiving them through the socket. `ride:completed` is not replayed; if a ride completed while the driver was offline, the REST stop list returns all stops with `confirmed=true` and `poolStatus='completed'`.
 

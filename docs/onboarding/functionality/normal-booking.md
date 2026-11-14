@@ -21,7 +21,7 @@ If nobody accepts within the hard-fail time (60 s by default) the ride ends as `
 | Choose route | Map/search/preset, quote appears. Toggle **Private** | - | W03 |
 | Book | "Book" button (labelled "Book share" for Share). Tracking panel opens with "Finding your driver..." | - | W03 |
 | Offer | - | Ringing offer screen with pickup, dropoff, fare and a countdown (server `ttlMs`, default 12 s). Accept or decline | D04 |
-| Accepted | Banner "Driver assigned - getting ready" | Ride screen with a primary action button ("Start trip" after accept, then "I've arrived", "Start ride", "End ride") and a Navigate button that opens Google Maps | W03, D04 |
+| Accepted | Banner "Driver assigned - getting ready" | Ride screen with a primary action button ("Head to pickup" after accept, then "I've arrived", "Start ride", "End ride") and a Navigate button that opens Google Maps | W03, D04 |
 | Driving to pickup | "Your driver is on the way", blue "Live - following your driver" hint, driver marker moves at about 1 Hz | Streams location every 5 s. **The first location packet after accept implicitly marks the ride `en_route`** | W03, D04 |
 | Arrived | "Your driver has arrived" | Button "Start ride"; a no-show button unlocks 5 minutes after arrival | W03, W05 |
 | In progress | "On the way to your destination"; cancel hidden | Button "End ride" | W03 |

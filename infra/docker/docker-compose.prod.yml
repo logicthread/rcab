@@ -50,6 +50,10 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      # Readiness includes OSRM; a first graph build takes minutes, longer than
+      # the healthcheck allows, so start the api once the graph exists.
+      osrm-extract:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:3000/v1/health/ready || exit 1"]
       interval: 10s
@@ -100,7 +104,11 @@ services:
     volumes:
       - pg-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      # -h 127.0.0.1: check TCP, not the Unix socket. On a fresh volume the
+      # image's init runs a temporary socket-only server, which a socket check
+      # reports healthy; the migrator then started early and failed with
+      # ECONNREFUSED on the first deploy (found by `pnpm prod:test`).
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
       timeout: 3s
       retries: 20
@@ -121,6 +129,57 @@ services:
       start_period: 3s
     restart: unless-stopped
 
+  # Routing graph, built once on a fresh osrm-data volume and reused afterwards
+  # (the recovery runbook's "re-run the one-shot services"). Without these a
+  # fresh host had no /data/region.osrm: osrm crash-looped and the api never
+  # became ready (found by `pnpm prod:test`). Set OSM_PBF_URL in
+  # /opt/rcab/compose/.env for another region; delete the volume to rebuild.
+  osrm-prep:
+    image: alpine:3.19
+    networks: [rcab_net]
+    environment:
+      OSM_PBF_URL: ${OSM_PBF_URL:-https://download.geofabrik.de/asia/india/north-eastern-zone-latest.osm.pbf}
+    volumes:
+      - osrm-data:/data
+    command: >
+      sh -c '
+        set -eu
+        cd /data
+        if [ -f region.osrm.mldgr ] || [ -f region.osm.pbf ]; then
+          echo "[osrm-prep] PBF or graph already present"
+        else
+          apk add --no-cache curl
+          echo "[osrm-prep] downloading $$OSM_PBF_URL"
+          curl -fL --output region.osm.pbf.part "$$OSM_PBF_URL"
+          mv region.osm.pbf.part region.osm.pbf
+        fi
+      '
+    restart: "no"
+
+  osrm-extract:
+    image: osrm/osrm-backend@sha256:af5d4a83fb90086a43b1ae2ca22872e6768766ad5fcbb07a29ff90ec644ee409
+    platform: linux/amd64
+    networks: [rcab_net]
+    volumes:
+      - osrm-data:/data
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - >
+        set -e;
+        cd /data;
+        if [ -f region.osrm.mldgr ]; then
+          echo "[osrm-extract] graph already present";
+        else
+          osrm-extract -p /opt/car.lua region.osm.pbf &&
+          osrm-partition region.osrm &&
+          osrm-customize region.osrm &&
+          echo "[osrm-extract] graph built";
+        fi
+    depends_on:
+      osrm-prep:
+        condition: service_completed_successfully
+    restart: "no"
+
   osrm:
     image: osrm/osrm-backend@sha256:af5d4a83fb90086a43b1ae2ca22872e6768766ad5fcbb07a29ff90ec644ee409
     platform: linux/amd64
@@ -128,6 +187,9 @@ services:
     volumes:
       - osrm-data:/data:ro
     command: ["osrm-routed", "--algorithm", "mld", "--port", "5000", "/data/region.osrm"]
+    depends_on:
+      osrm-extract:
+        condition: service_completed_successfully
     restart: unless-stopped
 
   # Nightly pg_dump -Fc -> age -> /opt/rcab/backups (+ optional env-configured

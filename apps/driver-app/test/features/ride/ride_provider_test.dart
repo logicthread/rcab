@@ -60,7 +60,7 @@ void main() {
   group('RideStatus', () {
     test('drives the next event, label, and navigation heading', () {
       expect(RideStatus.accepted.nextEvent, 'start_en_route');
-      expect(RideStatus.accepted.actionLabel, 'Start trip');
+      expect(RideStatus.accepted.actionLabel, 'Head to pickup');
       expect(RideStatus.accepted.isHeadingToDropoff, isFalse);
       expect(RideStatus.enRoute.nextEvent, 'mark_arrived');
       expect(RideStatus.arrived.nextEvent, 'start_ride');

@@ -70,6 +70,10 @@ pnpm prod:up            # keep it running to poke at it; pnpm prod:smoke ; pnpm 
 
 `docker-compose.prod-test.yml` overlays the prod file to build from source with `RCAB_VERSION=prodtest`.
 
+**First start on a fresh host (or volume):** the `osrm-prep` / `osrm-extract` one-shots download the OSM extract
+(`OSM_PBF_URL`, default north-east India) and build the routing graph before `osrm` and the `api` start; this takes
+several minutes once and is skipped afterwards. `pnpm prod:test` rebuilds it every run (it uses fresh volumes).
+
 ## 5. Release checklist
 
 Before the approval prompt:

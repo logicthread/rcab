@@ -22,7 +22,19 @@ class Vehicle with _$Vehicle {
     required int seats,
     required bool active,
     required String createdAt,
+    /// The server's current vehicle (`driver.current_vehicle_id`), the one used
+    /// when going online. Older APIs omit it.
+    @Default(false) bool isCurrent,
   }) = _Vehicle;
 
   factory Vehicle.fromJson(Map<String, dynamic> json) => _$VehicleFromJson(json);
 }
+
+/// Rider/driver-facing name of a vehicle type (the API value is an enum).
+String vehicleTypeLabel(String type) => switch (type) {
+      'auto' => 'Auto-rickshaw',
+      'bike' => 'Bike',
+      'cab_hatch' => 'Hatchback cab',
+      'cab_sedan' => 'Sedan cab',
+      _ => type,
+    };

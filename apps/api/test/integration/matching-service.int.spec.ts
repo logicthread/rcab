@@ -16,13 +16,16 @@ import {
 const skip = process.env.RCAB_INT_SKIPPED === '1';
 
 // ── Coords ────────────────────────────────────────────────────────────────────
-// Kolkata city centre — two corridors, one close to the request, one further.
-const REQUEST_ORIGIN = { lat: 22.5726, lng: 88.3639 };
-const REQUEST_DEST = { lat: 22.58, lng: 88.37 };
+// Two corridors north of Kolkata, one close to the request, one further. Kept
+// clear of the Kolkata-centre corridor other specs use: specs share one
+// Postgres in parallel, and their open pools there could match this spec's
+// requests ("expected 'slotted' to be 'opened'").
+const REQUEST_ORIGIN = { lat: 22.8726, lng: 88.3639 };
+const REQUEST_DEST = { lat: 22.88, lng: 88.37 };
 
 // Pool A: very close to the request corridor (within 200 m)
-const POOL_A_ORIGIN = { lat: 22.5727, lng: 88.364 };
-const POOL_A_DEST = { lat: 22.5801, lng: 88.3701 };
+const POOL_A_ORIGIN = { lat: 22.8727, lng: 88.364 };
+const POOL_A_DEST = { lat: 22.8801, lng: 88.3701 };
 
 // Pool B: origin 4 km away — outside the 1500 m spatial pre-filter
 const POOL_B_ORIGIN = { lat: 22.61, lng: 88.38 };

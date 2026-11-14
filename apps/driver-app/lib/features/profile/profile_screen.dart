@@ -183,10 +183,13 @@ class _VehicleRowState extends ConsumerState<_VehicleRow> {
 
   @override
   Widget build(BuildContext context) {
-    final selected = ref.watch(selectedVehicleIdProvider) == widget.vehicle.id;
+    // A pick made in this session wins; otherwise trust the server, so a fresh
+    // install still shows which vehicle going online will use.
+    final picked = ref.watch(selectedVehicleIdProvider);
+    final selected = picked != null ? picked == widget.vehicle.id : widget.vehicle.isCurrent;
     return ListTile(
       key: Key('vehicle_row_${widget.vehicle.id}'),
-      title: Text('${widget.vehicle.type} · ${widget.vehicle.regNo}'),
+      title: Text('${vehicleTypeLabel(widget.vehicle.type)} · ${widget.vehicle.regNo}'),
       subtitle: Text('${widget.vehicle.make ?? ''} ${widget.vehicle.model ?? ''}'.trim()),
       trailing: _loading
           ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2))

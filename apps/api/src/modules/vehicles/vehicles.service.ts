@@ -2,7 +2,7 @@ import { Injectable, Inject, ConflictException, ForbiddenException, NotFoundExce
 import { eq, and } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { DRIZZLE_DB, type DrizzleDb } from '../../infra/db/drizzle.module';
-import { vehicle } from '../../db/schema';
+import { driver, vehicle } from '../../db/schema';
 import { Constraint, PG_UNIQUE_VIOLATION, pgConstraintViolation } from '../../db/constraints';
 import type { CreateVehicleDto } from './dto/create-vehicle.dto';
 import type { UpdateVehicleDto } from './dto/update-vehicle.dto';
@@ -45,11 +45,25 @@ export class VehiclesService {
     }
   }
 
+  /**
+   * The driver's active vehicles, each with `isCurrent` (the one
+   * `driver.current_vehicle_id` points at), so a fresh app install shows which
+   * vehicle the server will use when going online.
+   */
   async findAllForDriver(driverId: string) {
-    return this.db
-      .select()
-      .from(vehicle)
-      .where(and(eq(vehicle.driverId, driverId), eq(vehicle.active, true)));
+    const [rows, [me]] = await Promise.all([
+      this.db
+        .select()
+        .from(vehicle)
+        .where(and(eq(vehicle.driverId, driverId), eq(vehicle.active, true))),
+      this.db
+        .select({ currentVehicleId: driver.currentVehicleId })
+        .from(driver)
+        .where(eq(driver.userId, driverId))
+        .limit(1),
+    ]);
+    const currentId = me?.currentVehicleId ?? null;
+    return rows.map((v) => ({ ...v, isCurrent: v.id === currentId }));
   }
 
   async update(id: string, driverId: string, dto: UpdateVehicleDto) {
@@ -64,7 +78,10 @@ export class VehiclesService {
     }
 
     if (existing.driverId !== driverId) {
-      throw new ForbiddenException({ code: 'forbidden', message: "Cannot update another driver's vehicle" });
+      throw new ForbiddenException({
+        code: 'forbidden',
+        message: "Cannot update another driver's vehicle",
+      });
     }
 
     const updates: Record<string, unknown> = {};

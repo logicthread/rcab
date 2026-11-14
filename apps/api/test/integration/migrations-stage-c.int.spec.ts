@@ -271,9 +271,8 @@ describe.skipIf(skip)('Stage C schema invariants (0014–0016)', () => {
 
     it('a driver holds at most one live offer; a resolved one frees the slot', async () => {
       const driverId = await seedUser(c, 'driver');
-      const passengerId = await seedUser(c, 'client');
-      const r1 = await seedSoloRide(c, passengerId);
-      const r2 = await seedSoloRide(c, passengerId);
+      const r1 = await seedSoloRide(c, await seedUser(c, 'client'));
+      const r2 = await seedSoloRide(c, await seedUser(c, 'client')); // 0019: one live ride each
       const first = await offer(driverId, r1);
 
       const err = await pgError(offer(driverId, r2));
@@ -599,7 +598,9 @@ describe.skipIf(skip)('Stage C upgrade path from 0013 (T36)', () => {
       members: [member(p3), member(p1)],
     });
 
-    await applyMigrations((f) => f >= '0014');
+    // Stage C only: 0019 (one live normal ride per passenger) deliberately
+    // refuses this legacy data, asserted at the end of this test.
+    await applyMigrations((f) => f >= '0014' && f < '0019');
 
     // Guards: only the unambiguous, known-driver trip is guarded.
     const guards = await c.query(
@@ -682,5 +683,14 @@ describe.skipIf(skip)('Stage C upgrade path from 0013 (T36)', () => {
         processed_at: null,
       },
     ]);
+
+    // 0019 refuses (loudly, changing nothing) a database where one passenger
+    // still holds two live normal rides, as this legacy fixture does.
+    const before = await c.query(`SELECT count(*)::int AS n FROM rides WHERE status <> 'cancelled'`);
+    await expect(applyMigrations((f) => f.startsWith('0019'))).rejects.toThrow(
+      /0019: \d+ passenger\(s\) hold more than one live normal ride/,
+    );
+    const after = await c.query(`SELECT count(*)::int AS n FROM rides WHERE status <> 'cancelled'`);
+    expect(after.rows[0].n).toBe(before.rows[0].n);
   });
 });

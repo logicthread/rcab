@@ -93,7 +93,7 @@ Future<({_FakeRideService svc, List<Uri> launched, FakeRealtimeSocket socket, Pr
 }
 
 void main() {
-  testWidgets('accepted renders status, Navigate-to-pickup, and Start trip', (tester) async {
+  testWidgets('accepted renders status, Navigate-to-pickup, and Head to pickup', (tester) async {
     await _pump(tester, status: 'accepted');
     expect(find.byKey(const Key('ride_screen')), findsOneWidget);
     expect(find.byKey(const Key('ride_status')), findsOneWidget);
@@ -101,7 +101,7 @@ void main() {
     expect(find.byKey(const Key('ride_navigate_button')), findsOneWidget);
     expect(find.text('Navigate to pickup'), findsOneWidget);
     expect(find.byKey(const Key('ride_action_button')), findsOneWidget);
-    expect(find.text('Start trip'), findsOneWidget);
+    expect(find.text('Head to pickup'), findsOneWidget);
   });
 
   testWidgets('arrived shows the Start ride action', (tester) async {

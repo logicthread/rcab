@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/api/api_error.dart';
 import '../../core/driver/driver_state_notifier.dart';
 import '../../di/providers.dart';
+import 'models/vehicle.dart';
 
 const _vehicleTypes = ['auto', 'bike', 'cab_hatch', 'cab_sedan'];
 
@@ -97,7 +98,7 @@ class _VehicleFormScreenState extends ConsumerState<VehicleFormScreen> {
               decoration: const InputDecoration(labelText: 'Vehicle type'),
               initialValue: _type,
               items: _vehicleTypes
-                  .map((t) => DropdownMenuItem(value: t, child: Text(t)))
+                  .map((t) => DropdownMenuItem(value: t, child: Text(vehicleTypeLabel(t))))
                   .toList(),
               onChanged: (v) => setState(() => _type = v),
               validator: (v) => v == null ? 'Vehicle type required' : null,

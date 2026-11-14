@@ -132,7 +132,7 @@ DELETE FROM client c
 
 -- Optional starter vehicle; skipped when --vehicle-reg is empty.
 INSERT INTO vehicle (id, driver_id, type, reg_no, make, model, color, seats, active)
-SELECT gen_random_uuid(), :'uid', 'auto', :'reg', 'Unspecified', 'Unspecified', 'unspecified', 3, true
+SELECT gen_random_uuid(), :'uid', 'auto', :'reg', NULL, NULL, NULL, 3, true
  WHERE :'reg' <> ''
 ON CONFLICT (reg_no) DO NOTHING;
 

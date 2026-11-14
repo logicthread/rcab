@@ -4,6 +4,7 @@ import 'package:socket_io_client/socket_io_client.dart' as io;
 
 import '../auth/token_store.dart';
 import 'offer_outcome.dart';
+import 'socket_reauth.dart';
 import '../../features/offer/offer_models.dart';
 import '../../features/shared_ride/shared_ride_provider.dart';
 
@@ -53,10 +54,18 @@ abstract class IRealtimeSocket implements StopConfirmSender, OfferResponseSender
 /// Phase-0 scope: a second socket alongside `DriverStateNotifier._socket`.
 /// Consolidating into a single shared transport is deferred (no story yet).
 class RealtimeSocket implements IRealtimeSocket {
-  RealtimeSocket({required this.apiBaseUrl, required this.tokenStore});
+  RealtimeSocket({
+    required this.apiBaseUrl,
+    required this.tokenStore,
+    Future<void> Function()? refreshSession,
+  }) : _reauth = SocketReauth(
+          readToken: tokenStore.getJwt,
+          refreshSession: refreshSession ?? () async {},
+        );
 
   final String apiBaseUrl;
   final TokenStore tokenStore;
+  final SocketReauth _reauth;
 
   io.Socket? _socket;
 
@@ -108,14 +117,19 @@ class RealtimeSocket implements IRealtimeSocket {
     final jwt = await tokenStore.getJwt();
     if (jwt == null || _socket != null) return;
 
-    _socket = io.io(
+    // The token is read on every handshake (not captured here) and a server
+    // rejection refreshes the session and reconnects: see [SocketReauth].
+    final socket = io.io(
       apiBaseUrl,
       io.OptionBuilder()
           .setTransports(['websocket'])
-          .setAuth({'token': jwt})
+          .setAuthFn(_reauth.authFn)
           .disableAutoConnect()
+          .enableForceNew()
           .build(),
-    )
+    );
+    _socket = socket;
+    socket
       ..on('ride_offer', (raw) {
         final map = _asMap(raw);
         if (map != null) _rideOfferCtrl.add(map);
@@ -159,10 +173,16 @@ class RealtimeSocket implements IRealtimeSocket {
       })
       // Rooms do not survive a reconnect: follow every tracked ride again.
       ..onConnect((_) {
+        _reauth.onConnected();
         for (final id in _rideSubs) {
           _emitRideSubscribe(id);
         }
       })
+      ..onDisconnect((reason) => _reauth.onDisconnect(
+            reason,
+            stillWanted: () => identical(_socket, socket),
+            reconnect: socket.connect,
+          ))
       ..connect();
   }
 

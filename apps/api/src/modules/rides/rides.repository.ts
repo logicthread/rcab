@@ -1,5 +1,5 @@
 import { Injectable, Inject } from '@nestjs/common';
-import { and, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { DRIZZLE_DB, type DrizzleDb } from '../../infra/db/drizzle.module';
 import { rides } from '../../db/schema';
 import { DriverAssignmentRepository } from '../dispatch/assignment.repository';
@@ -10,6 +10,7 @@ import { OutboxTopic } from '../outbox/outbox.types';
 import { toRow, type RideRow } from './ride-row';
 import { getPolicy } from '../../config/policy/policy';
 import { recordDispatchOutcome, recordRideTransition } from '../../metrics';
+import { Constraint, PG_UNIQUE_VIOLATION, pgConstraintViolation } from '../../db/constraints';
 
 export type { RideRow } from './ride-row';
 
@@ -71,6 +72,27 @@ const TIMESTAMP_FOR_STATUS: Record<
   completed: 'completedAt',
 };
 
+/** Statuses of a ride that is still live (not terminal). */
+export const LIVE_RIDE_STATUSES = [
+  'requested',
+  'dispatching',
+  'accepted',
+  'en_route',
+  'arrived',
+  'in_progress',
+] as const;
+
+/**
+ * The passenger already has a live immediate ride; raised when the
+ * `rides_one_live_normal_per_passenger_uq` backstop (0019) rejects an insert
+ * that raced past the controller's pre-check.
+ */
+export class PassengerHasActiveRideError extends Error {
+  constructor() {
+    super('passenger already has a live normal ride');
+  }
+}
+
 @Injectable()
 export class RidesRepository {
   // Stateless SQL helpers (they run on the transaction they are handed); held
@@ -113,52 +135,70 @@ export class RidesRepository {
     // queue is later lost, for the reconciler); a crash before it leaves
     // neither, so a retry simply creates both. A replay (scope conflict) writes
     // no new intent: the original commit already carried it.
-    const inserted = await this.db.transaction(async (tx) => {
-      const rows = await tx
-        .insert(rides)
-        .values({
-          passengerId: params.passengerId,
-          originLat: params.originLat,
-          originLng: params.originLng,
-          destLat: params.destLat,
-          destLng: params.destLng,
-          fareCents: params.fareCents,
-          status: 'requested',
-          type,
-          scheduledFor: params.scheduledFor ?? null,
-          idempotencyKey: params.idempotencyKey,
-          idempotencyOperation: operation,
-          requestFingerprint: fingerprint,
-          // A normal ride is dispatchable at once (generation 1). A scheduled
-          // ride stays at generation 0 until its wake (T-lead) moves it to 1.
-          dispatchGeneration: scheduled ? 0 : 1,
-        })
-        .onConflictDoNothing({
-          target: [rides.passengerId, rides.idempotencyOperation, rides.idempotencyKey],
-        })
-        .returning();
-      const row = rows[0];
-      if (!row) return null;
-      if (scheduled) {
-        if (!params.scheduledFor) throw new Error('scheduled ride requires scheduledFor');
-        await enqueueOutbox(tx, {
-          topic: OutboxTopic.RideWakeSchedule,
-          aggregateType: 'ride',
-          aggregateId: row.id,
-          generation: 1,
-          payload: { scheduledFor: params.scheduledFor.toISOString() },
-        });
-      } else {
-        await enqueueOutbox(tx, {
-          topic: OutboxTopic.RideDispatchRequested,
-          aggregateType: 'ride',
-          aggregateId: row.id,
-          generation: 1,
-          payload: { rideId: row.id },
-        });
+    let inserted;
+    try {
+      inserted = await this.db.transaction(async (tx) => {
+        const rows = await tx
+          .insert(rides)
+          .values({
+            passengerId: params.passengerId,
+            originLat: params.originLat,
+            originLng: params.originLng,
+            destLat: params.destLat,
+            destLng: params.destLng,
+            fareCents: params.fareCents,
+            status: 'requested',
+            type,
+            scheduledFor: params.scheduledFor ?? null,
+            idempotencyKey: params.idempotencyKey,
+            idempotencyOperation: operation,
+            requestFingerprint: fingerprint,
+            // A normal ride is dispatchable at once (generation 1). A scheduled
+            // ride stays at generation 0 until its wake (T-lead) moves it to 1.
+            dispatchGeneration: scheduled ? 0 : 1,
+          })
+          .onConflictDoNothing({
+            target: [rides.passengerId, rides.idempotencyOperation, rides.idempotencyKey],
+          })
+          .returning();
+        const row = rows[0];
+        if (!row) return null;
+        if (scheduled) {
+          if (!params.scheduledFor) throw new Error('scheduled ride requires scheduledFor');
+          await enqueueOutbox(tx, {
+            topic: OutboxTopic.RideWakeSchedule,
+            aggregateType: 'ride',
+            aggregateId: row.id,
+            generation: 1,
+            payload: { scheduledFor: params.scheduledFor.toISOString() },
+          });
+        } else {
+          await enqueueOutbox(tx, {
+            topic: OutboxTopic.RideDispatchRequested,
+            aggregateType: 'ride',
+            aggregateId: row.id,
+            generation: 1,
+            payload: { rideId: row.id },
+          });
+        }
+        return row;
+      });
+    } catch (err) {
+      const v = pgConstraintViolation(err);
+      if (v?.code === PG_UNIQUE_VIOLATION && v.constraint === Constraint.RidePassengerHasLiveRide) {
+        // A concurrent retry of THIS request can trip the one-live-ride index
+        // before the idempotency arbiter (Postgres checks non-arbiter unique
+        // indexes too): if our own scope row exists, it is a replay.
+        const own = await this.findByIdempotencyScope(
+          params.passengerId,
+          operation,
+          params.idempotencyKey,
+        );
+        if (own) return { ...own, created: false };
+        throw new PassengerHasActiveRideError();
       }
-      return row;
-    });
+      throw err;
+    }
 
     if (inserted) {
       // Counted once, after the ride + its intent committed (replays insert nothing).
@@ -176,6 +216,23 @@ export class RidesRepository {
       throw new Error('idempotency conflict without a matching ride');
     }
     return { ...existing, created: false };
+  }
+
+  /** The passenger's live immediate (normal) ride, if any (newest first). */
+  async findLiveNormalRide(passengerId: string): Promise<RideRow | null> {
+    const rows = await this.db
+      .select()
+      .from(rides)
+      .where(
+        and(
+          eq(rides.passengerId, passengerId),
+          eq(rides.type, 'normal'),
+          inArray(rides.status, [...LIVE_RIDE_STATUSES]),
+        ),
+      )
+      .orderBy(desc(rides.createdAt))
+      .limit(1);
+    return rows[0] ? toRow(rows[0]) : null;
   }
 
   async findById(id: string): Promise<RideRow | null> {
