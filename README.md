@@ -113,8 +113,12 @@ phone OTP back on.
 
 ```bash
 pnpm dev:up          # docker compose up -d --build, incl. the observability profile
-pnpm dev:smoke       # waits until the api answers 200 with postgres + redis connected
+pnpm dev:smoke       # waits until the api answers 200 with postgres, redis and osrm connected
 ```
+
+The first `dev:up` takes about 7–10 minutes: it builds the images, downloads the map extract and builds the
+routing graph, and returns only when the routing server has started. Later starts reuse the cached volumes and
+take seconds.
 
 `pnpm dev:up:slim` skips the observability containers (lighter on memory).
 
@@ -125,7 +129,7 @@ them after the first start and whenever you pull new migrations:
 
 ```bash
 docker compose --env-file .env.dev -f infra/docker/docker-compose.dev.yml exec -T api npx tsx src/migrate.ts
-# [migrator] applied 0000_…  …  [migrator] done
+# [migrator] running migrations...  [migrator] done   (safe to re-run; applied files are skipped)
 ```
 
 ### Check it is up
@@ -136,8 +140,7 @@ curl -s localhost:3000/v1/auth/config       # {"methods":["google"],"google":{"c
 docker compose --env-file .env.dev -f infra/docker/docker-compose.dev.yml ps
 ```
 
-The first boot's routing graph build shows as the `osrm` container restarting/starting for several minutes;
-`health/ready` reports osrm down until it finishes. Follow it with `pnpm dev:logs`.
+`health/ready` reports `"osrm":false` for a few seconds after start while the routing server loads its graph.
 
 | URL | What |
 |---|---|
@@ -176,7 +179,7 @@ docker compose --env-file .env.dev -f infra/docker/docker-compose.dev.yml --prof
 around `26.14, 91.73`), otherwise quotes fail with "routing unavailable".
 
 1. **Passenger:** open http://localhost:3002/signin → **Continue with Google**. The first sign-in creates a
-   passenger account. Then **Book a ride**: pick pickup and drop on the map, choose private / shared / scheduled.
+   passenger account. Then **Book a ride**: set pickup and drop on the map, choose **Share** or **Private**, and **Now** or **Later** (a scheduled ride).
 2. **Driver:** sign in once in the driver app (or the web) with the Google account that will drive, then promote
    it:
 
@@ -290,9 +293,10 @@ domain and architecture. Start at `00-index/HOME.md`; `00-index/reading-paths.md
 
 | Symptom | Fix |
 |---|---|
+| `pnpm install` warns "Ignored build scripts: msgpackr-extract" | harmless; BullMQ falls back to the JS implementation |
 | `port is already allocated` on `dev:up` | another process holds 3000/3002/55432/6379/3001/3003/9090; stop it |
 | api 500s mentioning a missing column/table | migrations not applied: run `src/migrate.ts` (section 4) |
-| quote says "routing unavailable" / api 503 on quote | OSRM still building (watch `pnpm dev:logs osrm`), or the points are outside north-east India |
+| quote says "routing unavailable" / api 503 on quote | the points are outside north-east India, or OSRM is not up (`curl -s localhost:3000/v1/health/ready`) |
 | `google_not_configured` | `GOOGLE_CLIENT_IDS` empty in `.env.dev`; set it, then `docker compose … up -d api` |
 | Google popup: "Access blocked" / "app not verified" | account not in the consent screen's test users, or origin `http://localhost:3002` missing on the web client |
 | driver app "Not registered as a driver yet" | run `scripts/provision-driver.sh <email>`, then Retry |
