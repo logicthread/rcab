@@ -41,4 +41,30 @@ describe('PinoNestLogger', () => {
     new PinoNestLogger(pino as never).warn({ message: 'denied', rideId: 'r1' }, 'Gateway');
     expect(pino.warn).toHaveBeenCalledWith({ context: 'Gateway', message: 'denied', rideId: 'r1' }, 'denied');
   });
+
+  it('keeps the message text of pino-style (fields, message) calls', () => {
+    const pino = fakePino();
+    Logger.overrideLogger(new PinoNestLogger(pino as never));
+    try {
+      const l = new Logger('DispatchService');
+      l.warn({ rideId: 'r1', waveNumber: 1 }, 'no fresh candidates this wave (solo)');
+      l.error({ err: 'boom' }, 'relay failed');
+      l.log({ n: 2 }, 'relayed');
+    } finally {
+      Logger.overrideLogger(false);
+    }
+    expect(pino.warn).toHaveBeenCalledWith(
+      { context: 'DispatchService', rideId: 'r1', waveNumber: 1 },
+      'no fresh candidates this wave (solo)',
+    );
+    expect(pino.error).toHaveBeenCalledWith({ context: 'DispatchService', err: 'boom' }, 'relay failed');
+    expect(pino.info).toHaveBeenCalledWith({ context: 'DispatchService', n: 2 }, 'relayed');
+  });
+
+  it('still treats a real stack trace after an object error as the stack', () => {
+    const pino = fakePino();
+    const stack = 'Error: x\n    at foo (a.ts:1:1)';
+    new PinoNestLogger(pino as never).error({ rideId: 'r1' }, stack, 'Outbox');
+    expect(pino.error).toHaveBeenCalledWith({ context: 'Outbox', stack, rideId: 'r1' }, '');
+  });
 });
