@@ -585,9 +585,9 @@ function BookPage() {
             )}
             {quote && stage !== 'error' && (
               <div style={{ marginTop: 6 }}>
-                <div style={{ fontSize: 20, fontWeight: 700 }}>
-                  {rideType === 'shared'
-                    ? formatMoney(indicativeSeatPrice)
+                <div style={{ fontSize: 20, fontWeight: 700 }} data-testid="quote-headline">
+                  {rideType === 'shared' && indicativeSeatPrice
+                    ? `${formatMoney(indicativeSeatPrice)} – ${formatMoney(quote.soloFare)}`
                     : formatMoney(quote.soloFare)}
                 </div>
                 <div style={{ fontSize: 12, color: '#525252', marginTop: 4 }}>
@@ -598,9 +598,16 @@ function BookPage() {
                   {Math.round(quote.durationS / 60)} min
                 </div>
                 {rideType === 'shared' && quote.sharedEstimate && (
-                  <div style={{ fontSize: 12, color: '#525252', marginTop: 4 }}>
-                    Indicative per-seat (2-seat pool):{' '}
-                    {formatMoney(quote.sharedEstimate.perSeatPrice)}
+                  // The seat fare is fixed when you join (stand-in policy until
+                  // RCAB-E8.S9): joining a ride that already has a rider gives
+                  // the shared price; starting a new one locks the solo fare.
+                  <div
+                    style={{ fontSize: 12, color: '#525252', marginTop: 4 }}
+                    data-testid="shared-fare-note"
+                  >
+                    {formatMoney(quote.sharedEstimate.perSeatPrice)} if you join a ride already
+                    going your way; {formatMoney(quote.soloFare)} if you start a new one. Your fare
+                    is fixed when you book.
                   </div>
                 )}
               </div>
@@ -678,13 +685,18 @@ function BookPage() {
               {stage === 'solo_fallback' && (
                 <SoloFallbackBanner soloFare={quote?.soloFare ?? null} />
               )}
-              <button
-                type="button"
-                onClick={reset}
-                style={{ marginTop: 10, fontSize: 13, padding: '6px 10px' }}
-              >
-                New booking
-              </button>
+              {/* Only once the pool is over (as for a solo ride): mid-trip it
+                  dropped the rider out of the pool view. */}
+              {(poolStatus === 'completed' || poolStatus === 'aborted') && (
+                <button
+                  type="button"
+                  onClick={reset}
+                  data-testid="pool-new-booking"
+                  style={{ marginTop: 10, fontSize: 13, padding: '6px 10px' }}
+                >
+                  New booking
+                </button>
+              )}
             </section>
           )}
         </>

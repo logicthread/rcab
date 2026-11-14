@@ -241,7 +241,7 @@ void main() {
         url,
         io.OptionBuilder().setTransports(['websocket']).disableAutoConnect().build(),
       );
-      final presence = io.io(url, DriverStateNotifier.socketOptions('jwt'));
+      final presence = io.io(url, DriverStateNotifier.socketOptions((cb) => cb({'token': 'jwt'})));
       addTearDown(() {
         presence.dispose();
         app.dispose();
@@ -258,7 +258,7 @@ void main() {
       )..on('ride_offer', (_) {});
       addTearDown(app.dispose);
 
-      io.io(url, DriverStateNotifier.socketOptions('jwt')).dispose();
+      io.io(url, DriverStateNotifier.socketOptions((cb) => cb({'token': 'jwt'}))).dispose();
 
       expect(app.hasListeners('ride_offer'), isTrue);
     });

@@ -18,6 +18,7 @@ _$VehicleImpl _$$VehicleImplFromJson(Map<String, dynamic> json) =>
       seats: (json['seats'] as num).toInt(),
       active: json['active'] as bool,
       createdAt: json['createdAt'] as String,
+      isCurrent: json['isCurrent'] as bool? ?? false,
     );
 
 Map<String, dynamic> _$$VehicleImplToJson(_$VehicleImpl instance) =>
@@ -32,4 +33,5 @@ Map<String, dynamic> _$$VehicleImplToJson(_$VehicleImpl instance) =>
       'seats': instance.seats,
       'active': instance.active,
       'createdAt': instance.createdAt,
+      'isCurrent': instance.isCurrent,
     };

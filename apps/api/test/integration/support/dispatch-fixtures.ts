@@ -136,7 +136,26 @@ export async function seedDriver(
   return id;
 }
 
-/** A `requested` solo ride already on dispatch generation `generation`. */
+/**
+ * Cancel the passenger's live normal rides. Migration 0019 allows one live
+ * immediate ride per passenger, so a suite that books a fresh ride per test for
+ * one passenger retires the previous test's ride first (it is never asserted on
+ * again).
+ */
+export async function retireLiveNormalRides(db: Db, passengerIds: string[]): Promise<void> {
+  await db.query(
+    `UPDATE rides SET status = 'cancelled', cancelled_at = now(), cancelled_by = 'client',
+            cancel_reason = 'test: superseded'
+      WHERE passenger_id = ANY($1::uuid[]) AND type = 'normal'
+        AND status IN ('requested','dispatching','accepted','en_route','arrived','in_progress')`,
+    [passengerIds],
+  );
+}
+
+/**
+ * A `requested` solo ride already on dispatch generation `generation`. Retires
+ * the passenger's previous live normal ride (0019 allows one).
+ */
 export async function seedSoloRide(
   db: Db,
   passengerId: string,
@@ -144,6 +163,7 @@ export async function seedSoloRide(
 ): Promise<string> {
   const lat = opts.lat ?? 26.1445;
   const lng = opts.lng ?? 91.7362;
+  await retireLiveNormalRides(db, [passengerId]);
   const { rows } = await db.query<{ id: string }>(
     `INSERT INTO rides (passenger_id, origin_lat, origin_lng, dest_lat, dest_lng, fare_cents,
                         status, type, idempotency_key, idempotency_operation, dispatch_generation)

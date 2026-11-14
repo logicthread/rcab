@@ -65,6 +65,24 @@ Owner decision 2026-11-10: until launch, sign-in and registration use Google OAu
 - Existing demo recordings W02 and D01 show the phone flow until re-recorded.
 - Needed `secrets-management` changes (owner): document `GOOGLE_CLIENT_IDS` as public config (not a secret), `NEXT_PUBLIC_GOOGLE_CLIENT_ID` build-time var, `GOOGLE_SERVER_CLIENT_ID` driver build define, and that Firebase Admin credentials are no longer on the login path (still needed for FCM).
 
+## Walkthrough on real accounts (2026-11-14)
+
+Every passenger and driver flow was walked with two real Google accounts (web + Android emulator): sign-in and
+registration, driver provisioning, private ride to rating, decline, both cancels, no-show, one- and two-rider shared
+rides, scheduled ride, vehicles, offline, sign-out. Fixed on the way:
+
+- Driver app: the realtime socket kept the identity it first connected with, so a driver enabled by an operator (or
+  any account switch) never joined `driver:<id>` and received no offers; and a token rejected on reconnect (expired
+  access token) was never retried. Socket now reopens on identity/role change and re-authenticates (`SocketReauth`).
+- API: one live normal ride per passenger (0019, 409 `passenger_has_active_ride`); vehicle list `isCurrent`;
+  structured log messages were blank (PinoNestLogger).
+- Web: "New booking" only after a ride or pool ends; honest shared-fare range; clearer pool copy.
+- Driver app copy: "Head to pickup", vehicle type names, plural, server-current vehicle marked.
+- Production compose: Postgres health checked over TCP (migrator raced first-boot init) and the OSRM graph is built
+  by one-shots before `osrm`/`api` start (a fresh host had no routing). `pnpm prod:test` green.
+
+Remaining gaps and the owner's pre-launch list: root `README.md`, "Known gaps" and "Before a real deployment".
+
 ## See also
 
 - [[epic-e8-production-hardening]] · [[story-rcab-e8-s10-central-policy-config]] · [[story-rcab-e8-s14-team-onboarding-pack]]

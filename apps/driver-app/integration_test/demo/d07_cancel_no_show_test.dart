@@ -68,7 +68,7 @@ void main() {
     await demo.cue('drive', {'to': 'pickup', 'secs': '8'});
     await demo.wait(4);
     // The server marks en_route on the first location packet; tap only if needed.
-    if (find.text('Start trip').evaluate().isNotEmpty) await demo.tap(find.text('Start trip'));
+    if (find.text('Head to pickup').evaluate().isNotEmpty) await demo.tap(find.text('Head to pickup'));
     await demo.waitFor(find.text("I've arrived"), timeout: 25, what: 'en_route');
     await demo.wait(2);
     await demo.tap(find.text("I've arrived"));

@@ -1,11 +1,12 @@
 import { Pool } from 'pg';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { randomUUID } from 'node:crypto';
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
 import * as schema from '../../src/db/schema';
 import { RidesRepository } from '../../src/modules/rides/rides.repository';
 import { IdempotencyRepository } from '../../src/modules/rides/idempotency.repository';
 import { PoolMembershipRepository } from '../../src/modules/matching/pool-membership.repository';
+import { retireLiveNormalRides } from './support/dispatch-fixtures';
 
 const skip = process.env.RCAB_INT_SKIPPED === '1';
 
@@ -37,6 +38,8 @@ describe.skipIf(skip)('RidesRepository — idempotency (real Postgres)', () => {
     await seedClient(passengerId);
     await seedClient(otherPassengerId);
   });
+
+  beforeEach(() => retireLiveNormalRides(pool, [passengerId, otherPassengerId]));
 
   afterAll(async () => {
     const ids = [passengerId, otherPassengerId];

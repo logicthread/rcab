@@ -74,6 +74,16 @@ class FakeRidesStore {
 
   readonly findById = vi.fn(async () => null);
 
+  /** Every stored row is still `requested`, so any normal one is live. */
+  readonly findLiveNormalRide = vi.fn(async (passengerId: string) => {
+    const live = [...this.byScope.values()]
+      .map((e) => e.row)
+      .filter(
+        (r) => r.passengerId === passengerId && r.type === 'normal' && r.status === 'requested',
+      );
+    return live.at(-1) ?? null;
+  });
+
   rowCount(): number {
     return this.byScope.size;
   }

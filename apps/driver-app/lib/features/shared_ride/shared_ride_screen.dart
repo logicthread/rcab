@@ -150,7 +150,7 @@ class _SharedOfferView extends ConsumerWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  '${state.passengerCount} passengers · ${state.stops.length} stops',
+                  '${state.passengerCount} ${state.passengerCount == 1 ? 'passenger' : 'passengers'} · ${state.stops.length} stops',
                   style: theme.textTheme.titleMedium,
                 ),
                 const SizedBox(height: 8),

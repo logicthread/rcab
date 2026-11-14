@@ -105,6 +105,7 @@ final driverStateProvider =
     apiBaseUrl: _kApiBaseUrl,
     tokenStore: ref.read(tokenStoreProvider),
     foregroundService: ref.read(_foregroundServiceProvider),
+    refreshSession: () => ref.read(authProvider.notifier).refreshSession(),
   );
 });
 
@@ -141,6 +142,7 @@ final realtimeSocketProvider = Provider<IRealtimeSocket>((ref) {
   final socket = RealtimeSocket(
     apiBaseUrl: _kApiBaseUrl,
     tokenStore: ref.read(tokenStoreProvider),
+    refreshSession: () => ref.read(authProvider.notifier).refreshSession(),
   );
   ref.onDispose(socket.dispose);
   return socket;

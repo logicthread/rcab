@@ -95,8 +95,21 @@ void main() {
 
     expect(find.byKey(const Key('vehicle_list')), findsOneWidget);
     expect(find.byKey(const Key('vehicle_row_v1')), findsOneWidget);
-    expect(find.text('cab_sedan · KA-01-AB-1234'), findsOneWidget);
+    expect(find.text('Sedan cab · KA-01-AB-1234'), findsOneWidget);
     expect(find.byKey(const Key('empty_state_label')), findsNothing);
+  });
+
+  // Regression (RCAB-E8.S15): the marker was client-only state, so a fresh
+  // install showed "Select" on the vehicle the server would actually use.
+  testWidgets('marks the server-current vehicle as Selected on a fresh start', (tester) async {
+    await tester.pumpWidget(_buildScreen(vehicles: [
+      _sampleVehicle.copyWith(isCurrent: true),
+      _sampleVehicle.copyWith(id: 'v2', regNo: 'AS-01-ZZ-0002'),
+    ]));
+    await tester.pump();
+
+    expect(find.byKey(const Key('selected_vehicle_v1')), findsOneWidget);
+    expect(find.byKey(const Key('select_vehicle_v2')), findsOneWidget);
   });
 
   testWidgets('Select button calls PATCH /v1/drivers/me/vehicle', (tester) async {

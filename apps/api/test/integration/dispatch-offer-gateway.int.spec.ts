@@ -101,7 +101,7 @@ describe.skipIf(skip)('ride_offer_response — real handler → dispatch → ack
 
     const passenger = await seedClient(pool);
     const rideId = await seedSoloRide(pool, passenger);
-    const decoyRide = await seedSoloRide(pool, passenger);
+    const decoyRide = await seedSoloRide(pool, await seedClient(pool)); // one live ride per passenger (0019)
     const driverId = await seedDriver(pool);
     await markOnline(redis, driverId);
     const offerId = await insertOffer(pool, { trip: { kind: 'solo', rideId }, driverId });

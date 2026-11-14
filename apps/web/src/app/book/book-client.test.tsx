@@ -225,6 +225,36 @@ describe('BookPage quote flow (F01)', () => {
   });
 });
 
+describe('BookPage shared fare copy (stand-in policy until RCAB-E8.S9)', () => {
+  it('shows the join price and the solo fare, since a new pool locks the solo fare', async () => {
+    fetchQuote.mockResolvedValueOnce({
+      ...quote('q1', 18322),
+      sharedEstimate: { perSeatPrice: { amount: 12825, currency: 'INR' } },
+    } as QuoteResponse);
+    render(<BookClient />);
+    pickPreset(0);
+    const headline = await screen.findByTestId('quote-headline');
+    expect(headline).toHaveTextContent(/128\.25.*183\.22/);
+    expect(screen.getByTestId('shared-fare-note')).toHaveTextContent(/join a ride already going your way/);
+    expect(screen.getByTestId('shared-fare-note')).toHaveTextContent(/start a new one/);
+  });
+});
+
+describe('BookPage pool view New booking', () => {
+  it('is offered only once the pool is completed or aborted', () => {
+    useBookingStore
+      .getState()
+      .setOpened('pool-1', 1, 'open', { amount: 18322, currency: 'INR' });
+    render(<BookClient />);
+    for (const status of ['open', 'closed_full', 'closed_timeout', 'closed_started'] as const) {
+      act(() => useBookingStore.getState().applyPoolUpdate('pool-1', 2, status));
+      expect(screen.queryByTestId('pool-new-booking'), status).not.toBeInTheDocument();
+    }
+    act(() => useBookingStore.getState().applyPoolUpdate('pool-1', 2, 'completed'));
+    expect(screen.getByTestId('pool-new-booking')).toBeInTheDocument();
+  });
+});
+
 describe('BookPage re-quotes when the quote is cleared without a coordinate change (F01)', () => {
   it('re-applying the same preset clears the quote and fetches a fresh one, exactly once', async () => {
     fetchQuote.mockResolvedValueOnce(quote('q1')).mockResolvedValueOnce(quote('q2'));

@@ -27,6 +27,8 @@ export const Constraint = {
   OfferSharedAlreadyAccepted: 'dispatch_offer_shared_one_accept_uq',
   /** 23505 — the outbox intent already exists (idempotent writer). */
   OutboxDedupe: 'outbox_dedupe_key_uq',
+  /** 23505 — the passenger already has a live immediate (normal) ride (0019). */
+  RidePassengerHasLiveRide: 'rides_one_live_normal_per_passenger_uq',
   /** 23505 — passenger already a member of this pool. */
   PoolMemberDuplicate: 'pool_member_pkey',
   /** 23505 — passenger already holds a seat in another non-terminal pool. */
@@ -46,9 +48,7 @@ export const Constraint = {
 export type ConstraintName = (typeof Constraint)[keyof typeof Constraint];
 
 /** Narrow an unknown thrown value to a pg error carrying a constraint name. */
-export function pgConstraintViolation(
-  err: unknown,
-): { code: string; constraint: string } | null {
+export function pgConstraintViolation(err: unknown): { code: string; constraint: string } | null {
   if (typeof err !== 'object' || err === null) return null;
   const e = err as { code?: unknown; constraint?: unknown; cause?: unknown };
   if (typeof e.code === 'string' && typeof e.constraint === 'string') {

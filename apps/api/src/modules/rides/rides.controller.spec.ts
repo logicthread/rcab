@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { RidesController } from './rides.controller';
 import { RideType } from './dto/create-ride.dto';
-import type { RideRow } from './rides.repository';
+import { PassengerHasActiveRideError, type RideRow } from './rides.repository';
 import type { JwtPayload } from '../../common/guards/auth.guard';
 import type { SharedRideRow } from '../matching/shared-ride.repository';
 import type { RideStopRow } from '../matching/ride-stop.repository';
@@ -92,6 +92,7 @@ function makeController(
     ridesCreate?: ReturnType<typeof vi.fn>;
     ridesFindById?: ReturnType<typeof vi.fn>;
     ridesFindByScope?: ReturnType<typeof vi.fn>;
+    ridesFindLive?: ReturnType<typeof vi.fn>;
     idempotency?: Record<string, ReturnType<typeof vi.fn>>;
     apply?: ReturnType<typeof vi.fn>;
     cancel?: ReturnType<typeof vi.fn>;
@@ -122,6 +123,7 @@ function makeController(
     create: opts.ridesCreate ?? vi.fn(),
     findById: opts.ridesFindById ?? vi.fn(),
     findByIdempotencyScope: opts.ridesFindByScope ?? vi.fn().mockResolvedValue(null),
+    findLiveNormalRide: opts.ridesFindLive ?? vi.fn().mockResolvedValue(null),
   };
   const stateMachine = { apply: opts.apply ?? vi.fn(), cancel: opts.cancel ?? vi.fn() };
   const bus = { joinRide: vi.fn().mockResolvedValue(undefined) };
@@ -290,7 +292,10 @@ describe('RidesController.quote', () => {
       quoteSolo: vi.fn().mockResolvedValue(solo),
       getRouteGeometry: vi.fn().mockResolvedValue(GEOMETRY),
     });
-    const res = await ctrl.quote(clientReq as never, { ...(soloDto as object), type: RideType.Scheduled } as never);
+    const res = await ctrl.quote(
+      clientReq as never,
+      { ...(soloDto as object), type: RideType.Scheduled } as never,
+    );
     expect(res.soloFare).toEqual(solo.fare);
     expect(res.quoteToken).toBe('quote.tok');
   });
@@ -348,7 +353,7 @@ describe('RidesController.create — normal (solo) path', () => {
     expect(relay.kick).toHaveBeenCalledTimes(1);
   });
 
-  it('replays the caller\'s own ride from the durable record without inserting again', async () => {
+  it("replays the caller's own ride from the durable record without inserting again", async () => {
     const ridesCreate = vi.fn();
     const ridesFindByScope = vi.fn().mockResolvedValue({
       row: row(),
@@ -378,6 +383,49 @@ describe('RidesController.create — normal (solo) path', () => {
     expect(ridesCreate).toHaveBeenCalledTimes(1);
     // Duplicate key (already existed) → no re-dispatch.
     expect(relay.kick).not.toHaveBeenCalled();
+  });
+
+  it('409 passenger_has_active_ride when a live ride exists under another key', async () => {
+    const ridesCreate = vi.fn();
+    const { ctrl, relay } = makeController({
+      verify: vi.fn().mockReturnValue(claims),
+      ridesCreate,
+      ridesFindLive: vi
+        .fn()
+        .mockResolvedValue(row({ id: 'ride-live', idempotencyKey: 'idem-old' })),
+    });
+    await expect(ctrl.create(clientReq as never, dto, 'idem-1')).rejects.toMatchObject({
+      response: { code: 'passenger_has_active_ride' },
+    });
+    expect(ridesCreate).not.toHaveBeenCalled();
+    expect(relay.kick).not.toHaveBeenCalled();
+  });
+
+  it('a live ride under the same key is a retry, not a second ride', async () => {
+    const ridesCreate = vi.fn().mockResolvedValue({
+      row: row(),
+      created: false,
+      requestFingerprint: requestFingerprint(IdempotencyOperation.Solo, dto),
+    });
+    const { ctrl } = makeController({
+      verify: vi.fn().mockReturnValue(claims),
+      ridesCreate,
+      ridesFindLive: vi.fn().mockResolvedValue(row({ idempotencyKey: 'idem-1' })),
+    });
+    const res = await ctrl.create(clientReq as never, dto, 'idem-1');
+    expect((res as { rideId: string }).rideId).toBe('ride-9');
+  });
+
+  it('409 when a concurrent request wins the one-live-ride index (DB backstop)', async () => {
+    const ridesFindLive = vi.fn().mockResolvedValue(null);
+    const { ctrl } = makeController({
+      verify: vi.fn().mockReturnValue(claims),
+      ridesCreate: vi.fn().mockRejectedValue(new PassengerHasActiveRideError()),
+      ridesFindLive,
+    });
+    await expect(ctrl.create(clientReq as never, dto, 'idem-1')).rejects.toMatchObject({
+      response: { code: 'passenger_has_active_ride' },
+    });
   });
 
   it('400 when the Idempotency-Key header is missing', async () => {
@@ -498,7 +546,9 @@ describe('RidesController.create — normal (solo) path', () => {
       }),
     );
     const sharedDto = { ...(dto as object), type: RideType.Shared } as never;
-    await expect(ctrl.create(clientReq as never, sharedDto, undefined)).rejects.toThrow('osrm down');
+    await expect(ctrl.create(clientReq as never, sharedDto, undefined)).rejects.toThrow(
+      'osrm down',
+    );
   });
 });
 
@@ -549,7 +599,6 @@ describe('RidesController.create — scheduled path (RCAB-E6.S2)', () => {
     expect(scheduled.scheduleWake).not.toHaveBeenCalled();
     expect(relay.kick).toHaveBeenCalledTimes(1);
     expect(bus.joinRide).toHaveBeenCalledWith('c-1', 'ride-9');
-
   });
 
   it('echoes scheduledFor in the create response (normal rides never carry it)', async () => {
@@ -579,15 +628,17 @@ describe('RidesController.create — scheduled path (RCAB-E6.S2)', () => {
 
   it('400 scheduled_for_required when the timestamp is missing', async () => {
     const { ctrl } = makeController({ verify: vi.fn().mockReturnValue(claims) });
-    await expect(ctrl.create(clientReq as never, scheduledDto(undefined), 'idem-1')).rejects.toMatchObject(
-      { response: { code: 'scheduled_for_required' } },
-    );
+    await expect(
+      ctrl.create(clientReq as never, scheduledDto(undefined), 'idem-1'),
+    ).rejects.toMatchObject({ response: { code: 'scheduled_for_required' } });
   });
 
   it('400 out_of_window when sooner than 15 min', async () => {
     const soon = new Date(Date.now() + 5 * 60 * 1000).toISOString();
     const { ctrl, scheduled } = makeController({ verify: vi.fn().mockReturnValue(claims) });
-    await expect(ctrl.create(clientReq as never, scheduledDto(soon), 'idem-1')).rejects.toMatchObject({
+    await expect(
+      ctrl.create(clientReq as never, scheduledDto(soon), 'idem-1'),
+    ).rejects.toMatchObject({
       response: { code: 'scheduled_for_out_of_window' },
     });
     expect(scheduled.scheduleWake).not.toHaveBeenCalled();
@@ -596,7 +647,9 @@ describe('RidesController.create — scheduled path (RCAB-E6.S2)', () => {
   it('400 out_of_window when further than 24 h', async () => {
     const far = new Date(Date.now() + 25 * 60 * 60 * 1000).toISOString();
     const { ctrl } = makeController({ verify: vi.fn().mockReturnValue(claims) });
-    await expect(ctrl.create(clientReq as never, scheduledDto(far), 'idem-1')).rejects.toMatchObject({
+    await expect(
+      ctrl.create(clientReq as never, scheduledDto(far), 'idem-1'),
+    ).rejects.toMatchObject({
       response: { code: 'scheduled_for_out_of_window' },
     });
   });

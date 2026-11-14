@@ -4,7 +4,7 @@ import type { PoolStatus } from './types';
 export const POOL_STATUS_LABEL: Record<PoolStatus, string> = {
   open: 'Waiting for a co-rider',
   closed_full: 'Pool is full, finding your driver',
-  closed_timeout: 'No co-rider joined',
+  closed_timeout: 'No co-rider joined, finding your driver',
   closed_started: 'Trip under way',
   completed: 'Trip complete',
   aborted: 'Pool cancelled',

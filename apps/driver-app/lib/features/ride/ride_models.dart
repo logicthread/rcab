@@ -42,7 +42,7 @@ enum RideStatus {
 
   /// Label for the single primary action button.
   String? get actionLabel => switch (this) {
-        RideStatus.accepted => 'Start trip',
+        RideStatus.accepted => 'Head to pickup',
         RideStatus.enRoute => "I've arrived",
         RideStatus.arrived => 'Start ride',
         RideStatus.inProgress => 'End ride',

@@ -1,10 +1,11 @@
 import { Pool } from 'pg';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { randomUUID } from 'node:crypto';
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
 import * as schema from '../../src/db/schema';
 import { RidesRepository } from '../../src/modules/rides/rides.repository';
 import { guardsFor, seedDriver } from './support/dispatch-fixtures';
+import { retireLiveNormalRides } from './support/dispatch-fixtures';
 
 const skip = process.env.RCAB_INT_SKIPPED === '1';
 
@@ -32,6 +33,8 @@ describe.skipIf(skip)('RidesRepository.transition — solo lifecycle (real Postg
       [passengerId, `fb-${passengerId}`, phone],
     );
   });
+
+  beforeEach(() => retireLiveNormalRides(pool, [passengerId]));
 
   afterAll(async () => {
     await pool.query('DELETE FROM rides WHERE passenger_id = $1', [passengerId]);
@@ -92,8 +95,14 @@ describe.skipIf(skip)('RidesRepository.transition — solo lifecycle (real Postg
     expect(await guardsFor(pool, { driverId })).toEqual([
       { driver_id: driverId, solo_ride_id: id, shared_ride_id: null },
     ]);
+    // Another passenger: one passenger holds one live normal ride (0019).
+    const otherPassenger = randomUUID();
+    await pool.query(
+      `INSERT INTO app_user (id, firebase_uid, phone_e164, role) VALUES ($1, $2, $3, 'client')`,
+      [otherPassenger, `fb-${otherPassenger}`, `+91${Date.now().toString().slice(-10)}`],
+    );
     const { row: second } = await repo.create({
-      passengerId,
+      passengerId: otherPassenger,
       originLat: 26.1445,
       originLng: 91.7362,
       destLat: 26.1758,

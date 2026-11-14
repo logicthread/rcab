@@ -26,7 +26,20 @@ class _DriverAppState extends ConsumerState<DriverApp> {
     _wiredAuthListener = true;
     final container = ProviderScope.containerOf(context);
     ref.listenManual<AuthState>(authProvider, (prev, next) {
-      if (next is AuthStateAuthenticated && _sharedRideCtrl == null) {
+      // The realtime socket authenticates as one user with one role, and the
+      // server puts it in `driver:<id>` only for a driver token. So a sign-out,
+      // another account, or a role change (an operator enabling this account as
+      // a driver, then Retry) must reopen it; otherwise the driver never
+      // receives an offer (found walking the driver flows, RCAB-E8.S15).
+      final identityChanged = next is AuthStateAuthenticated &&
+          (prev is! AuthStateAuthenticated ||
+              prev.userId != next.userId ||
+              prev.role != next.role ||
+              _sharedRideCtrl == null);
+      if (next is! AuthStateAuthenticated || identityChanged) {
+        _stopRealtime(container);
+      }
+      if (identityChanged) {
         final router = ref.read(routerProvider);
         _sharedRideCtrl = SharedRideController(
           container: container,
@@ -36,13 +49,17 @@ class _DriverAppState extends ConsumerState<DriverApp> {
           container: container,
           router: router,
         )..start();
-      } else if (next is! AuthStateAuthenticated && _sharedRideCtrl != null) {
-        _sharedRideCtrl?.stop();
-        _sharedRideCtrl = null;
-        _offerCtrl?.stop();
-        _offerCtrl = null;
       }
     }, fireImmediately: true);
+  }
+
+  void _stopRealtime(ProviderContainer container) {
+    if (_sharedRideCtrl == null && _offerCtrl == null) return;
+    _sharedRideCtrl?.stop();
+    _sharedRideCtrl = null;
+    _offerCtrl?.stop();
+    _offerCtrl = null;
+    container.read(realtimeSocketProvider).disconnect();
   }
 
   @override

@@ -225,7 +225,7 @@ Or via skill: `/seed-db --reset --scenario=default`.
 11. Watch the driver position update at ~1 Hz.
 
 ### Steps — ride lifecycle (driver)
-12. Driver taps **Start trip** → state `en_route`.
+12. Driver taps **Head to pickup** (or just starts moving: the first location update does it) → state `en_route`.
 13. Driver taps **Arrived at pickup** → state `arrived`.
 14. Driver taps **Begin ride** → state `in_progress`.
 15. Driver taps **Complete** → state `completed`.

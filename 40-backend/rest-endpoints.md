@@ -49,7 +49,7 @@ Auth errors: 403 `account_disabled` (exchange/Google login), 401 `account_disabl
 ## vehicles (🚗)
 | Method | Path | Description |
 |---|---|---|
-| GET | `/v1/vehicles` 🔒🚗 | list owned |
+| GET | `/v1/vehicles` 🔒🚗 | list owned (active); each row carries `isCurrent` (the vehicle going online uses) |
 | POST | `/v1/vehicles` 🔒🚗 | add |
 | PATCH | `/v1/vehicles/:id` 🔒🚗 | update |
 
@@ -57,7 +57,7 @@ Auth errors: 403 `account_disabled` (exchange/Google login), 401 `account_disabl
 | Method | Path | Description |
 |---|---|---|
 | POST | `/v1/rides/quote` 🔒🧍 | Body: `{ type: normal\|shared\|scheduled, originLat, originLng, destLat, destLng }` → `{ type, distanceM, durationS, soloFare: Money, geometry, quoteToken, sharedEstimate?: { perSeatPrice: Money, seatMultiplier, detourFactor, seatCount } }`. Side-effect-free. (RCAB-E5.S5) |
-| POST | `/v1/rides` 🔒🧍 | Body: `{ type, originLat, originLng, destLat, destLng, quoteToken?, scheduledFor? }` (no `passengerId`; identity is the JWT). `type=shared` → `{ sharedRideId, passengerId, mode, poolStatus, perSeatPrice: Money, farePolicy, seatMultiplier?, detourFactor? }` (matching, optional `Idempotency-Key`). `type=normal` / `scheduled` → `{ rideId, passengerId, status: 'requested', fare }`; `Idempotency-Key` header **required**, `quoteToken` required, `scheduledFor` (15 min–24 h ahead) required for scheduled. (RCAB-E4.S2, E5.S2–S5, E6.S2) |
+| POST | `/v1/rides` 🔒🧍 | Body: `{ type, originLat, originLng, destLat, destLng, quoteToken?, scheduledFor? }` (no `passengerId`; identity is the JWT). `type=shared` → `{ sharedRideId, passengerId, mode, poolStatus, perSeatPrice: Money, farePolicy, seatMultiplier?, detourFactor? }` (matching, optional `Idempotency-Key`). `type=normal` / `scheduled` → `{ rideId, passengerId, status: 'requested', fare }`; `Idempotency-Key` header **required**, `quoteToken` required, `scheduledFor` (15 min–24 h ahead) required for scheduled. `type=normal` while the passenger already has a live normal ride → 409 `passenger_has_active_ride` (same key still replays; DB backstop 0019). (RCAB-E4.S2, E5.S2–S5, E6.S2, E8.S15) |
 | POST | `/v1/rides/requests/:id/cancel` 🔒🧍 | cancel (legacy abstract `ride_request` model — **not built**; solo cancel ships as `/v1/rides/:id/cancel`, RCAB-E4.S8) |
 | GET | `/v1/rides/:id` 🔒 | (client or driver of this ride) → status + lifecycle timestamp trail (RCAB-E4.S6). Used for mount + reconnect-restore. |
 | POST | `/v1/rides/offers/:id/accept` 🔒🚗 | **not built as HTTP**: accept/decline are the Socket.IO event `ride_offer_response { offerId, accept }` (see [[websocket-events]]) |

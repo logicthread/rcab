@@ -51,6 +51,19 @@ describe('RideTrackingPanel', () => {
     expect(onNewBooking).toHaveBeenCalledOnce();
   });
 
+  it('offers New booking only once the ride is over', () => {
+    for (const status of ['requested', 'accepted', 'en_route', 'arrived', 'in_progress'] as const) {
+      const { unmount } = render(panel({ status }));
+      expect(screen.queryByTestId('tracking-new-booking'), status).not.toBeInTheDocument();
+      unmount();
+    }
+    for (const status of ['completed', 'no_driver', 'cancelled', 'no_show'] as const) {
+      const { unmount } = render(panel({ status }));
+      expect(screen.getByTestId('tracking-new-booking')).toBeInTheDocument();
+      unmount();
+    }
+  });
+
   it('shows the no-show banner for a no_show ride', () => {
     render(panel({ status: 'no_show' }));
     expect(screen.getByTestId('tracking-status')).toHaveTextContent('Marked as no-show');

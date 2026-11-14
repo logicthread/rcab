@@ -25,6 +25,7 @@ a green test gate. For deeper material see [Where to go next](#where-to-go-next)
 5. [Use the app](#5-use-the-app)
 6. [Driver app](#6-driver-app)
 7. [Develop](#7-develop)
+- [Before a real deployment](#before-a-real-deployment)
 8. [Troubleshooting](#8-troubleshooting)
 9. [Where to go next](#where-to-go-next)
 
@@ -175,24 +176,73 @@ docker compose --env-file .env.dev -f infra/docker/docker-compose.dev.yml --prof
 
 ## 5. Use the app
 
-**Region:** the dev routing graph covers **north-east India**. Pickups and drop-offs must be there (Guwahati is
-around `26.14, 91.73`), otherwise quotes fail with "routing unavailable".
+Every flow below was walked end to end on the dev stack (web in a browser, driver app on an Android emulator)
+before this README was last updated.
 
-1. **Passenger:** open http://localhost:3002/signin → **Continue with Google**. The first sign-in creates a
-   passenger account. Then **Book a ride**: set pickup and drop on the map, choose **Share** or **Private**, and **Now** or **Later** (a scheduled ride).
-2. **Driver:** sign in once in the driver app (or the web) with the Google account that will drive, then promote
-   it:
+**Region:** the dev routing graph covers **north-east India**. Pickups and drop-offs must be there (Guwahati is
+around `26.14, 91.73`), otherwise quotes fail with "routing unavailable". The booking page's **Quick picks**
+(Paltan Bazaar → Zoo Road, …) are valid routes.
+
+**Two Google accounts.** Use one account as the passenger (web) and another as the driver (phone). One account is
+one role: promoting an account to driver makes it a driver everywhere. Both accounts must be test users on the
+OAuth consent screen while it is in *Testing* (section 3).
+
+### Set up the driver
+
+1. Sign in once in the driver app with the driver's Google account. It shows **Not registered as a driver yet**.
+2. Promote the account (it must have signed in once):
 
    ```bash
-   ./scripts/provision-driver.sh you@gmail.com --vehicle-reg AS01AB1234 --dry-run   # preview
-   ./scripts/provision-driver.sh you@gmail.com --vehicle-reg AS01AB1234
+   ./scripts/provision-driver.sh driver@gmail.com --vehicle-reg AS01AB1234 --dry-run   # preview
+   ./scripts/provision-driver.sh driver@gmail.com --vehicle-reg AS01AB1234
    ```
 
-   In the driver app tap **Retry** on the "Not registered as a driver yet" screen.
-3. **Ride:** driver goes online, passenger books nearby, driver accepts the offer and moves the ride through
-   en route → arrived → started → completed; both sides rate each other.
+3. Tap **Retry**. The app opens the home screen; the profile lists the starter vehicle as **Selected**.
+4. Tap the round button to go **online** and allow location. The driver must be within **2 km** of a pickup to be
+   offered a ride at once, or **4 km** in the second wave 30 s later.
+
+### Passenger and driver flows
+
+| Flow | Passenger (web, http://localhost:3002) | Driver (app) |
+|---|---|---|
+| Sign in / register | **Continue with Google**; the first sign-in creates a passenger account | **Continue with Google**; operator promotes the account once |
+| Private ride | **Private** + **Now** → **Book** → "Finding your driver…" → live map with the driver → "has arrived" → "on the way" → **Trip complete** → rate | Offer screen (12 s) → **Accept** → **Head to pickup** (also automatic when the driver starts moving) → **I've arrived** → **Start ride** → **End ride** → rate the passenger |
+| Decline / no answer | Next driver, then "No driver available — please try again" after 60 s | **Decline**, or let the countdown run out |
+| Cancel | **Cancel ride** until the trip starts | **Cancel ride** (pick a reason) until the trip ends |
+| No-show | "Marked as no-show" | **Report no-show** unlocks 5 min after **I've arrived** |
+| Shared ride | **Share** → **Book share**. Joining a ride already going your way costs the shared price; starting a new one locks the solo fare (stand-in until RCAB-E8.S9). A pool collects co-riders for **60 s**, then a driver is found | Shared offer lists every stop → confirm each pickup and drop in order |
+| Scheduled ride | **Private** + **Later** → pick a time 15 min – 24 h ahead → **Schedule ride**. A driver is searched for 10 min before pickup | Gets a normal offer at that point |
+| One ride at a time | A second "now" ride while one is live is refused ("You already have a ride in progress") | One trip at a time |
+| Vehicles | — | Profile → **+** to add, **Select** to make current |
+| Go offline / sign out | **Sign out** | Toggle offline; profile → sign out (revokes the session) |
 
 Videos of every flow: `docs/onboarding/videos/` (web, driver, ops), indexed in each `INDEX.md`.
+
+### Testing tips
+
+- **Move the emulator:** `adb emu geo fix <lng> <lat>` (longitude first), e.g. `adb emu geo fix 91.746 26.1855`.
+- **Seeded drivers** never accept; they only make dispatch find candidates. To test with only your real driver,
+  stop `seed-dev.sh --keepalive`; the server drops them after 60 s.
+- **Fire a scheduled ride now** instead of waiting for its wake (10 min before pickup):
+
+  ```bash
+  RIDE=<ride id>
+  docker compose --env-file .env.dev -f infra/docker/docker-compose.dev.yml exec -T api node -e "
+  const {Queue}=require('bullmq');const q=new Queue('scheduled-dispatch',{connection:{host:'redis',port:6379}});
+  q.getJob('scheduled-wake-$RIDE-g1').then(j=>j.promote()).then(()=>q.close())"
+  ```
+
+- **Test a shared pool with two riders:** book **Share** on the web, then within 60 s book a nearby shared ride
+  as a second passenger (a second browser profile signed in with another test account).
+
+### Known gaps (not blocking the flows above)
+
+- Driver **Earnings** is a placeholder (RCAB-E7).
+- Driver screens show coordinates, not addresses; the shared-ride screen has no Navigate or Cancel button.
+- A scheduled ride's offer does not show its pickup time.
+- A driver cancel ends the ride; the passenger books again (no automatic re-dispatch).
+- The driver app still uses Flutter's default launcher icon.
+- Shared fares use the stand-in "fixed at join" rule until RCAB-E8.S9.
 
 ---
 
@@ -214,10 +264,10 @@ flutter run --dart-define=API_BASE_URL=http://192.168.1.20:3000   # physical dev
 
 - `android/app/google-services.json` is **not committed**. Download it from the Firebase console (project
   settings → Android app `com.rcab.driver_app`) and put it there; the build fails without it.
-- Google sign-in on the emulator needs a Google account added to the emulator (Settings → Accounts), a system
-  image **with Google Play**, and that account in the consent screen's test users.
-- Set the emulator location to Guwahati (Extended controls → Location) so routing works. The app must keep sending
-  locations while online, or the server takes the driver offline after 60 s.
+- Use an emulator image **with Google Play**. If it has no Google account, **Continue with Google** walks you
+  through adding one; that account must be a test user on the consent screen.
+- Set the emulator location to Guwahati (Extended controls → Location, or `adb emu geo fix`) so routing works.
+  The app keeps sending locations while online; without them the server takes the driver offline after 60 s.
 - Optional: `--dart-define=GOOGLE_SERVER_CLIENT_ID=<web client id>` is only a fallback when `/v1/auth/config` is
   unreachable.
 
@@ -289,6 +339,25 @@ domain and architecture. Start at `00-index/HOME.md`; `00-index/reading-paths.md
 
 ---
 
+## Before a real deployment
+
+The code paths above are production-shaped (fail-closed config, hashed rotating refresh tokens, outbox-driven
+dispatch, release images by commit SHA, backup/restore drills). What is still the owner's to do before launch:
+
+- **Google sign-in:** add the production web origin to the Web client; give the consent screen a public home page,
+  privacy policy and authorized domain, then **Publish** it (in *Testing* only listed test users can sign in).
+- **Driver app release:** create an upload/release keystore (the release build currently signs with the debug
+  key), add its SHA-1 (and Play App Signing's) to the Android OAuth client, set a real launcher icon.
+- **Secrets and hosting:** production `api.env` per `80-infrastructure/secrets-management.md` (strong
+  `JWT_SECRET`, `CORS_ORIGINS`, `GOOGLE_CLIENT_IDS`), TLS, offsite backup target and keys.
+- **Product decisions:** the shared-fare rule (RCAB-E8.S9) and the launch OTP provider (ADR-0003 amendment).
+- **Sign-off walks** for the open RCAB-E8 stories (`95-delivery/stories-index.md`).
+
+Process: `docs/onboarding/workflows/release-and-deploy.md` · `docs/operations/recovery-runbook.md` ·
+`pnpm prod:test` runs the production compose locally and smoke-tests it.
+
+---
+
 ## 8. Troubleshooting
 
 | Symptom | Fix |
@@ -299,6 +368,7 @@ domain and architecture. Start at `00-index/HOME.md`; `00-index/reading-paths.md
 | quote says "routing unavailable" / api 503 on quote | the points are outside north-east India, or OSRM is not up (`curl -s localhost:3000/v1/health/ready`) |
 | `google_not_configured` | `GOOGLE_CLIENT_IDS` empty in `.env.dev`; set it, then `docker compose … up -d api` |
 | Google popup: "Access blocked" / "app not verified" | account not in the consent screen's test users, or origin `http://localhost:3002` missing on the web client |
+| driver gets no offers | online (green), within 2 km of the pickup (4 km after 30 s), signed in as a driver account; if you promoted the account while the app was open, tap Retry |
 | driver app "Not registered as a driver yet" | run `scripts/provision-driver.sh <email>`, then Retry |
 | seeded drivers vanish after a minute | expected; use `./scripts/seed-dev.sh --keepalive` |
 | `pnpm verify` integration failures about Docker | start Docker Desktop; Testcontainers needs it |

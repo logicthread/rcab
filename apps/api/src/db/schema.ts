@@ -234,6 +234,12 @@ export const rides = pgTable(
   (t) => [
     index('rides_passenger_idx').on(t.passengerId),
     index('rides_driver_idx').on(t.driverId),
+    // 0019: one live immediate ride per passenger (409 passenger_has_active_ride).
+    uniqueIndex('rides_one_live_normal_per_passenger_uq')
+      .on(t.passengerId)
+      .where(
+        sql`${t.type} = 'normal' AND ${t.status} IN ('requested','dispatching','accepted','en_route','arrived','in_progress')`,
+      ),
     check(
       'rides_status_check',
       sql`${t.status} IN ('requested','dispatching','accepted','en_route','arrived','in_progress','completed','cancelled','no_driver','no_show')`,
@@ -502,10 +508,7 @@ export const poolMember = pgTable(
   (t) => [
     primaryKey({ columns: [t.poolId, t.passengerId] }),
     check('pool_member_one_seat_check', sql`${t.seats} = 1`),
-    check(
-      'pool_member_fare_check',
-      sql`${t.quotedFareCents} IS NULL OR ${t.quotedFareCents} >= 0`,
-    ),
+    check('pool_member_fare_check', sql`${t.quotedFareCents} IS NULL OR ${t.quotedFareCents} >= 0`),
     check(
       'pool_member_agreed_fare_check',
       sql`${t.agreedFareCents} IS NULL OR ${t.agreedFareCents} >= 0`,

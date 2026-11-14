@@ -32,7 +32,7 @@ Future<void> _fillForm(WidgetTester tester, {String regNo = 'KA-01-AB-1234'}) as
   // Select type
   await tester.tap(find.byKey(const Key('type_dropdown')));
   await tester.pumpAndSettle();
-  await tester.tap(find.text('cab_sedan').last);
+  await tester.tap(find.text('Sedan cab').last);
   await tester.pumpAndSettle();
 
   await tester.enterText(find.byKey(const Key('reg_no_field')), regNo);

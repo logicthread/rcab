@@ -49,7 +49,8 @@ There is no `details` object. `request_id` is the `x-request-id` header, also re
 | 409 | `no_show_too_early` | No-show before the 5-minute wait |
 | 409 | `ride_not_completed` / `already_rated` | Rating a non-completed ride / rating twice |
 | 409 | `idempotency_request_in_progress` | Original request with this key still running |
-| 409 | `passenger_has_active_pool` / `pool_conflict` | Already holds a shared seat (carries `sharedRideId`) / concurrent pool change, retry |
+| 409 | `passenger_has_active_pool` / `pool_conflict` | Already holds a shared seat / concurrent pool change, retry |
+| 409 | `passenger_has_active_ride` | `POST /v1/rides` type normal while the passenger already has a live (requested … in_progress) normal ride; a retry under the same `Idempotency-Key` still replays. Backstop: `rides_one_live_normal_per_passenger_uq` (0019) |
 | 409 | `vehicle_reg_exists`, `google_already_linked` | Duplicate registration number (own or another driver's vehicle) / Google account linked to another user |
 | 422 | `idempotency_key_conflict` | Key reused for a different request |
 | 429 | `rate_limited` | Throttler (auth routes 10/min, global 1000/min where applied) |

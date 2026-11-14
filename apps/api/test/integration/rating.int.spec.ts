@@ -2,11 +2,12 @@ import { uniquePhone } from '@rcab/test-fixtures';
 import { Pool } from 'pg';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { randomUUID } from 'node:crypto';
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
 import * as schema from '../../src/db/schema';
 import { RidesRepository } from '../../src/modules/rides/rides.repository';
 import { RatingRepository } from '../../src/modules/rating/rating.repository';
 import { RatingService } from '../../src/modules/rating/rating.service';
+import { retireLiveNormalRides } from './support/dispatch-fixtures';
 
 const skip = process.env.RCAB_INT_SKIPPED === '1';
 
@@ -43,6 +44,8 @@ describe.skipIf(skip)('RatingService.rate — two-sided capture (real Postgres)'
     );
     await pool.query('INSERT INTO driver (user_id) VALUES ($1)', [driverId]);
   });
+
+  beforeEach(() => retireLiveNormalRides(pool, [passengerId]));
 
   afterAll(async () => {
     await pool.query('DELETE FROM ratings WHERE rater_id = $1 OR subject_id = $1', [passengerId]);
