@@ -10,7 +10,7 @@ import { RidesRepository } from '../../src/modules/rides/rides.repository';
 import { OutboxRepository } from '../../src/modules/outbox/outbox.repository';
 import { DispatchReconciler } from '../../src/modules/outbox/dispatch-reconciler.service';
 import { rearmScheduledRide } from '../../src/modules/scheduled/scheduled-retry';
-import { hardFailJobId, wave2JobId } from '../../src/modules/outbox/outbox.jobs';
+import { hardFailJobId, wave2JobId, wave3JobId } from '../../src/modules/outbox/outbox.jobs';
 import { dispatchOutcome } from '../../src/metrics';
 
 const skip = process.env.RCAB_INT_SKIPPED === '1';
@@ -358,16 +358,19 @@ describe.skipIf(skip)('scheduled ride retry (Postgres + BullMQ)', () => {
       expect((await ride(r.id)).status).toBe('requested');
     });
 
-    it('inside the window the 60 s normal timing is NOT applied: offers 100 s old restore a ~140 s hard-fail and a ~20 s wave-2', async () => {
+    it('inside the window the 60 s normal timing is NOT applied: offers 100 s old restore a ~140 s hard-fail, a ~20 s wave-2 and a ~80 s wave-3', async () => {
       const r = await wokenRide(1, 100);
       await offer(r.id, 1, 100);
       const report = await reconciler.reconcile();
-      expect(report.timersRestored).toBe(2);
+      expect(report.timersRestored).toBe(3);
       expect((await ride(r.id)).dispatch_generation).toBe(1);
       const hard = (await dispatchQ.getJob(hardFailJobId(r.id, 1)))!;
       const wave2 = (await dispatchQ.getJob(wave2JobId(r.id, 1)))!;
       expect(Math.abs((hard.opts.delay ?? 0) - 140_000)).toBeLessThan(3_000);
       expect(Math.abs((wave2.opts.delay ?? 0) - 20_000)).toBeLessThan(3_000);
+      // The 2 min window puts wave 3 halfway between wave 2 (120 s) and the hard fail (240 s): 180 s - 100 s.
+      const wave3 = (await dispatchQ.getJob(wave3JobId(r.id, 1)))!;
+      expect(Math.abs((wave3.opts.delay ?? 0) - 80_000)).toBeLessThan(3_000);
     });
 
     it('a live hard-fail timer is trusted: the window is closed by the timer, not the reconciler', async () => {

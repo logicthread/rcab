@@ -192,11 +192,15 @@ describe.skipIf(skip)('outbox -> relay -> worker -> dispatch (full Nest wiring)'
     await moduleRef.get(DispatchProcessor, { strict: false }).process(job);
     expect(await offeredDriverIds(rideId)).toEqual([driverId]);
 
-    // Timers for the escalation window exist, one of each kind, for this ride.
+    // Timers for the escalation window exist for this ride: wave 2 and wave 3 (both wave-timeout jobs) and the hard fail.
     const timers = (await dispatchQ.getJobs(['delayed', 'waiting'])).filter(
       (j) => (j.data as { rideId?: string }).rideId === rideId,
     );
-    expect(timers.map((j) => j.name).sort()).toEqual(['dispatch:hard-fail', 'dispatch:wave-timeout']);
+    expect(timers.map((j) => j.name).sort()).toEqual([
+      'dispatch:hard-fail',
+      'dispatch:wave-timeout',
+      'dispatch:wave-timeout',
+    ]);
   });
 
   it('a retried identical request (same key) returns the same ride and writes no second intent', async () => {
