@@ -19,7 +19,8 @@ audience: both
 - Provide `RideStateMachine.apply(rideId, event)` — the **only** way to drive a ride *forward* (driver-only).
 - Provide `RideStateMachine.cancel({ rideId, actor, actorId, isNoShow, reason })` — the role-aware terminal path: client/driver cancel → `cancelled`, driver no-show (from `arrived`, after the 5-min wait) → `no_show` (RCAB-E4.S8). Guards ownership + the cancellable-from set; no-show enforces `now − arrived_at ≥ 5 min` server-side (→ `no_show_too_early`). Stamps `cancelled_at`/`cancelled_by`/`cancel_reason`. **No fee in Phase-0** (deferred). After commit it broadcasts `ride_state_changed`, clears a bound driver's `current_ride_id`, and emits `RIDE_CANCELLED_EVENT` so [[module-dispatch]] unwinds in-flight dispatch.
 - Compute fares on completion.
-- Provide history list queries.
+- Provide history list queries: `GET /v1/rides` returns the caller's recent rides (a client's bookings, or a driver's assigned trips), newest first, via `RidesRepository.findRecentByPassenger` / `findRecentByDriver` (RCAB-E8.S18).
+- Snap a point to the road: `GET /v1/rides/snap` asks OSRM `/nearest` through `RouteSimilarityService.nearestRoad` and refuses points farther than `rides.snapMaxMeters` (RCAB-E8.S21).
 
 ## Public providers
 

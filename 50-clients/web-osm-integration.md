@@ -37,6 +37,7 @@ flowchart LR
   quote --> osrm[/OSRM via API/]
 ```
 
+- **Snap before set (RCAB-E8.S21):** a point from search, a map tap or a preset is sent to `GET /v1/rides/snap` and the road coordinate is what gets stored, quoted and drawn. A shift of 15 m or more is announced ("Pickup moved 20 m to the nearest road."); a point with no road within 500 m is refused. If snapping is unavailable the point is kept as picked. The marker therefore sits on the road, and the label still names the spot the rider chose.
 - Pick first, then drop. The map recenters to the union bounds.
 - Polyline drawn from OSRM response.
 - **Live tracking (RCAB-E4.S7):** while a solo ride is active the driver's position renders as a distinct filled-circle marker (vs the teardrop endpoint pins), moved in place on each `driver_location` (≤ 1 Hz). The same `MapPicker` is reused via an optional `driver` prop — no separate map component.

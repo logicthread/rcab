@@ -18,7 +18,7 @@ audience: both
 |---|---|
 | `/route/v1/driving/{o};{d}` | quote a single ride (distance, duration, polyline) |
 | `/table/v1/driving/{o};{d1};{d2}…` | many-to-many ETAs for shared-ride detour checks |
-| `/nearest/v1/driving/{p}` | snap a GPS sample to the road network when needed |
+| `/nearest/v1/driving/{p}` | snap a point to the road network. **Used for booking** (RCAB-E8.S21): `GET /v1/rides/snap` snaps every pickup and drop-off; measured on dev data the preset points were 20 m and 169 m from the road |
 
 ## Hosting
 

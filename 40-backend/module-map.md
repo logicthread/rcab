@@ -11,7 +11,7 @@ audience: both
 # Module map
 
 *Every NestJS feature module under `apps/api/src/modules/`, what it owns, what it exposes.*
-*The 14 rows below are the actual module directories under `modules/`. Keep in sync with `pnpm code:graph:check`.*
+*The 15 rows below are the actual module directories under `modules/`. Keep in sync with `pnpm code:graph:check`.*
 
 | Module | Owns | Public providers (exports) | Notes |
 |---|---|---|---|
@@ -28,6 +28,7 @@ audience: both
 | `health` | Liveness / readiness probes, build identity, `/metrics` | — | `HealthController` (`/v1/health/live`, `/ready`, `/version`, `/metrics`, `/`) |
 | `scheduled` | Scheduled-booking wake queue (BullMQ delayed jobs, E6) and the retry-until-cutoff policy | `ScheduledDispatchService` | wakes a future ride ~10 min before pickup → normal dispatch (S3); queue `bull:scheduled-dispatch:*`; `scheduled-retry.ts` re-arms an unanswered window |
 | `outbox` | Transactional outbox: `enqueueOutbox`, `OutboxRelay` (lease → BullMQ), `DispatchReconciler` (rebuild lost work from Postgres), deterministic job ids | `OutboxRelay`, `OutboxRepository`, `enqueueOutbox` | Stage C (RCAB-E8.S8); see `docs/onboarding/functionality/idempotency-and-durability.md` |
+| `account` | Profile (`GET`/`PATCH /v1/me`), in-app feedback (`POST /v1/feedback`), support chat (`/v1/support/messages`) for both roles | — | RCAB-E8.S18/S19; tables `feedback`, `support_message` (migration 0021); `AccountService` talks to Drizzle directly |
 | `metrics` | `BusinessMetricsSampler`: state-shaped gauges (active/busy drivers, outbox backlog, shared match rate) | — | RCAB-E8.S12; counters/histograms live in `apps/api/src/metrics.ts` |
 
 Cross-cutting infra (not feature modules) lives under `apps/api/src/infra/`: `DrizzleModule` (Postgres), `RedisModule`, `FirebaseModule`, `GoogleModule`. Business configuration is the global `PolicyModule` (`apps/api/src/config/policy/`, see [[policy-config]]), and `DispatchRunnerModule` (`modules/dispatch/dispatch-runner.module.ts`) hosts the queue workers and the reconciler.

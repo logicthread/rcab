@@ -203,6 +203,29 @@ CREATE TABLE notification (
 CREATE INDEX ON notification (user_id, created_at DESC);
 ```
 
+### feedback and support_message (0021, RCAB-E8.S19)
+
+```sql
+CREATE TABLE feedback (
+  id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id    uuid NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
+  role       text NOT NULL CHECK (role IN ('client','driver')),
+  category   text NOT NULL CHECK (category IN ('bug','idea','compliment','other')),
+  message    text NOT NULL CHECK (char_length(message) BETWEEN 1 AND 2000),
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX feedback_user_idx ON feedback (user_id, created_at DESC);
+
+CREATE TABLE support_message (      -- the user's single support conversation, oldest first
+  id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id    uuid NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
+  sender     text NOT NULL CHECK (sender IN ('user','support')),
+  body       text NOT NULL CHECK (char_length(body) BETWEEN 1 AND 2000),
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX support_message_user_idx ON support_message (user_id, created_at);
+```
+
 ## Constraints worth noting
 
 - `app_user.role` is exclusive in Phase-0 — no compound (client+driver) accounts.

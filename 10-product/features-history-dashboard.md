@@ -12,6 +12,10 @@ audience: both
 
 *Past rides for clients; earnings + ratings + ride list for drivers.*
 
+## Shipped so far (RCAB-E8.S18)
+
+`GET /v1/rides` and the web `/history` page: the rider's recent rides, newest first, with date, fare and a readable status (empty and error states). Drivers get the same list of assigned trips in the driver app ("Trip history"). Rows show coordinates only (rides store no addresses yet); detail view, route preview, driver name, repeat-ride and the driver earnings dashboard remain below / E7.S3-S4.
+
 ## Client dashboard (Phase-0)
 
 - List of past rides (paginated, newest first).

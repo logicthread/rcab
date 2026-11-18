@@ -17,7 +17,7 @@ audience: both
 - Start dispatch **only** from durable outbox intents (never from in-memory events): `OutboxRelay` publishes `ride.dispatch.requested`, `ride.wake.schedule` and `pool.*` rows; `DispatchStartService` runs the first wave; `DispatchReconciler` re-arms anything that was committed but never started.
 - For an unmatched trip, find K nearest eligible drivers (via `geo`, active vehicle with enough seats) and persist one `dispatch_offer` row per driver (generation-stamped, DB-clock expiry, 12 s TTL).
 - Validate an accept authoritatively in **one Postgres transaction** (offer owner, expiry, generation, trip state, eligibility) and bind the trip; the `driver_active_assignment` guard allows at most one active trip (solo or shared) per driver.
-- Revoke the remaining offers when one wins; retry with wave 2 (K=10) at 30 s, hard-fail at 60 s.
+- Revoke the remaining offers when one wins; widen in waves: wave 2 at 30 s (5 km), wave 3 at 45 s (7 km), hard-fail at 60 s; K = 20 per wave (RCAB-E8.S22).
 - Scheduled rides use a longer accept window (see Scheduled below).
 
 ## Algorithm
@@ -32,17 +32,17 @@ See [[algo-top-k-dispatch]] for the full algorithm and parameters.
 - `DispatchService`
   - `dispatchSolo(rideId)` / `dispatchPool(rideId)` — wave runners; the `dispatch_offer` UNIQUE constraints skip already-offered drivers, timer job ids are deterministic per generation.
   - accept path (`ride_offer_response`) — single-transaction validation against the stored `dispatch_offer` row (the client `sharedRideId` is ignored). Replies with a `ride_offer_response` ack and emits `ride_offer_outcome` (`assigned` / `lost` / `expired` / `revoked` / `rejected`).
-  - `releaseDispatch(rideId)` — unwinds in-flight dispatch on cancel (`ride.cancelled`): revokes offers, removes wave-2/hard-fail jobs. Safe no-op when nothing is in flight.
+  - `releaseDispatch(rideId)` — unwinds in-flight dispatch on cancel (`ride.cancelled`): revokes offers, removes wave-2/wave-3/hard-fail jobs. Safe no-op when nothing is in flight.
 
 ## State
 
 - **Postgres is the source of truth**: `dispatch_offer`, `driver_active_assignment`, `outbox`, `rides`/`shared_rides` (see [[schema-postgres]]). Migration 0014 added offers + the guard (with a backfill and a `migration_conflict` inventory for pre-existing double assignments).
-- Redis holds only projections and timers: `driver:state:<id>.current_ride_id` (reconciled from Postgres at boot and periodically), the `active_drivers` geo index and `bull:dispatch:*` delayed jobs (`dispatch:wave2-timeout`, `dispatch:hard-fail`). The former `claim:ride:*`, `offer:*`, `ride:*:offered`, `pool:*:offered/stops` keys and the Lua claim scripts were **removed**.
+- Redis holds only projections and timers: `driver:state:<id>.current_ride_id` (reconciled from Postgres at boot and periodically), the `active_drivers` geo index and `bull:dispatch:*` delayed jobs (`dispatch:wave-timeout` for waves 2 and 3, `dispatch:hard-fail`). The former `claim:ride:*`, `offer:*`, `ride:*:offered`, `pool:*:offered/stops` keys and the Lua claim scripts were **removed**.
 
 ## Scheduled rides (E6 + Stage C)
 
 - Wake fires at T−10 min (`SCHEDULED_WAKE_LEAD_MS`) via a `ride.wake.schedule` outbox intent.
-- Accept window is **4 minutes** (`SCHEDULED_DISPATCH_WINDOW_MS=240000`); wave one is `SCHEDULED_DISPATCH_WAVE_ONE_MS` (default half the window). Normal rides keep 30 s / 60 s.
+- Accept window is **4 minutes** (`SCHEDULED_DISPATCH_WINDOW_MS=240000`); wave one is `SCHEDULED_DISPATCH_WAVE_ONE_MS` (default half the window). Normal rides keep 30 s / 45 s / 60 s (wave 3 sits halfway between wave 2 and the hard fail, for scheduled windows too).
 - An unanswered scheduled ride is re-armed with a new generation (no retry cap); the passenger is told once (`ride_dispatch_retry`) and never gets `no_driver` from the scheduled path.
 
 ## Failure modes
