@@ -17,6 +17,8 @@ export const Constraint = {
   AssignmentSoloTaken: 'driver_active_assignment_solo_ride_id_key',
   /** 23505 — the shared ride already has an assigned driver. */
   AssignmentSharedTaken: 'driver_active_assignment_shared_ride_id_key',
+  /** 23505 — the driver already has a queued next ride. */
+  QueuedDriverFull: 'driver_queued_assignment_pkey',
   /** 23505 — the driver already holds a live (state='offered') offer. */
   OfferDriverHasLiveOffer: 'dispatch_offer_one_live_per_driver_uq',
   /** 23505 — this driver was already offered this trip generation. */

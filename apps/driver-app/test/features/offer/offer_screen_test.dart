@@ -25,6 +25,8 @@ SoloRideOffer _offer() => SoloRideOffer.tryFromRideOfferJson({
       'dropoff': {'lat': 26.1805, 'lng': 91.7500},
       'fareCents': 25000,
       'waveNumber': 1,
+      'pickupDistanceM': 3240,
+      'pickupDurationS': 421,
     })!;
 
 void main() {
@@ -58,16 +60,19 @@ void main() {
     return (sender, container);
   }
 
-  testWidgets('renders fare, pickup, dropoff, countdown + Accept/Decline',
+  testWidgets('shows fare, distance and time (from the driver position) + countdown + Accept/Decline',
       (tester) async {
     await pump(tester);
     expect(find.byKey(const Key('offer_screen')), findsOneWidget);
     expect(find.byKey(const Key('offer_fare')), findsOneWidget);
     expect(find.text('₹250.00'), findsOneWidget);
+    expect(find.text('3.2 km'), findsOneWidget);
+    expect(find.text('8 min'), findsOneWidget);
     expect(find.byKey(const Key('offer_countdown')), findsOneWidget);
     expect(find.text('12s'), findsOneWidget);
-    expect(find.textContaining('Pickup'), findsOneWidget);
-    expect(find.textContaining('Dropoff'), findsOneWidget);
+    // No raw coordinates / wave any more.
+    expect(find.textContaining('26.1445'), findsNothing);
+    expect(find.textContaining('Wave'), findsNothing);
     expect(find.byKey(const Key('offer_accept_button')), findsOneWidget);
     expect(find.byKey(const Key('offer_decline_button')), findsOneWidget);
   });

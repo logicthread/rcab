@@ -82,6 +82,7 @@ export type DispatchOutcomeLabel =
   | 'pool_aborted'
   | 'scheduled_retry'
   | 'scheduled_no_driver'
+  | 'round_retry'
   | 'cancelled'
   | 'infra_failure';
 

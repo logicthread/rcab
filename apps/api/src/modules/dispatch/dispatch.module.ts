@@ -8,6 +8,7 @@ import { DispatchService, DISPATCH_QUEUE } from './dispatch.service';
 import { DispatchOfferRepository } from './offer.repository';
 import { DriverAssignmentRepository } from './assignment.repository';
 import { DriverAssignmentProjection } from './driver-assignment.projection';
+import { DriverEtaService } from './driver-eta.service';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { DriverAssignmentProjection } from './driver-assignment.projection';
     DispatchOfferRepository,
     DriverAssignmentRepository,
     DriverAssignmentProjection,
+    DriverEtaService,
   ],
   exports: [
     DispatchService,

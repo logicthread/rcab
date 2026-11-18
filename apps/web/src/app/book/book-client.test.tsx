@@ -96,7 +96,10 @@ function pickPreset(i: number) {
 beforeEach(() => {
   vi.clearAllMocks();
   window.localStorage.clear();
-  useBookingStore.getState().reset();
+  useBookingStore.getState().clearAll();
+  // The shared flow is switched off in the UI (default + toggle) but its page logic is kept:
+  // these suites drive it by setting the ride type directly.
+  useBookingStore.setState({ rideType: 'shared' });
   useAuthStore.setState({
     user: { id: 'u1', role: 'client', phone_e164: '+911234567890' },
     jwt: 'jwt',
@@ -637,8 +640,40 @@ describe('BookPage scheduled booking (RCAB-E8.S14)', () => {
     const call = createScheduledRide.mock.calls[0];
     expect(call[2]).toBe('q-s');
     expect(call[3]).toBe(when);
-    expect(await screen.findByTestId('tracking-status')).toHaveTextContent(/^Scheduled for /);
-    expect(window.localStorage.getItem('rcab_active_ride')).toBe('rs1');
+    // A future ride does not block the form: confirmation shown, same route kept, no tracking view.
+    expect(await screen.findByTestId('scheduled-notice')).toHaveTextContent(/Ride scheduled for /);
+    expect(screen.queryByTestId('tracking-status')).not.toBeInTheDocument();
+    expect(window.localStorage.getItem('rcab_active_ride')).toBeNull();
+    expect(useBookingStore.getState().pickup).toEqual(PRESET_TRIPS[0].pickup);
+    expect(useBookingStore.getState().dropoff).toEqual(PRESET_TRIPS[0].dropoff);
+    expect(useBookingStore.getState().scheduledFor).toBeNull();
+
+    // ...and an immediate ride can be booked right after.
+    createNormalRide.mockResolvedValueOnce(rideResp());
+    await waitFor(() => expect(screen.getByTestId('submit-private')).toBeEnabled());
+    expect(screen.getByTestId('submit-private')).toHaveTextContent('Book');
+    fireEvent.click(screen.getByTestId('submit-private'));
+    await waitFor(() => expect(createNormalRide).toHaveBeenCalledTimes(1));
+  });
+
+  it('Book stays disabled until both pickup and drop are chosen; Share cannot be selected', async () => {
+    useBookingStore.setState({ rideType: 'private' });
+    fetchQuote.mockResolvedValue(quote('q-x'));
+    render(<BookClient />);
+    expect(screen.getByTestId('submit-private')).toBeDisabled();
+    expect(screen.getByRole('radio', { name: 'Share' })).toBeDisabled();
+    // A leftover quote with only one endpoint set must not enable Book.
+    act(() => {
+      useBookingStore.setState({
+        pickup: PRESET_TRIPS[0].pickup,
+        dropoff: null,
+        quote: quote('stale'),
+        stage: 'quoted',
+      });
+    });
+    expect(screen.getByTestId('submit-private')).toBeDisabled();
+    pickPreset(0);
+    await waitFor(() => expect(screen.getByTestId('submit-private')).toBeEnabled());
   });
 
   it('a time outside the window is rejected locally without calling the API', async () => {

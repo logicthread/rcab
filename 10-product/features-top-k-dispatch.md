@@ -26,7 +26,9 @@ In tier-2/3 cities a single "nearest" driver is often slow to respond (different
 | K (wave 2, +30s) | 10 |
 | Max radius | 4 km |
 | Per-driver offer TTL | 12 s |
-| Hard fail after | 60 s |
+| Hard fail after | 60 s per round, 3 rounds (normal rides) |
+| Booking hold before first offers | 5 s |
+| Busy driver offered a next ride within | 10 min of ending the current ride |
 
 ## See also
 - [[algo-top-k-dispatch]] · [[module-dispatch]]

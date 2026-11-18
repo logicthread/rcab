@@ -223,6 +223,8 @@ export interface RideOfferOutcomePayload {
   generation?: number;
   reason?: string;
   assignment?: DriverAssignmentView | null;
+  /** The accepted ride was queued behind the driver's active ride (not their active trip yet). */
+  queued?: boolean;
 }
 
 /** Map an accept refusal reason to the outcome the driver UI shows. */

@@ -259,4 +259,32 @@ export class DispatchOfferRepository {
        ORDER BY c.ord`);
     return res.rows.map((r) => r.id);
   }
+
+  /**
+   * Drivers who are busy but may be offered ONE next ride: their active trip is a
+   * solo ride that is `in_progress`, nothing is queued behind it, and they hold no
+   * live offer. Returns the drop-off of that active ride so the caller can judge
+   * the road ETA to its end. Same account / vehicle filters as `eligibleCandidates`.
+   */
+  async queueableCandidates(
+    db: DbExecutor,
+    candidateIds: string[],
+  ): Promise<Array<{ id: string; dropLat: number; dropLng: number }>> {
+    const ids = [...new Set(candidateIds.filter(isUuid))];
+    if (ids.length === 0) return [];
+    const res = await db.execute<{ id: string; dest_lat: number | string; dest_lng: number | string }>(sql`
+      SELECT c.id::text AS id, r.dest_lat, r.dest_lng
+        FROM unnest(${uuidArray(ids)}::uuid[]) WITH ORDINALITY AS c(id, ord)
+        JOIN app_user u ON u.id = c.id AND u.status = 'active' AND u.role = 'driver'
+        JOIN driver d ON d.user_id = c.id
+        JOIN driver_active_assignment a ON a.driver_id = c.id AND a.solo_ride_id IS NOT NULL
+        JOIN rides r ON r.id = a.solo_ride_id AND r.status = 'in_progress'
+       WHERE NOT EXISTS (SELECT 1 FROM driver_queued_assignment q WHERE q.driver_id = c.id)
+         AND NOT EXISTS (SELECT 1 FROM dispatch_offer o
+                          WHERE o.driver_id = c.id AND o.state = 'offered'
+                            AND o.expires_at > clock_timestamp())
+         AND EXISTS (SELECT 1 FROM vehicle v WHERE v.driver_id = c.id AND v.active AND v.seats >= 1)
+       ORDER BY c.ord`);
+    return res.rows.map((r) => ({ id: r.id, dropLat: Number(r.dest_lat), dropLng: Number(r.dest_lng) }));
+  }
 }

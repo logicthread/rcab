@@ -3,7 +3,7 @@ import { useBookingStore } from './store';
 import { PRESET_TRIPS, type Place, type QuoteResponse } from './types';
 
 function reset() {
-  useBookingStore.getState().reset();
+  useBookingStore.getState().clearAll();
 }
 
 const PICKUP: Place = { lat: 26.175, lng: 91.751, label: 'Paltan Bazaar' };
@@ -30,9 +30,9 @@ function quoteFixture(): QuoteResponse {
 describe('useBookingStore', () => {
   beforeEach(reset);
 
-  it('defaults to rideType=shared, no points, active=pickup', () => {
+  it('defaults to rideType=private (shared is switched off), no points, active=pickup', () => {
     const s = useBookingStore.getState();
-    expect(s.rideType).toBe('shared');
+    expect(s.rideType).toBe('private');
     expect(s.pickup).toBeNull();
     expect(s.dropoff).toBeNull();
     expect(s.activeField).toBe('pickup');
@@ -41,9 +41,9 @@ describe('useBookingStore', () => {
 
   it('setRideType clears stale quote and resets stage', () => {
     useBookingStore.setState({ quote: quoteFixture(), stage: 'quoted' });
-    useBookingStore.getState().setRideType('private');
+    useBookingStore.getState().setRideType('shared');
     const s = useBookingStore.getState();
-    expect(s.rideType).toBe('private');
+    expect(s.rideType).toBe('shared');
     expect(s.quote).toBeNull();
     expect(s.stage).toBe('idle');
   });
@@ -181,17 +181,25 @@ describe('useBookingStore', () => {
     expect(st().quoteEpoch).toBe(e);
   });
 
-  it('reset returns the store to initial values', () => {
+  it('reset returns to a fresh booking but keeps the chosen pickup and drop', () => {
     useBookingStore.getState().setOpened('ride-1', 1, 'open');
     useBookingStore.getState().setRideType('private');
     useBookingStore.getState().applyPreset(PRESET_TRIPS[0]);
     useBookingStore.getState().reset();
     const s = useBookingStore.getState();
-    expect(s.rideType).toBe('shared');
-    expect(s.pickup).toBeNull();
-    expect(s.dropoff).toBeNull();
+    expect(s.rideType).toBe('private');
+    expect(s.pickup).toEqual(PRESET_TRIPS[0].pickup);
+    expect(s.dropoff).toEqual(PRESET_TRIPS[0].dropoff);
     expect(s.sharedRideId).toBeNull();
     expect(s.stage).toBe('idle');
+  });
+
+  it('clearAll forgets the route too (sign-out)', () => {
+    useBookingStore.getState().applyPreset(PRESET_TRIPS[0]);
+    useBookingStore.getState().clearAll();
+    const s = useBookingStore.getState();
+    expect(s.pickup).toBeNull();
+    expect(s.dropoff).toBeNull();
   });
 
   // ── Solo live-tracking (RCAB-E4.S7) ──────────────────────────────────────────

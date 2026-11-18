@@ -27,6 +27,11 @@ export interface SoloRideOfferPayload {
   dropoff: { lat: number; lng: number };
   fareCents: number;
   waveNumber: number;
+  /** Road distance / time from the driver's current position to the pickup. */
+  pickupDistanceM?: number;
+  pickupDurationS?: number;
+  /** Offered to a driver still finishing a ride: accepting queues this ride behind it. */
+  nextRide?: boolean;
 }
 
 /** A trip in either table. The offer row — never the client — names it (F05). */
@@ -60,7 +65,8 @@ export type AcceptOfferFailure =
   | 'conflict';
 
 export type AcceptOfferResult =
-  | { ok: true; trip: TripRef; generation: number; replay: boolean }
+  /** `queued`: accepted as the driver's NEXT ride while they finish their active one. */
+  | { ok: true; trip: TripRef; generation: number; replay: boolean; queued?: boolean }
   | { ok: false; reason: AcceptOfferFailure };
 
 export type DeclineOfferResult = 'declined' | 'not_found' | 'not_live';
