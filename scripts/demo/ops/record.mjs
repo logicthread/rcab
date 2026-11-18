@@ -57,7 +57,7 @@ ${blocks.join('\n\n')}
 
 - **Traffic is synthetic.** Dashboards are fed by \`infra/load/workload.js\` (k6) with fixture identities from
   \`infra/load/prepare-dev.mjs\` (dev-only signed tokens; refuses non-loopback / production). The simulated drivers and riders are
-  parked in Guwahati **Area C** (${A.C.lat}, ${A.C.lng}), more than \`dispatch.r2Meters\` (4 km, [docs/POLICY.md](../../../POLICY.md)) from
+  parked in Guwahati **Area C** (${A.C.lat}, ${A.C.lng}), more than \`dispatch.r2Meters\` (5 km, [docs/POLICY.md](../../../POLICY.md)) from
   Area A (${A.A.lat}, ${A.A.lng}) and Area B (${A.B.lat}, ${A.B.lng}) where the app demos run, so load never steals or receives real demo offers.
   Override the centre for the loader with \`LOAD_BASE_LAT\` / \`LOAD_BASE_LNG\`.
 - **Dev-only credentials** (never reuse): Grafana \`admin\` / \`admin\` (\`docker-compose.dev.yml\`); throwaway Uptime Kuma for M04 \`admin\` / \`admin1234!\`

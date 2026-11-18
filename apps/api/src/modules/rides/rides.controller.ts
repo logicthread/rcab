@@ -3,6 +3,7 @@ import {
   Post,
   Get,
   Param,
+  Query,
   Body,
   Headers,
   HttpCode,
@@ -10,6 +11,7 @@ import {
   ConflictException,
   NotImplementedException,
   NotFoundException,
+  UnprocessableEntityException,
   Logger,
   UseGuards,
   Req,
@@ -28,6 +30,7 @@ import type { Money } from '../pricing/money';
 import { SHARED_FARE_POLICY, type SharedFarePolicy } from '../pricing/shared-fare-policy';
 import { CreateRideDto, RideType } from './dto/create-ride.dto';
 import { QuoteRideDto } from './dto/quote-ride.dto';
+import { SnapQueryDto } from './dto/snap-query.dto';
 import { TransitionRideDto } from './dto/transition-ride.dto';
 import { CancelRideDto } from './dto/cancel-ride.dto';
 import { QuoteTokenService, type QuoteClaims } from './quote-token.service';
@@ -103,6 +106,33 @@ export interface QuoteResponse {
     detourFactor: number;
     seatCount: number;
   };
+}
+
+const SNAP_MAX_METERS = getPolicy().rides.snapMaxMeters;
+
+/** `distanceM` is how far the point moved to reach the road (0 when it was already on one). */
+export interface SnapResponse {
+  lat: number;
+  lng: number;
+  distanceM: number;
+}
+
+const RIDE_HISTORY_DEFAULT = 20;
+const RIDE_HISTORY_MAX = 50;
+
+export interface RideHistoryItem {
+  rideId: string;
+  status: string;
+  type: string;
+  fare: Money;
+  origin: { lat: number; lng: number };
+  dropoff: { lat: number; lng: number };
+  scheduledFor: string | null;
+  createdAt: string;
+}
+
+export interface RideHistoryResponse {
+  rides: RideHistoryItem[];
 }
 
 export interface RideDetailResponse {
@@ -603,6 +633,56 @@ export class RidesController {
       });
     }
     return claims;
+  }
+
+  /** The signed-in user's recent rides, newest first: a rider's bookings, or a driver's assigned trips. */
+  @Get()
+  async listMyRides(
+    @Req() req: Request & { user: JwtPayload },
+    @Query('limit') limitParam?: string,
+  ): Promise<RideHistoryResponse> {
+    const parsed = Number.parseInt(limitParam ?? '', 10);
+    const limit = Number.isFinite(parsed)
+      ? Math.min(Math.max(parsed, 1), RIDE_HISTORY_MAX)
+      : RIDE_HISTORY_DEFAULT;
+    const items =
+      req.user.role === 'driver'
+        ? await this.ridesRepo.findRecentByDriver(req.user.sub, limit)
+        : await this.ridesRepo.findRecentByPassenger(req.user.sub, limit);
+    return {
+      rides: items.map(({ row, createdAt }) => ({
+        rideId: row.id,
+        status: row.status,
+        type: row.type,
+        fare: { amount: row.fareCents, currency: 'INR' },
+        origin: { lat: row.originLat, lng: row.originLng },
+        dropoff: { lat: row.destLat, lng: row.destLng },
+        scheduledFor: row.scheduledFor?.toISOString() ?? null,
+        createdAt: createdAt.toISOString(),
+      })),
+    };
+  }
+
+  /**
+   * Snap a point to the nearest drivable road. The web client calls this for every
+   * pickup / drop-off before quoting, so the marker the rider sees, the quote token
+   * and the driver's navigation all use the same on-road coordinate. A point with no
+   * road within `rides.snapMaxMeters` is refused (422 no_road_nearby).
+   */
+  @Get('snap')
+  async snap(@Query() q: SnapQueryDto): Promise<SnapResponse> {
+    const road = await this.routeSim.nearestRoad(q.lat, q.lng);
+    if (!road || road.distanceM > SNAP_MAX_METERS) {
+      throw new UnprocessableEntityException({
+        code: 'no_road_nearby',
+        message: 'No road close enough to that spot. Pick a point nearer a road.',
+      });
+    }
+    return {
+      lat: Number(road.lat.toFixed(6)),
+      lng: Number(road.lng.toFixed(6)),
+      distanceM: Math.round(road.distanceM),
+    };
   }
 
   @Get(':id/stops')

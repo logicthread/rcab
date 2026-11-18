@@ -4,7 +4,7 @@ import { describe, it, expect, vi } from 'vitest';
 const { rearm } = vi.hoisted(() => ({ rearm: vi.fn() }));
 vi.mock('../scheduled/scheduled-retry', () => ({ rearmScheduledRide: rearm }));
 import { DispatchReconciler } from './dispatch-reconciler.service';
-import { dispatchStartJobId, hardFailJobId } from './outbox.jobs';
+import { dispatchStartJobId, hardFailJobId, wave2JobId, wave3JobId } from './outbox.jobs';
 
 const TRIP = '6f1c1a8e-8f3b-4d7a-9a52-0d5d4c1e2b3a';
 
@@ -65,6 +65,51 @@ describe('DispatchReconciler.reconcileDispatching — no offers yet', () => {
     await run();
     expect(hardFail.remove).not.toHaveBeenCalled();
     expect(outbox.rearm).not.toHaveBeenCalled();
+  });
+});
+
+describe('DispatchReconciler.reconcileDispatching — lost wave timers', () => {
+  it('restores the wave-2 and wave-3 timers with the delay that remains since wave 1 offered', async () => {
+    const wave1At = new Date(Date.now() - 10_000);
+    const { run, dispatchQueue, report } = make(
+      { count: 2, first: wave1At },
+      { [hardFailJobId(TRIP, 1)]: job('delayed') },
+    );
+    await run();
+    const added = dispatchQueue.add.mock.calls.map(([, data, opts]) => ({
+      wave: (data as { waveNumber: number }).waveNumber,
+      jobId: (opts as { jobId: string }).jobId,
+      delay: (opts as { delay: number }).delay,
+    }));
+    expect(added).toHaveLength(2);
+    // Wave 2 at +30 s and wave 3 at +45 s after wave 1, minus the 10 s already elapsed.
+    expect(added[0]).toMatchObject({ wave: 2, jobId: wave2JobId(TRIP, 1) });
+    expect(added[0].delay).toBeGreaterThan(19_000);
+    expect(added[0].delay).toBeLessThanOrEqual(20_000);
+    expect(added[1]).toMatchObject({ wave: 3, jobId: wave3JobId(TRIP, 1) });
+    expect(added[1].delay).toBeGreaterThan(34_000);
+    expect(added[1].delay).toBeLessThanOrEqual(35_000);
+    expect(report.timersRestored).toBe(2);
+  });
+
+  it('skips a wave-3 timer that is still live, and one whose time has passed', async () => {
+    const live = make(
+      { count: 2, first: new Date(Date.now() - 10_000) },
+      {
+        [hardFailJobId(TRIP, 1)]: job('delayed'),
+        [wave2JobId(TRIP, 1)]: job('delayed'),
+        [wave3JobId(TRIP, 1)]: job('delayed'),
+      },
+    );
+    await live.run();
+    expect(live.dispatchQueue.add).not.toHaveBeenCalled();
+
+    const late = make(
+      { count: 2, first: new Date(Date.now() - 50_000) },
+      { [hardFailJobId(TRIP, 1)]: job('delayed') },
+    );
+    await late.run();
+    expect(late.dispatchQueue.add).not.toHaveBeenCalled();
   });
 });
 

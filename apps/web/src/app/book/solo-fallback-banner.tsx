@@ -18,18 +18,10 @@ export function SoloFallbackBanner({ soloFare }: Props) {
       role="status"
       aria-live="polite"
       data-testid="solo-fallback-banner"
-      style={{
-        marginTop: 12,
-        padding: '12px 14px',
-        background: '#fef3c7',
-        border: '1px solid #f59e0b',
-        borderRadius: 8,
-        color: '#78350f',
-        fontSize: 14,
-      }}
+      className="mt-3 rounded-control border border-amber bg-amber-wash px-3.5 py-3 text-sm text-amber-deep"
     >
-      <div style={{ fontWeight: 600 }}>No co-rider found — continuing as private</div>
-      <div style={{ marginTop: 4 }}>Updated fare: {formatMoney(soloFare)}</div>
+      <div className="font-semibold">No co-rider found — continuing as private</div>
+      <div className="mt-1">Updated fare: {formatMoney(soloFare)}</div>
     </div>
   );
 }

@@ -22,13 +22,16 @@ In tier-2/3 cities a single "nearest" driver is often slow to respond (different
 
 | Parameter | Value |
 |---|---|
-| K (initial wave) | 5 |
-| K (wave 2, +30s) | 10 |
-| Max radius | 4 km |
+| Drivers offered per wave (K) | 20 |
+| Wave 1 (start) radius | 3 km |
+| Wave 2 (+30 s) radius | 5 km |
+| Wave 3 (+45 s) radius = max | 7 km |
 | Per-driver offer TTL | 12 s |
 | Hard fail after | 60 s per round, 3 rounds (normal rides) |
 | Booking hold before first offers | 5 s |
 | Busy driver offered a next ride within | 10 min of ending the current ride |
+
+Owner decision 2026-11-18 ([[story-rcab-e8-s23-dispatch-three-waves]]): three widening waves instead of two, 20 drivers each. Values live in the policy table (`docs/POLICY.md`).
 
 ## See also
 - [[algo-top-k-dispatch]] · [[module-dispatch]]

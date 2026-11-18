@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../../core/auth/auth_state.dart';
 import '../../core/driver/driver_state.dart';
 import '../../di/providers.dart';
+import '../account/account_api.dart';
 import 'models/vehicle.dart';
 
 class ProfileScreen extends ConsumerWidget {
@@ -23,13 +24,14 @@ class ProfileScreen extends ConsumerWidget {
             key: const Key('sign_out_button'),
             icon: const Icon(Icons.logout),
             tooltip: 'Sign out',
-            onPressed: () => _confirmSignOut(context, ref),
+            onPressed: () => confirmSignOut(context, ref),
           ),
         ],
       ),
       body: Column(
         children: [
           const _AccountTile(),
+          const _StatsTile(),
           Expanded(
             child: vehiclesAsync.when(
               loading: () => const Center(child: CircularProgressIndicator()),
@@ -70,10 +72,73 @@ class _AccountTile extends ConsumerWidget {
   }
 }
 
+/// Display name, rating and trip count from GET /v1/me. Shows nothing while
+/// loading or if the profile cannot be read, so the screen never blocks on it.
+class _StatsTile extends ConsumerWidget {
+  const _StatsTile();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final profile = ref.watch(driverProfileProvider).valueOrNull;
+    if (profile == null) return const SizedBox.shrink();
+    final rating = profile.ratingAvg == null
+        ? 'No ratings yet'
+        : '★ ${profile.ratingAvg!.toStringAsFixed(1)} (${profile.ratingCount})';
+    return ListTile(
+      key: const Key('stats_tile'),
+      leading: const Icon(Icons.badge_outlined),
+      title: Text(profile.displayName ?? 'Add your name', key: const Key('profile_name')),
+      subtitle: Text('$rating  ·  ${profile.totalRides} trips'),
+      trailing: IconButton(
+        key: const Key('edit_name_button'),
+        icon: const Icon(Icons.edit_outlined),
+        tooltip: 'Edit name',
+        onPressed: () => _editName(context, ref, profile.displayName),
+      ),
+    );
+  }
+
+  Future<void> _editName(BuildContext context, WidgetRef ref, String? current) async {
+    final controller = TextEditingController(text: current ?? '');
+    final name = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Your name'),
+        content: TextField(
+          key: const Key('name_field'),
+          controller: controller,
+          maxLength: 80,
+          autofocus: true,
+          decoration: const InputDecoration(hintText: 'Name riders will see'),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          FilledButton(
+            key: const Key('name_save'),
+            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (name == null || name.isEmpty || name == current) return;
+    try {
+      await ref.read(accountApiProvider).updateName(name);
+      ref.invalidate(driverProfileProvider);
+    } catch (_) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('Could not save your name. Try again.')));
+      }
+    }
+  }
+}
+
 /// Sign out (RCAB-E8.S14): the app had no way to end a session. Goes offline
 /// first (best effort), then `AuthNotifier.signOut` revokes the refresh token
 /// server-side and clears secure storage; the router returns to /sign-in.
-Future<void> _confirmSignOut(BuildContext context, WidgetRef ref) async {
+Future<void> confirmSignOut(BuildContext context, WidgetRef ref) async {
   final ok = await showDialog<bool>(
     context: context,
     builder: (ctx) => AlertDialog(

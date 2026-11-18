@@ -60,7 +60,7 @@ what is on screen. Related reading: [80-infrastructure/observability.md](../../.
 
 - **Traffic is synthetic.** Dashboards are fed by `infra/load/workload.js` (k6) with fixture identities from
   `infra/load/prepare-dev.mjs` (dev-only signed tokens; refuses non-loopback / production). The simulated drivers and riders are
-  parked in Guwahati **Area C** (26.115, 91.7), more than `dispatch.r2Meters` (4 km, [docs/POLICY.md](../../../POLICY.md)) from
+  parked in Guwahati **Area C** (26.115, 91.7), more than `dispatch.r2Meters` (5 km, [docs/POLICY.md](../../../POLICY.md)) from
   Area A (26.1445, 91.7362) and Area B (26.18, 91.79) where the app demos run, so load never steals or receives real demo offers.
   Override the centre for the loader with `LOAD_BASE_LAT` / `LOAD_BASE_LNG`.
 - **Dev-only credentials** (never reuse): Grafana `admin` / `admin` (`docker-compose.dev.yml`); throwaway Uptime Kuma for M04 `admin` / `admin1234!`

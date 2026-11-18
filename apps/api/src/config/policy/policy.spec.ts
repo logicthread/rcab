@@ -39,10 +39,12 @@ describe('policy schema', () => {
       osrmTimeoutMs: 3000,
     });
     expect(p.dispatch).toEqual({
-      k1: 5,
-      k2: 10,
-      r1Meters: 2000,
-      r2Meters: 4000,
+      k1: 20,
+      k2: 20,
+      k3: 20,
+      r1Meters: 3000,
+      r2Meters: 5000,
+      r3Meters: 7000,
       offerTtlMs: 12_000,
       waveOneTimeoutMs: 30_000,
       hardFailMs: 60_000,
@@ -273,7 +275,7 @@ describe('buildPolicy — cross-field rules', () => {
   it.each([
     [{ SCHEDULED_DISPATCH_WINDOW_MS: '1000', SCHEDULED_DISPATCH_WAVE_ONE_MS: '1001' }, /waveOneMs ≤ windowMs/],
     [{ SCHEDULED_MIN_LEAD_MS: '86400000' }, /minLeadMs < maxLeadMs/],
-    [{ DISPATCH_R1_METERS: '5000' }, /r1Meters ≤ r2Meters/],
+    [{ DISPATCH_R1_METERS: '6000' }, /r1Meters ≤ r2Meters/],
     [{ DISPATCH_WAVE_ONE_TIMEOUT_MS: '60000' }, /waveOneTimeoutMs < hardFailMs/],
     [{ SEAT_MULTIPLIER_3: '0.8' }, /seatMultiplier3 ≤ seatMultiplier2/],
     [{ SHARED_QUOTE_SEATS: '4' }, /sharedQuoteSeats ≤ maxSeats/],

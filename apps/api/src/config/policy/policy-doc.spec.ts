@@ -90,7 +90,7 @@ describe('compareGenerated (the policy:doc:check core)', () => {
   });
   it('detects a hand edit of a default in the rendered doc', () => {
     const doc = renderPolicyDoc(NO_CLIENTS);
-    const edited = doc.replace('| `DISPATCH_K1` | 5 |', '| `DISPATCH_K1` | 6 |');
+    const edited = doc.replace('| `DISPATCH_K1` | 20 |', '| `DISPATCH_K1` | 21 |');
     expect(edited).not.toBe(doc);
     expect(compareGenerated('docs/POLICY.md', doc, edited)).toMatch(/stale at line \d+/);
   });

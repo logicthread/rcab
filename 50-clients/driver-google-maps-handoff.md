@@ -25,6 +25,10 @@ google.navigation:q=<lat>,<lng>&mode=d
 - `mode=d` for driving. (Bikes/autos: still `d` — the modes Google supports don't map to autos.)
 - Open via `url_launcher` with `LaunchMode.externalApplication`.
 
+## What the destination means (measured 2026-11-18, RCAB-E8.S22)
+
+The app sends the ride's exact coordinate. Google Maps puts its destination pin exactly there but ends the **route** on the nearest road it can drive to, so a point off the road shows a gap between the pin and where navigation finishes. Walking the flow on the emulator: the preset pickup (26.175, 91.751) is 20 m from a road, the drop-off (26.167, 91.7898) is 169 m (inside a park) and Google ended its route at the park's edge. There is **no fixed OSM-to-Google offset** to add; the gap is simply the distance from the point to the road. The fix is upstream: the web client snaps pickup and drop-off to the road at booking (`GET /v1/rides/snap`), so the coordinate handed to Google is already on a road and needs no further adjustment here.
+
 ## Fallback
 
 If Google Maps isn't installed (rare in India):

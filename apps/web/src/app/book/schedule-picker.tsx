@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { clsx } from 'clsx';
 import { WEB_POLICY } from '../../config/policy';
 import {
   defaultScheduleTime,
@@ -37,7 +38,11 @@ export function SchedulePicker({ value, onChange, disabled }: Props) {
 
   return (
     <div data-testid="schedule-picker">
-      <div role="radiogroup" aria-label="Pickup time" style={{ display: 'flex', gap: 8 }}>
+      <div
+        role="radiogroup"
+        aria-label="Pickup time"
+        className="inline-flex gap-1 rounded-panel border border-line bg-surface p-1"
+      >
         {[
           { id: 'now', label: 'Now', selected: !later },
           { id: 'later', label: 'Later', selected: later },
@@ -51,24 +56,18 @@ export function SchedulePicker({ value, onChange, disabled }: Props) {
             data-testid={`schedule-${opt.id}`}
             disabled={disabled}
             onClick={() => choose(opt.id === 'later')}
-            style={{
-              padding: '8px 16px',
-              borderRadius: 6,
-              border: '1px solid #d4d4d4',
-              background: opt.selected ? '#111' : '#fafafa',
-              color: opt.selected ? '#fff' : '#111',
-              cursor: disabled ? 'not-allowed' : 'pointer',
-              fontWeight: 600,
-              opacity: disabled ? 0.5 : 1,
-            }}
+            className={clsx(
+              'min-h-tap min-w-[88px] rounded-[12px] px-5 font-semibold transition-colors duration-150 disabled:opacity-50',
+              opt.selected ? 'bg-ink text-on-ink' : 'text-ink hover:bg-paper',
+            )}
           >
             {opt.label}
           </button>
         ))}
       </div>
       {later && (
-        <div style={{ marginTop: 8 }}>
-          <label style={{ fontSize: 12, color: '#525252', display: 'block', marginBottom: 4 }}>
+        <div className="mt-3">
+          <label className="block text-sm font-medium text-ink">
             Pickup date and time
             <input
               type="datetime-local"
@@ -78,14 +77,14 @@ export function SchedulePicker({ value, onChange, disabled }: Props) {
               max={bounds?.max}
               disabled={disabled}
               onChange={(e) => onChange(fromLocalInputValue(e.target.value) ?? value)}
-              style={{ display: 'block', marginTop: 4, fontSize: 14, padding: 6 }}
+              className="mt-1 block min-h-tap w-full rounded-control border border-line-strong bg-surface px-3 text-base"
             />
           </label>
-          <div style={{ fontSize: 12, color: '#737373' }}>
+          <p className="mt-2 text-sm text-muted">
             We start looking for a driver about {Math.round(WEB_POLICY.booking.scheduleWakeLeadMs / 60_000)} minutes before pickup. You can cancel until the trip starts.
-          </div>
+          </p>
           {error && (
-            <div data-testid="schedule-error" style={{ marginTop: 4, fontSize: 12, color: '#b91c1c' }}>
+            <div data-testid="schedule-error" className="mt-1 text-sm font-medium text-stop">
               {error}
             </div>
           )}

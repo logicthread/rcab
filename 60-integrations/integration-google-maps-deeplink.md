@@ -20,6 +20,10 @@ google.navigation:q=<lat>,<lng>&mode=d
 
 Open with `url_launcher` (`LaunchMode.externalApplication`). No API key, no quota.
 
+## What the coordinate does
+
+Google pins the destination at the exact coordinate and routes to the nearest drivable point; an off-road coordinate leaves a visible gap (169 m for the Zoo Road preset). Hand it an on-road coordinate: pickup and drop-off are snapped at booking ([[story-rcab-e8-s22-snap-pickup-dropoff-to-road]]).
+
 ## What this means legally
 
 - We're not embedding Google Maps. We're opening the user's own installed Google Maps app with a destination.

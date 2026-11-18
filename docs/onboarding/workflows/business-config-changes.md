@@ -32,7 +32,7 @@ Categories in the table: `pricing`, `dispatch`, `scheduled`, `matching`, `rides`
 3. A default can be **derived** from earlier knobs (`{label, compute}`), e.g. `scheduled.dispatchWaveOneMs` defaults
    to half of `scheduled.dispatchWindowMs`. The derived default recomputes if you override its source.
 4. Every cross-field rule in `POLICY_RULES` is checked. Today's ten rules include: wave 2 before hard fail
-   (`dispatch.waveOneTimeoutMs < hardFailMs`); `r1Meters <= r2Meters`; scheduled `waveOneMs <= windowMs`;
+   (`dispatch.waveOneTimeoutMs < hardFailMs`); `r1Meters <= r2Meters <= r3Meters`; scheduled `waveOneMs <= windowMs`;
    `minLeadMs < maxLeadMs`; a fuller pool is never dearer (`seatMultiplier3 <= seatMultiplier2`);
    `sharedQuoteSeats <= matching.maxSeats`; the auto-offline sweep is a whole-seconds divisor of 60;
    `realtime.geoIndexGateMs < drivers.staleAfterMs`; `perfBudget.apiP95Ms <= apiP99Ms`; access TTL < refresh TTL.
@@ -80,7 +80,7 @@ Do not put secrets handling changes in this flow: that is a HITL area (`80-infra
 | Ask | Knob(s) (env var) | Notes |
 |---|---|---|
 | Offers time out too fast | `dispatch.offerTtlMs` (`DISPATCH_OFFER_TTL_MS`, 12 s) | The driver app counts down from the `ttlMs` the server sends; the server DB clock is authoritative. |
-| Search wider / longer | `dispatch.k1/k2`, `r1Meters/r2Meters` (2 km / 4 km), `waveOneTimeoutMs` (30 s), `hardFailMs` (60 s) | `waveOneTimeoutMs < hardFailMs` is enforced. |
+| Search wider / longer | `dispatch.k1/k2/k3`, `r1Meters/r2Meters/r3Meters` (3 / 5 / 7 km), `waveOneTimeoutMs` (30 s), `hardFailMs` (60 s) | `waveOneTimeoutMs < hardFailMs` is enforced. |
 | Scheduled booking window | `scheduled.minLeadMs` 15 min, `maxLeadMs` 24 h, `wakeLeadMs` 10 min, `dispatchWindowMs` 4 min, `retryCutoffAfterPickupMs` 30 min | The cutoff decides when a never-answered scheduled ride finally ends as `no_driver`. |
 | Fares | `pricing.fareBaseCents/PerKm/PerMin`, `seatMultiplier2/3`, `platformCommissionRate`, `quoteTtlMs` | Money is integer paise; the shared fare is `fixed_at_join` (stand-in policy, migration 0017). |
 | Pool size / patience | `matching.maxSeats` 3, `poolTimeoutMs` 60 s, `prefilterRadiusM`, `detourBudgetM`, `similarityThreshold`, `joinPriceRetries` | |

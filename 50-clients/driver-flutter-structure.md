@@ -18,7 +18,7 @@ audience: both
 apps/driver-app/
   lib/
     main.dart
-    app.dart                 # Root widget, theming, router
+    app.dart                 # Root widget, theme + dark theme + themeMode, router
     core/
       api/                   # generated client (OpenAPI or hand-written)
       auth/                  # token store, refresh interceptor
@@ -26,6 +26,7 @@ apps/driver-app/
       location/              # background service wrapper
       fcm/                   # token registration, handlers
       logger/
+      theme/                 # app_theme.dart: ink/amber palette, buildTheme(light|dark), ThemeModeNotifier (shared_preferences)
     features/
       auth/                  # phone OTP via Firebase (E.164 input → verifyPhoneNumber → exchange)
       home/                  # online toggle, dashboard summary
@@ -33,6 +34,11 @@ apps/driver-app/
       ride/                  # active ride screen
       earnings/              # dashboard
       profile/
+      menu/                  # AppDrawer (side menu)
+      history/               # trip history
+      feedback/              # feedback form
+      help/                  # support chat
+      account/               # account_api.dart: /v1/me, /v1/rides, /v1/feedback, /v1/support/messages
       shared/                # common widgets
     routing/
       app_router.dart        # go_router

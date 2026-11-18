@@ -48,6 +48,8 @@ import { rearmScheduledRide, type ScheduledRetryOptions } from '../scheduled/sch
 import { scheduledWindowFromPolicy, type ScheduledDispatchWindow } from '../scheduled/scheduled-window';
 import {
   wave2JobId as waveTwoJobId,
+  wave3JobId as waveThreeJobId,
+  waveThreeDelayMs,
   hardFailJobId,
   legacyWave2JobId as legacyWaveTwoJobId,
   legacyHardFailJobId,
@@ -89,16 +91,22 @@ export interface HardFailJob {
 // dispatch-side names.
 export {
   wave2JobId as waveTwoJobId,
+  wave3JobId as waveThreeJobId,
   hardFailJobId,
   legacyWave2JobId as legacyWaveTwoJobId,
   legacyHardFailJobId,
 } from '../outbox/outbox.jobs';
 
+/** Dispatch widens in up to three waves; each runs once per trip generation. */
+export type WaveNumber = 1 | 2 | 3;
+
 interface DispatchParams {
   k1: number;
   k2: number;
+  k3: number;
   r1Meters: number;
   r2Meters: number;
+  r3Meters: number;
   waveOneTimeoutMs: number;
   hardFailMs: number;
   /** Live offer lifetime. The authoritative deadline is `dispatch_offer.expires_at`. */
@@ -154,8 +162,10 @@ export class DispatchService {
     this.params = {
       k1: d.k1,
       k2: d.k2,
+      k3: d.k3,
       r1Meters: d.r1Meters,
       r2Meters: d.r2Meters,
+      r3Meters: d.r3Meters,
       waveOneTimeoutMs: d.waveOneTimeoutMs,
       hardFailMs: d.hardFailMs,
       offerTtlMs: d.offerTtlMs,
@@ -516,13 +526,13 @@ export class DispatchService {
    * drivers. Throws on infrastructure failure (Postgres, Redis geo, queue.add)
    * so the calling job retries; idempotent within a generation — the offer
    * unique constraints skip drivers already offered and the timer job ids are
-   * deterministic per generation. Wave 1 also arms the wave-2 escalation and
+   * deterministic per generation. Wave 1 also arms the wave-2 and wave-3 escalations and
    * the hard-fail timer (`DISPATCH_WAVE_ONE_TIMEOUT_MS` / `DISPATCH_HARD_FAIL_MS`,
    * unchanged — flag F-1).
    */
   async runSoloWave(
     ride: RideRow,
-    waveNumber: 1 | 2,
+    waveNumber: WaveNumber,
     generation: number = ride.dispatchGeneration,
   ): Promise<void> {
     if (!Number.isInteger(generation) || generation < 1) {
@@ -595,7 +605,7 @@ export class DispatchService {
    */
   async runPoolWave(
     pool: SharedRideRow,
-    waveNumber: 1 | 2,
+    waveNumber: WaveNumber,
     generation: number = pool.dispatchGeneration,
   ): Promise<void> {
     if (!Number.isInteger(generation) || generation < 1) {
@@ -663,7 +673,8 @@ export class DispatchService {
 
   async handleWaveTimeout(job: Job<WaveTimeoutJob>): Promise<void> {
     const { rideId, kind, generation } = job.data;
-    const waveNumber = job.data.waveNumber === 1 ? 1 : 2;
+    const waveNumber: WaveNumber =
+      job.data.waveNumber === 1 ? 1 : job.data.waveNumber === 3 ? 3 : 2;
 
     if (kind === 'solo') {
       const ride = await this.ridesRepo.findById(rideId);
@@ -839,7 +850,11 @@ export class DispatchService {
   private async removeTimers(tripRef: string, generation: number | undefined): Promise<void> {
     const ids = [legacyWaveTwoJobId(tripRef), legacyHardFailJobId(tripRef)];
     if (generation !== undefined && generation >= 1) {
-      ids.push(waveTwoJobId(tripRef, generation), hardFailJobId(tripRef, generation));
+      ids.push(
+        waveTwoJobId(tripRef, generation),
+        waveThreeJobId(tripRef, generation),
+        hardFailJobId(tripRef, generation),
+      );
     }
     for (const id of ids) {
       await this.queue.remove(id).catch((err: unknown) => {
@@ -868,6 +883,16 @@ export class DispatchService {
       },
     );
     await this.queue.add(
+      WAVE_TIMEOUT_JOB,
+      { rideId: tripRef, waveNumber: 3, kind, generation } satisfies WaveTimeoutJob,
+      {
+        jobId: waveThreeJobId(tripRef, generation),
+        delay: waveThreeDelayMs(waveOneTimeoutMs, hardFailMs),
+        removeOnComplete: true,
+        removeOnFail: 100,
+      },
+    );
+    await this.queue.add(
       HARD_FAIL_JOB,
       { rideId: tripRef, kind, generation } satisfies HardFailJob,
       {
@@ -879,10 +904,10 @@ export class DispatchService {
     );
   }
 
-  private waveParams(waveNumber: 1 | 2): { k: number; radiusMeters: number } {
-    return waveNumber === 1
-      ? { k: this.params.k1, radiusMeters: this.params.r1Meters }
-      : { k: this.params.k2, radiusMeters: this.params.r2Meters };
+  private waveParams(waveNumber: WaveNumber): { k: number; radiusMeters: number } {
+    if (waveNumber === 1) return { k: this.params.k1, radiusMeters: this.params.r1Meters };
+    if (waveNumber === 2) return { k: this.params.k2, radiusMeters: this.params.r2Meters };
+    return { k: this.params.k3, radiusMeters: this.params.r3Meters };
   }
 
   /**

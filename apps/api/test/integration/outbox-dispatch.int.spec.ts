@@ -35,6 +35,7 @@ import {
   poolExpireJobId,
   scheduledWakeJobId,
   wave2JobId,
+  wave3JobId,
 } from '../../src/modules/outbox/outbox.jobs';
 
 const skip = process.env.RCAB_INT_SKIPPED === '1';
@@ -871,15 +872,19 @@ describe.skipIf(skip)('outbox + durable dispatch (Postgres + Redis + BullMQ, ind
       await (await dispatchQ.getJob(dispatchStartJobId(row.id, 1)))?.remove();
 
       const report = await reconciler.reconcile();
-      expect(report.timersRestored).toBe(2);
+      expect(report.timersRestored).toBe(3);
       const hard = (await dispatchQ.getJob(hardFailJobId(row.id, 1)))!;
       const wave2 = (await dispatchQ.getJob(wave2JobId(row.id, 1)))!;
+      const wave3 = (await dispatchQ.getJob(wave3JobId(row.id, 1)))!;
       expect(hard.name).toBe('dispatch:hard-fail');
       expect(hard.data).toEqual({ rideId: row.id, kind: 'solo', generation: 1 });
       // offered 10 s ago: ~50 s of the 60 s hard-fail window and ~20 s of the 30 s wave-1 window remain.
       expect(Math.abs((hard.opts.delay ?? 0) - 50_000)).toBeLessThan(3_000);
       expect(wave2.data).toEqual({ rideId: row.id, waveNumber: 2, kind: 'solo', generation: 1 });
       expect(Math.abs((wave2.opts.delay ?? 0) - 20_000)).toBeLessThan(3_000);
+      // Wave 3 starts at 45 s (halfway between wave 2 and the hard fail): ~35 s remain.
+      expect(wave3.data).toEqual({ rideId: row.id, waveNumber: 3, kind: 'solo', generation: 1 });
+      expect(Math.abs((wave3.opts.delay ?? 0) - 35_000)).toBeLessThan(3_000);
       // Offers existed, so no second dispatch start was queued.
       expect(await dispatchQ.getJob(dispatchStartJobId(row.id, 1))).toBeUndefined();
     });

@@ -53,6 +53,7 @@ There is no `details` object. `request_id` is the `x-request-id` header, also re
 | 409 | `passenger_has_active_ride` | `POST /v1/rides` type normal while the passenger already has a live (requested … in_progress) normal ride; a retry under the same `Idempotency-Key` still replays. Backstop: `rides_one_live_normal_per_passenger_uq` (0019) |
 | 409 | `vehicle_reg_exists`, `google_already_linked` | Duplicate registration number (own or another driver's vehicle) / Google account linked to another user |
 | 422 | `idempotency_key_conflict` | Key reused for a different request |
+| 422 | `no_road_nearby` | `GET /v1/rides/snap`: no drivable road within `rides.snapMaxMeters` (default 500 m) of the point, or OSRM knows no road there. Ask the rider to pick a spot nearer a road (RCAB-E8.S22) |
 | 429 | `rate_limited` | Throttler (auth routes 10/min, global 1000/min where applied) |
 | 500 | `fare_unavailable` | A legacy shared seat without a recorded fare |
 | 503 | `routing_unavailable` | OSRM down / no route |

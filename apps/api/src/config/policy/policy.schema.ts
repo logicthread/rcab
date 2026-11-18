@@ -161,24 +161,36 @@ export const POLICY_SCHEMA = {
 
   dispatch: {
     k1: int({
-      env: 'DISPATCH_K1', default: 5, min: 1, unit: 'drivers',
+      env: 'DISPATCH_K1', default: 20, min: 1, unit: 'drivers',
       description: 'Drivers offered in wave 1 (top-K nearest within R1).',
-      decision: 'features-top-k-dispatch Phase-0: K = 5.',
+      decision: 'owner 2026-11-18: 20 drivers per wave (was 5).',
     }),
     k2: int({
-      env: 'DISPATCH_K2', default: 10, min: 1, unit: 'drivers',
+      env: 'DISPATCH_K2', default: 20, min: 1, unit: 'drivers',
       description: 'Drivers offered in wave 2 (within R2).',
-      decision: 'features-top-k-dispatch Phase-0: wave-2 K = 10.',
+      decision: 'owner 2026-11-18: 20 drivers per wave (was 10).',
+    }),
+    k3: int({
+      env: 'DISPATCH_K3', default: 20, min: 1, unit: 'drivers',
+      description: 'Drivers offered in wave 3 (within R3).',
+      decision: 'owner 2026-11-18: third wave, 20 drivers like the others.',
     }),
     r1Meters: num({
-      env: 'DISPATCH_R1_METERS', default: 2000, min: 1, unit: 'm',
+      env: 'DISPATCH_R1_METERS', default: 3000, min: 1, unit: 'm',
       description: 'Wave-1 search radius around the pickup.',
-      decision: 'algo-top-k-dispatch: 2 km first ring.',
+      decision: 'owner 2026-11-18: wave 1 searches 3 km (was 2 km).',
     }),
     r2Meters: num({
-      env: 'DISPATCH_R2_METERS', default: 4000, min: 1, unit: 'm',
+      env: 'DISPATCH_R2_METERS', default: 5000, min: 1, unit: 'm',
       description: 'Wave-2 (widened) search radius around the pickup.',
-      decision: 'features-top-k-dispatch: max radius 4 km.',
+      decision: 'owner 2026-11-18: wave 2 widens to 5 km (was 4 km).',
+    }),
+    r3Meters: num({
+      env: 'DISPATCH_R3_METERS', default: 7000, min: 1, unit: 'm',
+      description:
+        'Wave-3 (widest) search radius around the pickup. Wave 3 starts halfway between ' +
+        'wave 2 and the hard fail (45 s with the defaults).',
+      decision: 'owner 2026-11-18: wave 3 widens to 7 km, timed at the midpoint of wave 2 and the hard fail.',
     }),
     offerTtlMs: ms({
       env: 'DISPATCH_OFFER_TTL_MS', default: 12_000, min: 1000, unit: 'ms',
@@ -307,6 +319,13 @@ export const POLICY_SCHEMA = {
   },
 
   rides: {
+    snapMaxMeters: num({
+      env: 'RIDE_SNAP_MAX_METERS', default: 500, min: 1, unit: 'm',
+      description:
+        'A pickup / drop-off is moved to the nearest road when one lies within this distance; ' +
+        'farther points are refused so the rider picks a spot nearer a road.',
+      decision: 'owner 2026-11-18: snap points to the road before booking; 500 m cap is a proposed default.',
+    }),
     noShowWaitMs: ms({
       env: 'RIDE_NO_SHOW_WAIT_MS', default: 5 * MIN, min: 0, unit: 'ms',
       description: 'Driver must wait this long after `arrived` before reporting a no-show.',
@@ -587,6 +606,11 @@ export const POLICY_RULES: readonly PolicyRule[] = [
     keys: ['dispatch.r1Meters', 'dispatch.r2Meters'],
     description: 'wave 2 widens the search (r1Meters ≤ r2Meters)',
     check: (p) => p.dispatch.r1Meters <= p.dispatch.r2Meters,
+  },
+  {
+    keys: ['dispatch.r2Meters', 'dispatch.r3Meters'],
+    description: 'wave 3 widens the search (r2Meters ≤ r3Meters)',
+    check: (p) => p.dispatch.r2Meters <= p.dispatch.r3Meters,
   },
   {
     keys: ['dispatch.waveOneTimeoutMs', 'dispatch.hardFailMs'],

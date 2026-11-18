@@ -1,0 +1,84 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --ink: 20 22 26;
+  --ink-soft: 44 48 56;
+  --paper: 246 247 249;
+  --surface: 255 255 255;
+  --line: 225 228 234;
+  --line-strong: 170 177 189;
+  --muted: 90 98 112;
+  --amber: 255 180 0;
+  --amber-deep: 138 88 0;
+  --amber-wash: 255 244 214;
+  --go: 15 123 85;
+  --go-wash: 227 245 237;
+  --stop: 192 38 45;
+  --stop-wash: 252 233 234;
+  /* Text on an ink-filled surface, and text on the (theme-independent) amber accent. */
+  --on-ink: 255 255 255;
+  --amber-ink: 20 22 26;
+  color-scheme: light;
+}
+
+/* Dark: next-themes puts `.dark` on <html>. Same names, re-picked values. */
+.dark {
+  --ink: 240 242 245;
+  --ink-soft: 206 211 220;
+  --paper: 13 15 19;
+  --surface: 23 26 32;
+  --line: 44 49 59;
+  --line-strong: 86 94 108;
+  --muted: 152 160 174;
+  --amber: 255 184 20;
+  --amber-deep: 255 205 90;
+  --amber-wash: 58 44 8;
+  --go: 62 207 150;
+  --go-wash: 14 52 40;
+  --stop: 255 126 130;
+  --stop-wash: 66 24 27;
+  --on-ink: 20 22 26;
+  color-scheme: dark;
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+  }
+  body {
+    @apply bg-paper font-sans text-ink antialiased;
+    font-size: 16px;
+    line-height: 1.5;
+  }
+  h1,
+  h2,
+  h3 {
+    @apply font-semibold tracking-tight;
+  }
+  /* Keyboard focus is always visible; mouse/touch focus stays quiet. */
+  :focus-visible {
+    outline: 3px solid rgb(var(--ink));
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+  button:disabled {
+    cursor: not-allowed;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+/* Leaflet panes default to z-index 400+, which would sit over our sheets/toasts. */
+.leaflet-container {
+  z-index: 0;
+  font-family: inherit;
+}

@@ -539,3 +539,41 @@ export const poolMember = pgTable(
     index('pool_member_passenger_idx').on(t.passengerId, t.joinedAt.desc()),
   ],
 );
+
+export const feedback = pgTable(
+  'feedback',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => appUser.id, { onDelete: 'cascade' }),
+    role: text('role').notNull(),
+    category: text('category').notNull(),
+    message: text('message').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('feedback_user_idx').on(t.userId, t.createdAt.desc()),
+    check('feedback_role_check', sql`${t.role} IN ('client','driver')`),
+    check('feedback_category_check', sql`${t.category} IN ('bug','idea','compliment','other')`),
+    check('feedback_message_check', sql`char_length(${t.message}) BETWEEN 1 AND 2000`),
+  ],
+);
+
+export const supportMessage = pgTable(
+  'support_message',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => appUser.id, { onDelete: 'cascade' }),
+    sender: text('sender').notNull(),
+    body: text('body').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('support_message_user_idx').on(t.userId, t.createdAt),
+    check('support_message_sender_check', sql`${t.sender} IN ('user','support')`),
+    check('support_message_body_check', sql`char_length(${t.body}) BETWEEN 1 AND 2000`),
+  ],
+);

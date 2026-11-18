@@ -93,6 +93,7 @@ function makeController(
     ridesFindById?: ReturnType<typeof vi.fn>;
     ridesFindByScope?: ReturnType<typeof vi.fn>;
     ridesFindLive?: ReturnType<typeof vi.fn>;
+    ridesFindRecent?: ReturnType<typeof vi.fn>;
     idempotency?: Record<string, ReturnType<typeof vi.fn>>;
     apply?: ReturnType<typeof vi.fn>;
     cancel?: ReturnType<typeof vi.fn>;
@@ -112,8 +113,9 @@ function makeController(
   const stops = {
     findByRideId: vi.fn().mockResolvedValue(opts.stops ?? []),
   };
-  const routeSim = {
+  const routeSim: { getRouteGeometry: ReturnType<typeof vi.fn>; nearestRoad: ReturnType<typeof vi.fn> } = {
     getRouteGeometry: opts.getRouteGeometry ?? vi.fn(),
+    nearestRoad: vi.fn(),
   };
   const quoteToken = {
     sign: vi.fn().mockReturnValue('quote.tok'),
@@ -124,6 +126,8 @@ function makeController(
     findById: opts.ridesFindById ?? vi.fn(),
     findByIdempotencyScope: opts.ridesFindByScope ?? vi.fn().mockResolvedValue(null),
     findLiveNormalRide: opts.ridesFindLive ?? vi.fn().mockResolvedValue(null),
+    findRecentByPassenger: opts.ridesFindRecent ?? vi.fn().mockResolvedValue([]),
+    findRecentByDriver: vi.fn().mockResolvedValue([]),
   };
   const stateMachine = { apply: opts.apply ?? vi.fn(), cancel: opts.cancel ?? vi.fn() };
   const bus = { joinRide: vi.fn().mockResolvedValue(undefined) };
@@ -783,6 +787,85 @@ describe('RidesController.getRide', () => {
     expect(res.cancelledBy).toBe('driver');
     expect(res.cancelReason).toBe('vehicle issue');
     expect(res.timestamps.cancelledAt).toBe('2026-05-31T10:00:00.000Z');
+  });
+});
+
+describe('RidesController.listMyRides', () => {
+  beforeEach(() => vi.clearAllMocks());
+  const clientReq = { user: { sub: 'c-1', role: 'client' } as JwtPayload };
+
+  it("lists the caller's rides with fare, route and created time", async () => {
+    const created = new Date('2026-11-17T08:00:00.000Z');
+    const find = vi
+      .fn()
+      .mockResolvedValue([{ row: soloRideRow({ status: 'completed' }), createdAt: created }]);
+    const { ctrl } = makeController({ ridesFindRecent: find });
+    const res = await ctrl.listMyRides(clientReq as never);
+    expect(find).toHaveBeenCalledWith('c-1', 20);
+    expect(res.rides).toHaveLength(1);
+    expect(res.rides[0]).toMatchObject({
+      rideId: 'ride-9',
+      status: 'completed',
+      type: 'normal',
+      fare: { amount: 18500, currency: 'INR' },
+      scheduledFor: null,
+      createdAt: '2026-11-17T08:00:00.000Z',
+    });
+  });
+
+  it('clamps the limit to 1..50 and falls back to 20 for junk', async () => {
+    const find = vi.fn().mockResolvedValue([]);
+    const { ctrl } = makeController({ ridesFindRecent: find });
+    await ctrl.listMyRides(clientReq as never, '500');
+    await ctrl.listMyRides(clientReq as never, '0');
+    await ctrl.listMyRides(clientReq as never, 'abc');
+    expect(find.mock.calls.map((c) => c[1])).toEqual([50, 1, 20]);
+  });
+
+  it("lists a driver's assigned trips instead of passenger bookings", async () => {
+    const byDriver = vi
+      .fn()
+      .mockResolvedValue([{ row: soloRideRow({ driverId: DRIVER_ID }), createdAt: new Date() }]);
+    const byPassenger = vi.fn();
+    const { ctrl, ridesRepo } = makeController();
+    ridesRepo.findRecentByDriver = byDriver;
+    ridesRepo.findRecentByPassenger = byPassenger;
+    const res = await ctrl.listMyRides({ user: jwtDriver() } as never);
+    expect(byDriver).toHaveBeenCalledWith(jwtDriver().sub, 20);
+    expect(byPassenger).not.toHaveBeenCalled();
+    expect(res.rides).toHaveLength(1);
+  });
+});
+
+describe('RidesController.snap', () => {
+  it('returns the nearest road point and how far the point moved', async () => {
+    const { ctrl, routeSim } = makeController();
+    routeSim.nearestRoad = vi
+      .fn()
+      .mockResolvedValue({ lat: 26.1748591, lng: 91.7511239, distanceM: 19.94 });
+    const res = await ctrl.snap({ lat: 26.175, lng: 91.751 });
+    expect(routeSim.nearestRoad).toHaveBeenCalledWith(26.175, 91.751);
+    expect(res).toEqual({ lat: 26.174859, lng: 91.751124, distanceM: 20 });
+  });
+
+  it('422 no_road_nearby when OSRM finds no road, or the road is beyond the cap', async () => {
+    const none = makeController();
+    none.routeSim.nearestRoad = vi.fn().mockResolvedValue(null);
+    await expect(none.ctrl.snap({ lat: 1, lng: 1 })).rejects.toMatchObject({
+      response: { code: 'no_road_nearby' },
+    });
+
+    const far = makeController();
+    far.routeSim.nearestRoad = vi.fn().mockResolvedValue({ lat: 1, lng: 1, distanceM: 501 });
+    await expect(far.ctrl.snap({ lat: 1, lng: 1 })).rejects.toMatchObject({
+      response: { code: 'no_road_nearby' },
+    });
+  });
+
+  it('accepts a road exactly at the cap', async () => {
+    const { ctrl, routeSim } = makeController();
+    routeSim.nearestRoad = vi.fn().mockResolvedValue({ lat: 2, lng: 3, distanceM: 500 });
+    await expect(ctrl.snap({ lat: 1, lng: 1 })).resolves.toMatchObject({ distanceM: 500 });
   });
 });
 

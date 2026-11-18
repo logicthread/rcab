@@ -46,6 +46,7 @@ vi.mock('../../lib/booking/api', async () => {
   return {
     ...actual,
     fetchQuote: vi.fn(),
+    snapToRoad: vi.fn(async (lat: number, lng: number) => ({ lat, lng, distanceM: 0 })),
     fetchRide: vi.fn(),
     createNormalRide: vi.fn(),
     createScheduledRide: vi.fn(),
@@ -528,7 +529,9 @@ describe('BookPage sign out (F12)', () => {
     pickPreset(0);
     await waitFor(() => expect(screen.getByTestId('submit-shared')).toBeEnabled());
 
-    fireEvent.click(screen.getByText('Sign out'));
+    // Sign out now lives in the side menu.
+    fireEvent.click(screen.getByTestId('menu-open'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Sign out' }));
 
     expect(signOut).toHaveBeenCalledTimes(1);
     expect(window.localStorage.getItem('rcab_active_ride')).toBeNull();

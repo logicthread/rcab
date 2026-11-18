@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/driver/driver_state.dart';
 import '../../core/driver/driver_state_notifier.dart';
 import '../../di/providers.dart';
+import '../menu/app_drawer.dart';
 import 'driver_notice.dart';
 import 'oem_onboarding_sheet.dart';
 import 'service_kill_banner.dart';
@@ -116,6 +117,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
     return Scaffold(
       key: const Key('home_screen'),
+      drawer: const AppDrawer(),
       appBar: AppBar(
         title: const Text('rcab'),
         actions: [
