@@ -12,6 +12,9 @@ import '../features/ride/ride_screen.dart';
 import '../features/shared_ride/shared_ride_screen.dart';
 import '../features/rating/rating_screen.dart';
 import '../features/earnings/earnings_screen.dart';
+import '../features/history/history_screen.dart';
+import '../features/feedback/feedback_screen.dart';
+import '../features/help/help_screen.dart';
 import '../features/profile/profile_screen.dart';
 import '../features/profile/vehicle_form_screen.dart';
 
@@ -70,6 +73,18 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/earnings',
         builder: (_, __) => const EarningsScreen(),
+      ),
+      GoRoute(
+        path: '/history',
+        builder: (_, __) => const HistoryScreen(),
+      ),
+      GoRoute(
+        path: '/feedback',
+        builder: (_, __) => const FeedbackScreen(),
+      ),
+      GoRoute(
+        path: '/help',
+        builder: (_, __) => const HelpScreen(),
       ),
       GoRoute(
         path: '/profile',

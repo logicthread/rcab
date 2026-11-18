@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'core/auth/auth_state.dart';
+import 'core/theme/app_theme.dart';
 import 'di/providers.dart';
 import 'features/offer/offer_controller.dart';
 import 'features/shared_ride/shared_ride_controller.dart';
@@ -75,13 +76,9 @@ class _DriverAppState extends ConsumerState<DriverApp> {
     return MaterialApp.router(
       title: 'rcab Driver',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF1B8EF8), // TODO: brand palette — pending design
-          brightness: Brightness.light,
-        ),
-        useMaterial3: true,
-      ),
+      theme: buildTheme(Brightness.light),
+      darkTheme: buildTheme(Brightness.dark),
+      themeMode: ref.watch(themeModeProvider),
       routerConfig: router,
     );
   }
