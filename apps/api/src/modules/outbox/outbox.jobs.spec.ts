@@ -17,6 +17,8 @@ import {
   poolExpireJobId,
   scheduledWakeJobId,
   wave2JobId,
+  wave3JobId,
+  waveThreeDelayMs,
 } from './outbox.jobs';
 import { POOL_EXPIRE_JOB } from '../matching/pool-lifecycle.service';
 
@@ -54,5 +56,19 @@ describe('outbox.jobs', () => {
     expect(legacyHardFailJobId('x')).toBe('dispatch:hard-fail:x');
     expect(legacyWakeJobId('x')).toBe('scheduled:wake:x');
     expect(legacyPoolExpireJobId('x')).toBe('pool:expire:x');
+  });
+});
+
+describe('wave 3 timing and ids', () => {
+  it('has a colon-free generation-scoped id', () => {
+    expect(wave3JobId('t', 3)).toBe('dispatch-wave3-t-g3');
+  });
+
+  it('starts halfway between wave 2 and the hard fail', () => {
+    expect(waveThreeDelayMs(30_000, 60_000)).toBe(45_000);
+    // Scheduled window (2 min wave 2, 4 min hard fail) scales the same way.
+    expect(waveThreeDelayMs(120_000, 240_000)).toBe(180_000);
+    // Never before wave 2, even for a degenerate config.
+    expect(waveThreeDelayMs(30_000, 10_000)).toBe(30_000);
   });
 });

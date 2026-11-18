@@ -21,6 +21,8 @@ import {
   poolExpireJobId,
   scheduledWakeJobId,
   wave2JobId,
+  wave3JobId,
+  waveThreeDelayMs,
   type DispatchKind,
 } from './outbox.jobs';
 import { OutboxRepository } from './outbox.repository';
@@ -323,6 +325,7 @@ export class DispatchReconciler implements OnApplicationBootstrap, OnModuleDestr
     const startId = dispatchStartJobId(tripId, generation);
     const hardFailIds = [hardFailJobId(tripId, generation), legacyHardFailJobId(tripId)];
     const wave2Ids = [wave2JobId(tripId, generation), legacyWave2JobId(tripId)];
+    const wave3Id = wave3JobId(tripId, generation);
 
     // The start job itself still being scheduled or running is progress.
     if (await this.hasLiveJob(this.dispatchQueue, [startId])) return;
@@ -417,6 +420,21 @@ export class DispatchReconciler implements OnApplicationBootstrap, OnModuleDestr
         {
           jobId: wave2Ids[0],
           delay: Math.max(0, waveOneEndsAt - now),
+          removeOnComplete: true,
+          removeOnFail: 100,
+        },
+      );
+      report.timersRestored++;
+    }
+    const waveThreeAt = base + waveThreeDelayMs(waveOneTimeoutMs, hardFailMs);
+    if (now < waveThreeAt && !(await this.hasLiveJob(this.dispatchQueue, [wave3Id]))) {
+      await this.removeFinished(this.dispatchQueue, wave3Id);
+      await this.dispatchQueue.add(
+        WAVE_TIMEOUT_JOB,
+        { rideId: tripId, waveNumber: 3, kind, generation },
+        {
+          jobId: wave3Id,
+          delay: Math.max(0, waveThreeAt - now),
           removeOnComplete: true,
           removeOnFail: 100,
         },

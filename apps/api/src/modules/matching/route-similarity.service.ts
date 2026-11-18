@@ -29,6 +29,11 @@ interface OsrmRouteResponse {
   routes: Array<{ geometry: { coordinates: Coord[] } }>;
 }
 
+interface OsrmNearestResponse {
+  code: string;
+  waypoints?: Array<{ location: Coord; distance: number }>;
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 const BASE32 = '0123456789bcdefghjkmnpqrstuvwxyz';
@@ -150,6 +155,25 @@ export class RouteSimilarityService {
    */
   async getRouteGeometry(route: RouteInput): Promise<RouteGeometry> {
     return { type: 'LineString', coordinates: await this.getPolyline(route) };
+  }
+
+  /**
+   * The nearest drivable road point to a coordinate (OSRM /nearest), or null when
+   * OSRM finds no road segment at all. Throws {@link OsrmUnavailableException} when
+   * OSRM is unreachable. Used to snap pickup / drop-off before a ride is quoted, so
+   * the rider's marker, the quote and the driver's navigation all name one point.
+   */
+  async nearestRoad(lat: number, lng: number): Promise<{ lat: number; lng: number; distanceM: number } | null> {
+    const url = `${this.osrmBase}/nearest/v1/driving/${lng},${lat}?number=1`;
+    let data: OsrmNearestResponse;
+    try {
+      ({ data } = await firstValueFrom(this.http.get<OsrmNearestResponse>(url)));
+    } catch {
+      throw new OsrmUnavailableException();
+    }
+    const wp = data.code === 'Ok' ? data.waypoints?.[0] : undefined;
+    if (!wp) return null;
+    return { lng: wp.location[0], lat: wp.location[1], distanceM: wp.distance };
   }
 
   private async getPolyline(route: RouteInput): Promise<Coord[]> {

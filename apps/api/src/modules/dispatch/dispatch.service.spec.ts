@@ -13,6 +13,7 @@ import {
   legacyHardFailJobId,
   legacyWaveTwoJobId,
   waveTwoJobId,
+  waveThreeJobId,
   type HardFailJob,
   type WaveTimeoutJob,
 } from './dispatch.service';
@@ -400,6 +401,7 @@ describe('DispatchService.acceptOffer', () => {
     expect(m.offers.revokeLiveForTrip).toHaveBeenCalledWith(m.tx, { kind: 'solo', rideId: RIDE }, OFFER);
     expect(m.projection.set).toHaveBeenCalledWith(DRIVER, RIDE);
     expect(m.queue.remove).toHaveBeenCalledWith(waveTwoJobId(RIDE, 1));
+    expect(m.queue.remove).toHaveBeenCalledWith(waveThreeJobId(RIDE, 1));
     expect(m.queue.remove).toHaveBeenCalledWith(hardFailJobId(RIDE, 1));
     expect(m.queue.remove).toHaveBeenCalledWith(legacyWaveTwoJobId(RIDE));
     expect(m.queue.remove).toHaveBeenCalledWith(legacyHardFailJobId(RIDE));
@@ -648,7 +650,7 @@ describe('DispatchService.runSoloWave', () => {
 
     await m.svc.runSoloWave(soloRide({ id: RIDE }), 1, 1);
 
-    expect(m.redis.georadius).toHaveBeenCalledWith('active_drivers', 91.7362, 26.1445, 2000, 'm', 'ASC', 'COUNT', 21);
+    expect(m.redis.georadius).toHaveBeenCalledWith('active_drivers', 91.7362, 26.1445, 3000, 'm', 'ASC', 'COUNT', 81);
     expect(m.offers.eligibleCandidates).toHaveBeenCalledWith(expect.anything(), [DRIVER, OTHER], 1);
     expect(m.bus.toDriver).toHaveBeenCalledTimes(1);
     expect(m.bus.toDriver).toHaveBeenCalledWith(DRIVER, 'ride_offer', {
@@ -666,6 +668,12 @@ describe('DispatchService.runSoloWave', () => {
       { rideId: RIDE, waveNumber: 2, kind: 'solo', generation: 1 },
       expect.objectContaining({ jobId: waveTwoJobId(RIDE, 1), delay: 30_000 }),
     );
+    // Wave 3 starts halfway between wave 2 (30 s) and the hard fail (60 s).
+    expect(m.queue.add).toHaveBeenCalledWith(
+      WAVE_TIMEOUT_JOB,
+      { rideId: RIDE, waveNumber: 3, kind: 'solo', generation: 1 },
+      expect.objectContaining({ jobId: waveThreeJobId(RIDE, 1), delay: 45_000 }),
+    );
     expect(m.queue.add).toHaveBeenCalledWith(
       HARD_FAIL_JOB,
       { rideId: RIDE, kind: 'solo', generation: 1 },
@@ -674,10 +682,30 @@ describe('DispatchService.runSoloWave', () => {
   });
 
   it('wave 2 uses K2/R2 and arms no timers; the configured windows are honoured', async () => {
-    const m = makeService({ DISPATCH_K2: 3, DISPATCH_R2_METERS: 9000 });
+    const m = makeService({ DISPATCH_K2: 3, DISPATCH_R2_METERS: 9000, DISPATCH_R3_METERS: 12000 });
     await m.svc.runSoloWave(soloRide({ id: RIDE }), 2, 1);
     expect(m.redis.georadius).toHaveBeenCalledWith('active_drivers', 91.7362, 26.1445, 9000, 'm', 'ASC', 'COUNT', 12);
     expect(m.queue.add).not.toHaveBeenCalled();
+  });
+
+  it('wave 3 uses K3/R3 (7 km by default) and arms no timers', async () => {
+    const m = makeService();
+    await m.svc.runSoloWave(soloRide({ id: RIDE }), 3, 1);
+    expect(m.redis.georadius).toHaveBeenCalledWith('active_drivers', 91.7362, 26.1445, 7000, 'm', 'ASC', 'COUNT', 80);
+    expect(m.queue.add).not.toHaveBeenCalled();
+
+    const custom = makeService({ DISPATCH_K3: 2, DISPATCH_R3_METERS: 8000 });
+    await custom.svc.runSoloWave(soloRide({ id: RIDE }), 3, 1);
+    expect(custom.redis.georadius).toHaveBeenCalledWith('active_drivers', 91.7362, 26.1445, 8000, 'm', 'ASC', 'COUNT', 8);
+  });
+
+  it('a wave-3 timeout job runs wave 3 for a still-requested ride', async () => {
+    const m = makeService();
+    m.ridesRepo.findById.mockResolvedValue(soloRide({ id: RIDE, status: 'requested' }));
+    await m.svc.handleWaveTimeout({
+      data: { rideId: RIDE, waveNumber: 3, kind: 'solo', generation: 1 },
+    } as unknown as Job<WaveTimeoutJob>);
+    expect(m.redis.georadius).toHaveBeenCalledWith('active_drivers', 91.7362, 26.1445, 7000, 'm', 'ASC', 'COUNT', 80);
   });
 
   it('refuses generation 0 (an un-woken / un-dispatched ride) and propagates infra errors', async () => {
@@ -848,6 +876,7 @@ describe('DispatchService.onRideCancelled / releaseDispatch', () => {
       legacyWaveTwoJobId(RIDE),
       legacyHardFailJobId(RIDE),
       waveTwoJobId(RIDE, 3),
+      waveThreeJobId(RIDE, 3),
       hardFailJobId(RIDE, 3),
     ]);
   });
@@ -1278,7 +1307,7 @@ describe('DispatchService — business metrics', () => {
       (m.db as unknown as { execute: unknown }).execute = vi.fn().mockRejectedValue(new Error('pg down'));
       await expect(m.svc.runSoloWave(soloRide({ id: RIDE }), 1, 1)).resolves.toBeUndefined();
       expect(m.bus.toDriver).toHaveBeenCalledWith(DRIVER, 'ride_offer', expect.anything());
-      expect(m.queue.add).toHaveBeenCalledTimes(2);
+      expect(m.queue.add).toHaveBeenCalledTimes(3);
     });
 
     it('pool wave 1 observes against the pool.dispatch.requested intent', async () => {

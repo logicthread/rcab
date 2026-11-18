@@ -39,6 +39,19 @@ export function wave2JobId(tripId: string, generation: number): string {
   return `dispatch-wave2-${tripId}-g${generation}`;
 }
 
+export function wave3JobId(tripId: string, generation: number): string {
+  return `dispatch-wave3-${tripId}-g${generation}`;
+}
+
+/**
+ * Delay (from wave 1) at which wave 3 starts: halfway between wave 2 and the
+ * hard fail, so wave 2's offers get most of the gap and wave 3 still has time
+ * to be answered. 30 s / 60 s -> 45 s; scheduled windows scale the same way.
+ */
+export function waveThreeDelayMs(waveTwoDelayMs: number, hardFailMs: number): number {
+  return waveTwoDelayMs + Math.floor(Math.max(0, hardFailMs - waveTwoDelayMs) / 2);
+}
+
 export function hardFailJobId(tripId: string, generation: number): string {
   return `dispatch-hardfail-${tripId}-g${generation}`;
 }

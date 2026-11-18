@@ -12,15 +12,15 @@ ride lifecycle, sessions, rate limits, realtime cadence, the outbox loop, and th
   (one deployment), then run `pnpm policy:doc`. "Code-fixed" knobs have no env var: change them in the schema.
 - **Clients:** `apps/web/src/config/policy.ts` and `apps/driver-app/lib/core/config/policy.dart`.
 
-68 server knobs (65 env-overridable) in 14 categories, 11 cross-field rules, 11 web and 11 driver-app knobs.
+71 server knobs (68 env-overridable) in 14 categories, 12 cross-field rules, 11 web and 11 driver-app knobs.
 
 ## Contents
 
 - Pricing & fares (10)
-- Dispatch (normal rides) (9)
+- Dispatch (normal rides) (11)
 - Scheduled booking (7)
 - Shared-ride matching & pools (7)
-- Ride lifecycle (3)
+- Ride lifecycle (4)
 - Driver presence (2)
 - Realtime (2)
 - Sessions & auth (4)
@@ -56,10 +56,12 @@ Top-K waves, radii, offer TTL and timers.
 
 | Key | Env var | Default | Allowed | Unit | Description | Decision |
 | --- | --- | --- | --- | --- | --- | --- |
-| `dispatch.k1` | `DISPATCH_K1` | 5 | integer ≥ 1 | drivers | Drivers offered in wave 1 (top-K nearest within R1). | features-top-k-dispatch Phase-0: K = 5. |
-| `dispatch.k2` | `DISPATCH_K2` | 10 | integer ≥ 1 | drivers | Drivers offered in wave 2 (within R2). | features-top-k-dispatch Phase-0: wave-2 K = 10. |
-| `dispatch.r1Meters` | `DISPATCH_R1_METERS` | 2000 | number ≥ 1 | m | Wave-1 search radius around the pickup. | algo-top-k-dispatch: 2 km first ring. |
-| `dispatch.r2Meters` | `DISPATCH_R2_METERS` | 4000 | number ≥ 1 | m | Wave-2 (widened) search radius around the pickup. | features-top-k-dispatch: max radius 4 km. |
+| `dispatch.k1` | `DISPATCH_K1` | 20 | integer ≥ 1 | drivers | Drivers offered in wave 1 (top-K nearest within R1). | owner 2026-11-18: 20 drivers per wave (was 5). |
+| `dispatch.k2` | `DISPATCH_K2` | 20 | integer ≥ 1 | drivers | Drivers offered in wave 2 (within R2). | owner 2026-11-18: 20 drivers per wave (was 10). |
+| `dispatch.k3` | `DISPATCH_K3` | 20 | integer ≥ 1 | drivers | Drivers offered in wave 3 (within R3). | owner 2026-11-18: third wave, 20 drivers like the others. |
+| `dispatch.r1Meters` | `DISPATCH_R1_METERS` | 3000 | number ≥ 1 | m | Wave-1 search radius around the pickup. | owner 2026-11-18: wave 1 searches 3 km (was 2 km). |
+| `dispatch.r2Meters` | `DISPATCH_R2_METERS` | 5000 | number ≥ 1 | m | Wave-2 (widened) search radius around the pickup. | owner 2026-11-18: wave 2 widens to 5 km (was 4 km). |
+| `dispatch.r3Meters` | `DISPATCH_R3_METERS` | 7000 | number ≥ 1 | m | Wave-3 (widest) search radius around the pickup. Wave 3 starts halfway between wave 2 and the hard fail (45 s with the defaults). | owner 2026-11-18: wave 3 widens to 7 km, timed at the midpoint of wave 2 and the hard fail. |
 | `dispatch.offerTtlMs` | `DISPATCH_OFFER_TTL_MS` | 12000 (12 s) | integer ≥ 1000 | ms | How long one driver offer stays acceptable (sent to the driver as ttlMs). | features-top-k-dispatch: per-driver offer TTL 12 s. |
 | `dispatch.waveOneTimeoutMs` | `DISPATCH_WAVE_ONE_TIMEOUT_MS` | 30000 (30 s) | integer ≥ 1 | ms | Normal rides: delay from wave 1 to wave 2. | features-top-k-dispatch: wave 2 at +30 s; frozen by Stage-C flag F-1. |
 | `dispatch.hardFailMs` | `DISPATCH_HARD_FAIL_MS` | 60000 (1 min) | integer ≥ 1 | ms | Normal rides: delay from wave 1 until the ride fails with no driver. | features-top-k-dispatch: hard fail after 60 s; frozen by Stage-C flag F-1. |
@@ -100,6 +102,7 @@ No-show wait and who may cancel from which state.
 
 | Key | Env var | Default | Allowed | Unit | Description | Decision |
 | --- | --- | --- | --- | --- | --- | --- |
+| `rides.snapMaxMeters` | `RIDE_SNAP_MAX_METERS` | 500 | number ≥ 1 | m | A pickup / drop-off is moved to the nearest road when one lies within this distance; farther points are refused so the rider picks a spot nearer a road. | owner 2026-11-18: snap points to the road before booking; 500 m cap is a proposed default. |
 | `rides.noShowWaitMs` | `RIDE_NO_SHOW_WAIT_MS` | 300000 (5 min) | integer ≥ 0 | ms | Driver must wait this long after `arrived` before reporting a no-show. | RCAB-E4.S8: 5 min no-show wait (driver app mirrors it). |
 | `rides.clientCancellableFrom` | — (code-fixed) | `requested`, `dispatching`, `accepted`, `en_route`, `arrived` | subset of `requested`, `dispatching`, `accepted`, `en_route`, `arrived`, `in_progress` | states | Ride states the client may cancel from (any time before the trip starts). | RCAB-E4.S8 cancellation rules; no cancel fee in Phase-0. |
 | `rides.driverCancellableFrom` | — (code-fixed) | `requested`, `dispatching`, `accepted`, `en_route`, `arrived`, `in_progress` | subset of `requested`, `dispatching`, `accepted`, `en_route`, `arrived`, `in_progress` | states | Ride states the bound driver may cancel from (any time before completion). | RCAB-E4.S8 cancellation rules. |
@@ -208,6 +211,7 @@ Checked at boot after every single knob is valid.
 | scheduled wave 2 must start within the window (waveOneMs ≤ windowMs) | `SCHEDULED_DISPATCH_WAVE_ONE_MS`, `SCHEDULED_DISPATCH_WINDOW_MS` |
 | the scheduled booking window must be non-empty (minLeadMs < maxLeadMs) | `SCHEDULED_MIN_LEAD_MS`, `SCHEDULED_MAX_LEAD_MS` |
 | wave 2 widens the search (r1Meters ≤ r2Meters) | `DISPATCH_R1_METERS`, `DISPATCH_R2_METERS` |
+| wave 3 widens the search (r2Meters ≤ r3Meters) | `DISPATCH_R2_METERS`, `DISPATCH_R3_METERS` |
 | wave 2 must start before the hard fail (waveOneTimeoutMs < hardFailMs) | `DISPATCH_WAVE_ONE_TIMEOUT_MS`, `DISPATCH_HARD_FAIL_MS` |
 | a fuller pool is never dearer per seat (seatMultiplier3 ≤ seatMultiplier2) | `SEAT_MULTIPLIER_3`, `SEAT_MULTIPLIER_2` |
 | the up-front shared quote must assume a reachable pool size (sharedQuoteSeats ≤ maxSeats) | `SHARED_QUOTE_SEATS`, `MATCHING_MAX_SEATS` |

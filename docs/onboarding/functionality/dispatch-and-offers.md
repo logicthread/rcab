@@ -24,14 +24,15 @@ Back to [README](../README.md) · see also [normal-booking](normal-booking.md), 
 ```
 t=0      booking commit: rides(requested, generation 1) + outbox ride.dispatch.requested
 t~0      relay kick -> BullMQ dispatch:start -> wave 1:
-           GEORADIUS active_drivers within R1=2000 m, up to K1*4 + offered candidates,
-           Postgres eligibility filter, first K1=5 get a dispatch_offer (TTL 12 s) and a ride_offer event
-         wave 1 also arms two delayed jobs for this generation:
-t=30 s   wave 2: K2=10 within R2=4000 m, skipping drivers already offered this generation
+           GEORADIUS active_drivers within R1=3000 m, up to K1*4 + offered candidates,
+           Postgres eligibility filter, first K1=20 get a dispatch_offer (TTL 12 s) and a ride_offer event
+         wave 1 also arms three delayed jobs for this generation:
+t=30 s   wave 2: K2=20 within R2=5000 m, skipping drivers already offered this generation
+t=45 s   wave 3: K3=20 within R3=7000 m (halfway between wave 2 and the hard fail), same skipping
 t=60 s   hard fail: ride -> no_driver, live offers revoked, ride_no_driver + ride_state_changed(no_driver)
 ```
 
-Observations: an offer lives 12 s but wave 2 starts at 30 s, so there is an idle gap; a driver who declined or let an offer lapse is never re-offered the same generation; a ride accepted at any moment cancels its pending timers.
+Observations: an offer lives 12 s but the next wave starts 15-30 s after the previous one, so there are idle gaps; a driver who declined or let an offer lapse is never re-offered the same generation; a ride accepted at any moment cancels its pending timers.
 
 Scheduled rides use the same code with a 4-minute window and a retry instead of a hard fail ([scheduled-rides](scheduled-rides.md)). A closed shared pool uses `runPoolWave` and aborts instead of failing a ride ([shared-rides](shared-rides.md)).
 
@@ -63,7 +64,7 @@ Driver sends `ride_offer_response { offerId, accept: true }` (a UUID and a real 
 
 Deadlock or serialization victims retry twice, then answer `conflict` (the offer stays live; the driver may tap again).
 
-After commit, best effort and never turning success into failure: project `current_ride_id`, remove the wave-2/hard-fail timers, send the winner `ride_offer_accepted` and `ride_offer_outcome { outcome: "assigned", assignment }`, send each loser `ride_offer_revoked { reason: "taken" }` and `ride_offer_outcome { outcome: "lost" }`, tell the ride room `ride_state_changed accepted` (solo) or publish a versioned `pool:update` (shared).
+After commit, best effort and never turning success into failure: project `current_ride_id`, remove the wave-2/wave-3/hard-fail timers, send the winner `ride_offer_accepted` and `ride_offer_outcome { outcome: "assigned", assignment }`, send each loser `ride_offer_revoked { reason: "taken" }` and `ride_offer_outcome { outcome: "lost" }`, tell the ride room `ride_state_changed accepted` (solo) or publish a versioned `pool:update` (shared).
 
 Decline: `ride_offer_response { accept: false }` runs one guarded UPDATE; result `declined | not_found | not_live`.
 
@@ -86,9 +87,9 @@ Decline: `ride_offer_response { accept: false }` runs one guarded UPDATE; result
 
 ## Crash safety
 
-- The relay leases rows for 30 s; a crashed publisher's rows are retried. Jobs have deterministic ids (`dispatch-start-<trip>-g<g>`, `dispatch-wave2-<trip>-g<g>`, `dispatch-hardfail-<trip>-g<g>`), so a re-publish never duplicates work. BullMQ retries a failing job 5 times with exponential backoff.
+- The relay leases rows for 30 s; a crashed publisher's rows are retried. Jobs have deterministic ids (`dispatch-start-<trip>-g<g>`, `dispatch-wave2-<trip>-g<g>`, `dispatch-wave3-<trip>-g<g>`, `dispatch-hardfail-<trip>-g<g>`), so a re-publish never duplicates work. BullMQ retries a failing job 5 times with exponential backoff.
 - Every handler re-checks state and generation first, so a stale, duplicate or late job is a successful no-op.
-- `DispatchReconciler` (boot + every 5 min, trips touched in the last 15 s skipped): re-arms missing wake jobs, missing `dispatch:start`, missing wave-2/hard-fail timers, missing pool-expiry jobs, and closes out scheduled rides whose window lapsed. It logs `reconcile repaired missing durable work` when it changes anything and exposes the backlog as outbox gauges.
+- `DispatchReconciler` (boot + every 5 min, trips touched in the last 15 s skipped): re-arms missing wake jobs, missing `dispatch:start`, missing wave-2/wave-3/hard-fail timers, missing pool-expiry jobs, and closes out scheduled rides whose window lapsed. It logs `reconcile repaired missing durable work` when it changes anything and exposes the backlog as outbox gauges.
 - If Redis is flushed, the reconciler rebuilds timers from Postgres; the geo index refills as drivers' location packets arrive. See the Redis-loss drill in [`docs/operations/recovery-runbook.md`](../../operations/recovery-runbook.md).
 
 ## Data
@@ -99,7 +100,7 @@ Operator tools: `/redis-inspect`, `/pool-inspect`, `/db-migrate`; invariant SQL 
 
 ## Policy knobs
 
-[Dispatch](../../POLICY.md#dispatch-normal-rides): `DISPATCH_K1` (5), `DISPATCH_K2` (10), `DISPATCH_R1_METERS` (2000), `DISPATCH_R2_METERS` (4000), `DISPATCH_OFFER_TTL_MS` (12 s), `DISPATCH_WAVE_ONE_TIMEOUT_MS` (30 s), `DISPATCH_HARD_FAIL_MS` (60 s), `DISPATCH_CANDIDATE_HEADROOM` (4), `DISPATCH_ASSIGNMENT_RECONCILE_MS` (30 s). [Outbox relay and reconciler](../../POLICY.md#outbox-relay--reconciler): poll 1 s, batch 50, lease 30 s, 10 publish attempts, 5 job attempts, reconcile every 5 min with 15 s grace. [Scheduled booking](../../POLICY.md#scheduled-booking) for the window. Cross-field: R1 <= R2 and wave-1 timeout < hard fail.
+[Dispatch](../../POLICY.md#dispatch-normal-rides): `DISPATCH_K1` (20), `DISPATCH_K2` (20), `DISPATCH_K3` (20), `DISPATCH_R1_METERS` (3000), `DISPATCH_R2_METERS` (5000), `DISPATCH_R3_METERS` (7000), `DISPATCH_OFFER_TTL_MS` (12 s), `DISPATCH_WAVE_ONE_TIMEOUT_MS` (30 s), `DISPATCH_HARD_FAIL_MS` (60 s), `DISPATCH_CANDIDATE_HEADROOM` (4), `DISPATCH_ASSIGNMENT_RECONCILE_MS` (30 s). [Outbox relay and reconciler](../../POLICY.md#outbox-relay--reconciler): poll 1 s, batch 50, lease 30 s, 10 publish attempts, 5 job attempts, reconcile every 5 min with 15 s grace. [Scheduled booking](../../POLICY.md#scheduled-booking) for the window. Cross-field: R1 <= R2 <= R3 and wave-1 timeout < hard fail. Wave 3 starts halfway between wave 2 and the hard fail (45 s with the defaults).
 
 ## Code entry points
 

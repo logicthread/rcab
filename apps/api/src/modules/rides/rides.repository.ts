@@ -235,6 +235,34 @@ export class RidesRepository {
     return rows[0] ? toRow(rows[0]) : null;
   }
 
+  /** The passenger's most recent rides, newest first (ride history). */
+  async findRecentByPassenger(
+    passengerId: string,
+    limit: number,
+  ): Promise<Array<{ row: RideRow; createdAt: Date }>> {
+    const rows = await this.db
+      .select()
+      .from(rides)
+      .where(eq(rides.passengerId, passengerId))
+      .orderBy(desc(rides.createdAt))
+      .limit(limit);
+    return rows.map((r) => ({ row: toRow(r), createdAt: r.createdAt }));
+  }
+
+  /** The driver's most recent rides (any state they were assigned), newest first. */
+  async findRecentByDriver(
+    driverId: string,
+    limit: number,
+  ): Promise<Array<{ row: RideRow; createdAt: Date }>> {
+    const rows = await this.db
+      .select()
+      .from(rides)
+      .where(eq(rides.driverId, driverId))
+      .orderBy(desc(rides.createdAt))
+      .limit(limit);
+    return rows.map((r) => ({ row: toRow(r), createdAt: r.createdAt }));
+  }
+
   async findById(id: string): Promise<RideRow | null> {
     const rows = await this.db.select().from(rides).where(eq(rides.id, id)).limit(1);
     return rows[0] ? toRow(rows[0]) : null;
