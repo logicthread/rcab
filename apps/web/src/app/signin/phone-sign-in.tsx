@@ -7,6 +7,7 @@ import {
   type ConfirmationResult,
 } from 'firebase/auth';
 import { getFirebaseAuth } from '../../lib/auth/firebase';
+import { Button } from '../../components/ui/button';
 
 /**
  * Phone OTP sign-in (Firebase). Rendered ONLY when the API's `GET /v1/auth/config`
@@ -87,10 +88,12 @@ export default function PhoneSignIn({
   const disabled = loading || busy;
 
   return (
-    <section aria-label="Phone sign-in">
+    <section aria-label="Phone sign-in" className="mt-6">
       {step === 'phone' && (
-        <form onSubmit={handlePhoneSubmit}>
-          <label htmlFor="phone">Phone number (E.164)</label>
+        <form onSubmit={handlePhoneSubmit} className="flex flex-col gap-2">
+          <label htmlFor="phone" className="text-sm font-semibold">
+            Phone number (E.164)
+          </label>
           <input
             id="phone"
             type="tel"
@@ -98,16 +101,19 @@ export default function PhoneSignIn({
             onChange={(e) => setPhone(e.target.value)}
             placeholder="+91XXXXXXXXXX"
             required
+            className="min-h-tap rounded-control border border-line-strong bg-surface px-3 text-base"
           />
-          <button type="submit" disabled={disabled}>
+          <Button type="submit" variant="primary" size="lg" block disabled={disabled} loading={loading}>
             {loading ? 'Sending…' : 'Send OTP'}
-          </button>
+          </Button>
         </form>
       )}
 
       {step === 'otp' && (
-        <form onSubmit={handleOtpSubmit}>
-          <label htmlFor="otp">Enter 6-digit OTP</label>
+        <form onSubmit={handleOtpSubmit} className="flex flex-col gap-2">
+          <label htmlFor="otp" className="text-sm font-semibold">
+            Enter 6-digit OTP
+          </label>
           <input
             id="otp"
             type="text"
@@ -116,19 +122,21 @@ export default function PhoneSignIn({
             value={otp}
             onChange={(e) => setOtp(e.target.value)}
             required
+            className="min-h-tap rounded-control border border-line-strong bg-surface px-3 text-center text-2xl tracking-[0.4em]"
           />
-          <button type="submit" disabled={disabled}>
+          <Button type="submit" variant="primary" size="lg" block disabled={disabled} loading={loading}>
             {loading ? 'Verifying…' : 'Verify'}
-          </button>
-          <button
-            type="button"
+          </Button>
+          <Button
+            variant="ghost"
+            block
             onClick={() => {
               setStep('phone');
               onError('');
             }}
           >
             ← Back
-          </button>
+          </Button>
         </form>
       )}
 

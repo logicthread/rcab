@@ -13,15 +13,7 @@ export function PoolBadge({ seatCount }: Props) {
       role="status"
       aria-live="polite"
       data-testid="pool-badge"
-      style={{
-        marginTop: 12,
-        padding: '10px 12px',
-        background: '#ecfdf5',
-        border: '1px solid #10b981',
-        borderRadius: 8,
-        color: '#065f46',
-        fontSize: 14,
-      }}
+      className="mt-3 rounded-control border border-go/40 bg-go-wash px-3 py-2.5 text-sm font-medium text-go"
     >
       Sharing with {others} other {noun}
     </div>

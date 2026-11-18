@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { clsx } from 'clsx';
 import { MIN_QUERY_LENGTH, searchPlaces, type NominatimSuggestion } from '../../lib/geo/nominatim';
 import type { Place } from '../../lib/booking/types';
 import { WEB_POLICY } from '../../config/policy';
@@ -75,8 +76,10 @@ export function AddressSearch({
   }
 
   return (
-    <div style={{ position: 'relative' }}>
-      <label style={{ fontSize: 12, fontWeight: 600, color: active ? '#111' : '#525252' }}>
+    <div className="relative">
+      <label
+        className={clsx('text-sm font-semibold', active ? 'text-ink' : 'text-muted')}
+      >
         {label}
       </label>
       <input
@@ -87,18 +90,13 @@ export function AddressSearch({
         aria-label={label}
         onFocus={onFocus}
         onChange={(e) => setText(e.target.value)}
-        style={{
-          width: '100%',
-          padding: '8px 10px',
-          marginTop: 4,
-          fontSize: 14,
-          borderRadius: 6,
-          border: `1px solid ${active ? '#111' : '#d4d4d4'}`,
-          boxSizing: 'border-box',
-        }}
+        className={clsx(
+          'mt-1 min-h-tap w-full rounded-control border bg-surface px-3 text-base placeholder:text-muted/70',
+          active ? 'border-ink ring-1 ring-ink' : 'border-line-strong',
+        )}
       />
       {loading && (
-        <span style={{ position: 'absolute', right: 10, top: 30, fontSize: 12, color: '#737373' }}>
+        <span className="absolute right-3 top-[38px] text-sm text-muted" aria-hidden="true">
           …
         </span>
       )}
@@ -106,35 +104,14 @@ export function AddressSearch({
         <ul
           role="listbox"
           data-testid={testId ? `${testId}-suggestions` : undefined}
-          style={{
-            listStyle: 'none',
-            margin: '4px 0 0',
-            padding: 4,
-            border: '1px solid #e5e5e5',
-            borderRadius: 6,
-            background: '#fff',
-            position: 'absolute',
-            zIndex: 1000,
-            width: '100%',
-            boxSizing: 'border-box',
-            boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
-          }}
+          className="absolute z-[1000] mt-1 w-full list-none rounded-control border border-line bg-surface p-1 shadow-lift"
         >
           {suggestions.map((s, i) => (
             <li key={`${s.lat},${s.lng},${i}`} role="option" aria-selected={false}>
               <button
                 type="button"
                 onClick={() => choose(s)}
-                style={{
-                  display: 'block',
-                  width: '100%',
-                  textAlign: 'left',
-                  padding: '8px 8px',
-                  fontSize: 13,
-                  border: 'none',
-                  background: 'transparent',
-                  cursor: 'pointer',
-                }}
+                className="block min-h-tap w-full rounded-[8px] px-3 py-2 text-left text-sm hover:bg-paper"
               >
                 {s.label}
               </button>

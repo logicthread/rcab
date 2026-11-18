@@ -4,6 +4,7 @@ import type {
   Place,
   QuoteResponse,
   RideDetailResponse,
+  RideHistoryItem,
   SoloRideResponse,
 } from './types';
 import { useAuthStore } from '../auth/store';
@@ -24,6 +25,11 @@ export class BookingApiError extends Error {
   /** True when the API could not route between the chosen points (OSRM). */
   get isRoutingUnavailable(): boolean {
     return this.code === 'routing_unavailable' || this.status === 503;
+  }
+
+  /** 422: no drivable road within snapping distance of the chosen point. */
+  get isNoRoadNearby(): boolean {
+    return this.code === 'no_road_nearby';
   }
 
   /** 400: the quote token behind a private booking has expired. Re-quote. */
@@ -92,7 +98,7 @@ async function authedFetch(path: string, init: RequestInit = {}): Promise<Respon
   return send(fresh);
 }
 
-async function postJson<T>(
+export async function postJson<T>(
   path: string,
   body: unknown,
   extraHeaders: Record<string, string> = {},
@@ -129,8 +135,17 @@ async function postIdempotent<T>(path: string, body: unknown, idempotencyKey: st
   }
 }
 
-async function getJson<T>(path: string): Promise<T> {
+export async function getJson<T>(path: string): Promise<T> {
   const res = await authedFetch(path);
+  return parseOrThrow<T>(res);
+}
+
+export async function patchJson<T>(path: string, body: unknown): Promise<T> {
+  const res = await authedFetch(path, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
   return parseOrThrow<T>(res);
 }
 
@@ -205,6 +220,27 @@ export function createScheduledRide(
 /** Fetch a ride's current state — used to rehydrate the tracking view on reload. */
 export function fetchRide(rideId: string): Promise<RideDetailResponse> {
   return getJson<RideDetailResponse>(`/v1/rides/${rideId}`);
+}
+
+export interface SnapResult {
+  lat: number;
+  lng: number;
+  /** How far the point moved to reach the road, in metres (0 = already on one). */
+  distanceM: number;
+}
+
+/**
+ * Snap a point to the nearest drivable road. Rejects with a `no_road_nearby`
+ * BookingApiError (422) when no road is close enough, so the rider picks again.
+ */
+export function snapToRoad(lat: number, lng: number): Promise<SnapResult> {
+  return getJson<SnapResult>(`/v1/rides/snap?lat=${lat}&lng=${lng}`);
+}
+
+/** The signed-in rider's recent rides, newest first. */
+export async function fetchRideHistory(limit = 20): Promise<RideHistoryItem[]> {
+  const res = await getJson<{ rides: RideHistoryItem[] }>(`/v1/rides?limit=${limit}`);
+  return res.rides;
 }
 
 export interface CancelRideResponse {

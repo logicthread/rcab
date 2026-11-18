@@ -24,6 +24,7 @@ test('W10 sign out', async ({ browser }) => {
   await openBook(page);
   await scene.step(page, 'Signed in (session restored from the refresh cookie)', 'signed in');
   await page.waitForTimeout(3000);
+  await page.getByRole('button', { name: 'Open menu' }).click(); // sign out lives in the side menu
   await page.getByRole('button', { name: 'Sign out' }).click();
   await page.waitForURL('**/signin', { timeout: 15_000 });
   await scene.step(page, 'Sign out: local state dropped at once, refresh token revoked server-side, redirect to /signin', 'signed out');

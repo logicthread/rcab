@@ -1,33 +1,28 @@
 import Link from 'next/link';
-
-const LINK_STYLE = {
-  display: 'inline-block',
-  padding: '12px 20px',
-  borderRadius: 8,
-  textDecoration: 'none',
-  fontWeight: 600,
-  fontSize: 15,
-} as const;
+import { buttonStyles } from '../components/ui/button';
 
 export default function HomePage() {
   return (
-    <main
-      style={{
-        maxWidth: 520,
-        margin: '72px auto',
-        padding: 16,
-        fontFamily: 'system-ui, sans-serif',
-      }}
-    >
-      <h1 style={{ fontSize: 32, margin: 0 }}>rcab</h1>
-      <p style={{ fontSize: 16, color: '#404040', marginTop: 8 }}>
-        Ride-hailing for tier-2/3 Indian cities. Book a private cab, or share a ride and split the fare.
-      </p>
-      <div style={{ display: 'flex', gap: 12, marginTop: 24 }}>
-        <Link href="/book" style={{ ...LINK_STYLE, background: '#111', color: '#fff' }}>
+    <main className="mx-auto flex min-h-dvh max-w-md flex-col justify-between px-4 pb-8 pt-12">
+      <div>
+        <h1 className="inline-flex items-center rounded-full bg-amber px-3 py-1 text-sm font-bold text-amber-ink">
+          rcab
+        </h1>
+        <p className="mt-6 text-[44px] font-bold leading-[1.05] tracking-tight">
+          Your cab, at the corner in minutes.
+        </p>
+        <p className="mt-4 max-w-[34ch] text-lg text-muted">
+          Book a bike, auto, cab or SUV and follow your driver live.
+        </p>
+      </div>
+      <div className="mt-10 flex flex-col gap-3">
+        <Link href="/book" className={buttonStyles({ variant: 'accent', size: 'lg', block: true })}>
           Book a ride
         </Link>
-        <Link href="/signin" style={{ ...LINK_STYLE, border: '1px solid #d4d4d4', color: '#111' }}>
+        <Link
+          href="/signin"
+          className={buttonStyles({ variant: 'secondary', size: 'lg', block: true })}
+        >
           Sign in
         </Link>
       </div>

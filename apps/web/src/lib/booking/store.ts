@@ -1,7 +1,10 @@
 'use client';
 
 import { create } from 'zustand';
+import { FEATURES } from '../../config/features';
 import {
+  DEFAULT_VEHICLE,
+  type VehicleType,
   type Money,
   type Place,
   type PointField,
@@ -31,6 +34,7 @@ export interface DriverPosition {
 
 export interface BookingState {
   rideType: RideType;
+  vehicle: VehicleType;
   pickup: Place | null;
   dropoff: Place | null;
   activeField: PointField;
@@ -63,6 +67,7 @@ export interface BookingState {
   scheduledFor: string | null;
 
   setRideType: (next: RideType) => void;
+  setVehicle: (next: VehicleType) => void;
   setActiveField: (field: PointField) => void;
   setPoint: (field: PointField, place: Place) => void;
   applyPreset: (trip: PresetTrip) => void;
@@ -98,8 +103,9 @@ export interface BookingState {
   reset: () => void;
 }
 
-const INITIAL_STATE = {
-  rideType: 'shared' as RideType,
+const initialState = () => ({
+  rideType: (FEATURES.sharedRides ? 'shared' : 'private') as RideType,
+  vehicle: DEFAULT_VEHICLE as VehicleType,
   pickup: null as Place | null,
   dropoff: null as Place | null,
   activeField: 'pickup' as PointField,
@@ -118,7 +124,7 @@ const INITIAL_STATE = {
   searchRetry: null as { retryUntil: string | null } | null,
   rated: false,
   scheduledFor: null as string | null,
-};
+});
 
 // The API emits a fixed lifecycle vocabulary; anything unexpected falls back to
 // `requested` so the banner stays sane rather than rendering a raw string.
@@ -151,7 +157,11 @@ const CLEAR_QUOTE = { quote: null, quoteError: null, stage: 'idle' as BookingSta
 const clearQuote = (epoch: number) => ({ ...CLEAR_QUOTE, quoteEpoch: epoch + 1 });
 
 export const useBookingStore = create<BookingState>((set, get) => ({
-  ...INITIAL_STATE,
+  ...initialState(),
+
+  setVehicle(next) {
+    set({ vehicle: next });
+  },
 
   setRideType(next) {
     if (next === get().rideType) return;
@@ -291,6 +301,6 @@ export const useBookingStore = create<BookingState>((set, get) => ({
   },
 
   reset() {
-    set({ ...INITIAL_STATE, quoteEpoch: get().quoteEpoch + 1 });
+    set({ ...initialState(), quoteEpoch: get().quoteEpoch + 1 });
   },
 }));

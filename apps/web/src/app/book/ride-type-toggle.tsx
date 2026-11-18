@@ -1,5 +1,6 @@
 'use client';
 
+import { clsx } from 'clsx';
 import type { RideType } from '../../lib/booking/types';
 
 interface Props {
@@ -18,14 +19,7 @@ export function RideTypeToggle({ value, onChange, disabled }: Props) {
     <div
       role="radiogroup"
       aria-label="Ride type"
-      style={{
-        display: 'flex',
-        gap: 8,
-        border: '1px solid #d4d4d4',
-        borderRadius: 8,
-        padding: 4,
-        background: '#fafafa',
-      }}
+      className="flex gap-1 rounded-panel border border-line bg-surface p-1"
     >
       {OPTIONS.map((opt) => {
         const selected = opt.value === value;
@@ -38,20 +32,15 @@ export function RideTypeToggle({ value, onChange, disabled }: Props) {
             aria-label={opt.label}
             disabled={disabled}
             onClick={() => onChange(opt.value)}
-            style={{
-              flex: 1,
-              padding: '10px 12px',
-              borderRadius: 6,
-              border: 'none',
-              cursor: disabled ? 'not-allowed' : 'pointer',
-              background: selected ? '#111' : 'transparent',
-              color: selected ? '#fff' : '#111',
-              textAlign: 'left',
-              opacity: disabled ? 0.5 : 1,
-            }}
+            className={clsx(
+              'min-h-[56px] flex-1 rounded-[12px] px-3 py-2 text-left transition-colors duration-150 disabled:opacity-50',
+              selected ? 'bg-ink text-on-ink' : 'text-ink hover:bg-paper',
+            )}
           >
-            <div style={{ fontWeight: 600 }}>{opt.label}</div>
-            <div style={{ fontSize: 12, opacity: 0.75 }}>{opt.subtitle}</div>
+            <div className="font-semibold">{opt.label}</div>
+            <div className={clsx('text-xs', selected ? 'text-on-ink/75' : 'text-muted')}>
+              {opt.subtitle}
+            </div>
           </button>
         );
       })}

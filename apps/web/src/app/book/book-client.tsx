@@ -11,6 +11,7 @@ import {
   apiRideType,
   type Money,
   type Place,
+  type PointField,
   type PresetTrip,
 } from '../../lib/booking/types';
 import {
@@ -21,14 +22,19 @@ import {
   createSharedRide,
   fetchQuote,
   fetchRide,
+  snapToRoad,
   submitRating,
 } from '../../lib/booking/api';
 import { connectBookingSocket } from '../../lib/booking/ws';
 import { createIntentKeyTracker } from '../../lib/booking/intent';
 import { reverseGeocode } from '../../lib/geo/nominatim';
 import { AddressSearch } from './address-search';
+import { Button } from '../../components/ui/button';
+import { MenuDrawer } from '../../components/menu-drawer';
 import { validateSchedule } from '../../lib/booking/schedule';
+import { FEATURES } from '../../config/features';
 import { RideTypeToggle } from './ride-type-toggle';
+import { VehiclePicker } from './vehicle-picker';
 import { SchedulePicker } from './schedule-picker';
 import { PoolBadge } from './pool-badge';
 import { poolStatusLabel } from '../../lib/booking/pool-status';
@@ -36,10 +42,17 @@ import { SoloFallbackBanner } from './solo-fallback-banner';
 import { RideTrackingPanel } from './ride-tracking-panel';
 
 const ACTIVE_RIDE_KEY = 'rcab_active_ride';
+// Tell the rider when snapping moved their point by at least this much (smaller shifts are invisible).
+const SNAP_NOTICE_MIN_M = 15;
 // Terminal solo statuses: the persisted active-ride marker is dropped (and a reload
 // does not resume tracking) once the ride reaches any of them. `no_show` is a terminal
 // state the driver can put a ride into after the wait, so it must be here too.
-const TERMINAL_RIDE_STATUSES: readonly string[] = ['completed', 'no_driver', 'cancelled', 'no_show'];
+const TERMINAL_RIDE_STATUSES: readonly string[] = [
+  'completed',
+  'no_driver',
+  'cancelled',
+  'no_show',
+];
 
 // Leaflet touches `window`, so the map is client-only (no SSR).
 const MapPicker = dynamic(() => import('./map-picker').then((m) => m.MapPicker), {
@@ -87,6 +100,8 @@ function BookPage() {
   const getToken = useCallback(() => useAuthStore.getState().getAccessToken(), []);
   const {
     rideType,
+    vehicle,
+    setVehicle,
     pickup,
     dropoff,
     activeField,
@@ -326,23 +341,93 @@ function BookPage() {
     createErrorMessage,
   ]);
 
-  // Tap the map → set the active endpoint, then resolve a human label.
+  // Every pickup / drop-off is snapped to the nearest road BEFORE it is set, so the
+  // marker the rider sees, the quote token and the driver's navigation share one
+  // on-road coordinate. A newer pick for the same field supersedes an older one.
+  const snapSeq = useRef<Record<PointField, number>>({ pickup: 0, dropoff: 0 });
+  const [snapNotes, setSnapNotes] = useState<Record<PointField, string | null>>({
+    pickup: null,
+    dropoff: null,
+  });
+  const [snapError, setSnapError] = useState<string | null>(null);
+
+  const resolvePoint = useCallback(
+    async (field: PointField, place: Place): Promise<Place | null> => {
+      const seq = ++snapSeq.current[field];
+      const name = field === 'pickup' ? 'Pickup' : 'Drop-off';
+      try {
+        const snapped = await snapToRoad(place.lat, place.lng);
+        if (seq !== snapSeq.current[field]) return null;
+        setSnapError(null);
+        setSnapNotes((n) => ({
+          ...n,
+          [field]:
+            snapped.distanceM >= SNAP_NOTICE_MIN_M
+              ? `${name} moved ${snapped.distanceM} m to the nearest road.`
+              : null,
+        }));
+        return { ...place, lat: snapped.lat, lng: snapped.lng };
+      } catch (err) {
+        if (seq !== snapSeq.current[field]) return null;
+        if (err instanceof BookingApiError && err.isNoRoadNearby) {
+          setSnapError(`${name}: ${err.message}`);
+          return null;
+        }
+        // Snapping is unavailable (offline / routing down): keep the point as picked;
+        // the quote step reports a routing outage itself.
+        setSnapNotes((n) => ({ ...n, [field]: null }));
+        return place;
+      }
+    },
+    [],
+  );
+
+  const choosePoint = useCallback(
+    async (field: PointField, place: Place) => {
+      const resolved = await resolvePoint(field, place);
+      if (resolved) setPoint(field, resolved);
+    },
+    [resolvePoint, setPoint],
+  );
+
+  const choosePreset = useCallback(
+    async (preset: PresetTrip) => {
+      const [pickupPoint, dropoffPoint] = await Promise.all([
+        resolvePoint('pickup', preset.pickup),
+        resolvePoint('dropoff', preset.dropoff),
+      ]);
+      if (pickupPoint && dropoffPoint) {
+        applyPreset({ ...preset, pickup: pickupPoint, dropoff: dropoffPoint });
+      }
+    },
+    [resolvePoint, applyPreset],
+  );
+
+  const swapSnapped = useCallback(() => {
+    swapPoints();
+    setSnapNotes((n) => ({ pickup: n.dropoff, dropoff: n.pickup }));
+  }, [swapPoints]);
+
+  // Tap the map → snap, set the active endpoint, then resolve a human label.
   const handleMapClick = useCallback(
     async (lat: number, lng: number) => {
       const field = useBookingStore.getState().activeField;
       const coordLabel = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
-      setPoint(field, { lat, lng, label: coordLabel });
+      const snapped = await resolvePoint(field, { lat, lng, label: coordLabel });
+      if (!snapped) return;
+      setPoint(field, snapped);
       try {
+        // Name the spot the rider actually tapped; the pin itself sits on the road.
         const label = await reverseGeocode(lat, lng);
         const current = useBookingStore.getState()[field];
-        if (current && current.lat === lat && current.lng === lng) {
-          setPoint(field, { lat, lng, label });
+        if (current && current.lat === snapped.lat && current.lng === snapped.lng) {
+          setPoint(field, { lat: snapped.lat, lng: snapped.lng, label });
         }
       } catch {
         /* keep the coordinate label */
       }
     },
-    [setPoint],
+    [resolvePoint, setPoint],
   );
 
   const submit = useCallback(async () => {
@@ -411,34 +496,21 @@ function BookPage() {
   );
 
   return (
-    <main
-      style={{
-        maxWidth: 520,
-        margin: '24px auto',
-        padding: 16,
-        fontFamily: 'system-ui, sans-serif',
-      }}
-    >
-      <header
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          marginBottom: 16,
-        }}
-      >
-        <h1 style={{ fontSize: 22, margin: 0 }}>Book a ride</h1>
-        <button type="button" onClick={handleSignOut} style={{ fontSize: 13 }}>
-          Sign out
-        </button>
+    <main className="mx-auto max-w-lg px-4 pb-10 pt-5">
+      <header className="flex items-center gap-2">
+        <MenuDrawer account={user?.email ?? user?.phone_e164} onSignOut={handleSignOut} />
+        <div className="min-w-0">
+          <h1 className="text-2xl font-bold">Book a ride</h1>
+          <p className="truncate text-sm text-muted">
+            Signed in as{' '}
+            <strong className="font-semibold text-ink">{user?.email ?? user?.phone_e164}</strong>
+          </p>
+        </div>
       </header>
-      <p style={{ fontSize: 13, color: '#525252', marginTop: 0 }}>
-        Signed in as <strong>{user?.email ?? user?.phone_e164}</strong>
-      </p>
 
       {tracking ? (
         <>
-          <section style={{ marginTop: 12 }}>
+          <section className="mt-4 overflow-hidden rounded-panel border border-line shadow-lift">
             <MapPicker
               pickup={pickup}
               dropoff={dropoff}
@@ -462,211 +534,238 @@ function BookPage() {
         </>
       ) : (
         <>
-          <section style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <AddressSearch
-              label="Pickup"
-              placeholder="Search pickup or tap the map"
-              value={pickup}
-              active={activeField === 'pickup'}
-              testId="pickup-search"
-              onSelect={(p: Place) => setPoint('pickup', p)}
-              onFocus={() => setActiveField('pickup')}
-            />
-            <AddressSearch
-              label="Dropoff"
-              placeholder="Search dropoff or tap the map"
-              value={dropoff}
-              active={activeField === 'dropoff'}
-              testId="dropoff-search"
-              onSelect={(p: Place) => setPoint('dropoff', p)}
-              onFocus={() => setActiveField('dropoff')}
-            />
-            <button
-              type="button"
-              onClick={swapPoints}
-              disabled={!pickup && !dropoff}
-              style={{ alignSelf: 'flex-start', fontSize: 12, padding: '4px 8px' }}
-            >
-              ⇅ Swap
-            </button>
-          </section>
-
-          <section style={{ marginTop: 12 }}>
-            <div style={{ fontSize: 12, color: '#737373', marginBottom: 4 }}>
-              Quick picks (Guwahati)
-            </div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-              {PRESET_TRIPS.map((preset: PresetTrip) => (
-                <button
-                  key={preset.id}
-                  type="button"
-                  onClick={() => applyPreset(preset)}
-                  style={{
-                    fontSize: 12,
-                    padding: '6px 10px',
-                    borderRadius: 16,
-                    border: '1px solid #d4d4d4',
-                    background: '#fafafa',
-                    cursor: 'pointer',
-                  }}
-                >
-                  {preset.label}
-                </button>
-              ))}
-            </div>
-          </section>
-
-          <section style={{ marginTop: 12 }}>
-            <MapPicker
-              pickup={pickup}
-              dropoff={dropoff}
-              routeCoords={routeCoords}
-              center={{ lat: mapCenter.lat, lng: mapCenter.lng }}
-              onMapClick={handleMapClick}
-            />
-            <div style={{ fontSize: 11, color: '#a3a3a3', marginTop: 4 }}>
-              Tap the map to set your {activeField}.
-            </div>
-          </section>
-
-          <section style={{ marginTop: 16 }}>
-            <label style={{ fontSize: 13, fontWeight: 600 }}>Ride type</label>
-            <div style={{ marginTop: 6 }}>
-              <RideTypeToggle
-                value={rideType}
-                onChange={setRideType}
-                disabled={stage === 'requesting'}
+          {/* Once a shared ride exists the booking form is done: show the pool, not the form. */}
+          {sharedRideId && (
+            <section className="mt-4 overflow-hidden rounded-panel border border-line shadow-lift">
+              <MapPicker
+                pickup={pickup}
+                dropoff={dropoff}
+                routeCoords={routeCoords}
+                center={{ lat: mapCenter.lat, lng: mapCenter.lng }}
+                onMapClick={() => undefined}
               />
-            </div>
-          </section>
-
-          {rideType === 'private' && (
-            <section style={{ marginTop: 16 }}>
-              <label style={{ fontSize: 13, fontWeight: 600 }}>Pickup time</label>
-              <div style={{ marginTop: 6 }}>
-                <SchedulePicker
-                  value={scheduledFor}
-                  onChange={setScheduledFor}
-                  disabled={stage === 'requesting'}
-                />
-              </div>
             </section>
           )}
-
-          <section
-            data-testid="quote-panel"
-            style={{
-              marginTop: 16,
-              padding: 14,
-              border: '1px solid #e5e5e5',
-              borderRadius: 8,
-              background: '#fff',
-            }}
-          >
-            <div style={{ fontSize: 13, color: '#525252' }}>Quote</div>
-            {!bothSet && (
-              <div style={{ fontSize: 13, color: '#737373', marginTop: 4 }}>
-                Set a pickup and dropoff to see your fare.
-              </div>
-            )}
-            {stage === 'quoting' && <div>Pricing…</div>}
-            {quoteError && (
-              <div data-testid="quote-error" style={{ color: '#b91c1c', marginTop: 4 }}>
-                {quoteError}
-                <button
-                  type="button"
-                  data-testid="quote-retry"
-                  onClick={() => setQuoteNonce((n) => n + 1)}
-                  style={{ marginLeft: 8, fontSize: 12 }}
+          {!sharedRideId && (
+            <>
+              <section className="mt-4 flex flex-col gap-3 rounded-panel border border-line bg-surface p-4 shadow-lift">
+                <AddressSearch
+                  label="Pickup"
+                  placeholder="Search pickup or tap the map"
+                  value={pickup}
+                  active={activeField === 'pickup'}
+                  testId="pickup-search"
+                  onSelect={(p: Place) => void choosePoint('pickup', p)}
+                  onFocus={() => setActiveField('pickup')}
+                />
+                <AddressSearch
+                  label="Dropoff"
+                  placeholder="Search dropoff or tap the map"
+                  value={dropoff}
+                  active={activeField === 'dropoff'}
+                  testId="dropoff-search"
+                  onSelect={(p: Place) => void choosePoint('dropoff', p)}
+                  onFocus={() => setActiveField('dropoff')}
+                />
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  className="self-start"
+                  onClick={swapSnapped}
+                  disabled={!pickup && !dropoff}
                 >
-                  Retry
-                </button>
-              </div>
-            )}
-            {quote && stage !== 'error' && (
-              <div style={{ marginTop: 6 }}>
-                <div style={{ fontSize: 20, fontWeight: 700 }} data-testid="quote-headline">
-                  {rideType === 'shared' && indicativeSeatPrice
-                    ? `${formatMoney(indicativeSeatPrice)} – ${formatMoney(quote.soloFare)}`
-                    : formatMoney(quote.soloFare)}
-                </div>
-                <div style={{ fontSize: 12, color: '#525252', marginTop: 4 }}>
-                  Solo fare for this route: {formatMoney(quote.soloFare)}
-                  {' · '}
-                  {(quote.distanceM / 1000).toFixed(1)} km
-                  {' · '}
-                  {Math.round(quote.durationS / 60)} min
-                </div>
-                {rideType === 'shared' && quote.sharedEstimate && (
-                  // The seat fare is fixed when you join (stand-in policy until
-                  // RCAB-E8.S9): joining a ride that already has a rider gives
-                  // the shared price; starting a new one locks the solo fare.
-                  <div
-                    style={{ fontSize: 12, color: '#525252', marginTop: 4 }}
-                    data-testid="shared-fare-note"
+                  ⇅ Swap
+                </Button>
+                {snapError && (
+                  <p
+                    role="alert"
+                    data-testid="snap-error"
+                    className="rounded-control bg-stop-wash px-3 py-2 text-sm font-medium text-stop"
                   >
-                    {formatMoney(quote.sharedEstimate.perSeatPrice)} if you join a ride already
-                    going your way; {formatMoney(quote.soloFare)} if you start a new one. Your fare
-                    is fixed when you book.
+                    {snapError}
+                  </p>
+                )}
+                {[
+                  pickup && snapNotes.pickup,
+                  dropoff && snapNotes.dropoff,
+                ]
+                  .filter((n): n is string => Boolean(n))
+                  .map((note) => (
+                    <p key={note} data-testid="snap-note" className="text-sm text-muted">
+                      {note}
+                    </p>
+                  ))}
+              </section>
+
+              <section className="mt-4">
+                <div className="mb-2 text-sm font-medium text-muted">Quick picks (Guwahati)</div>
+                <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1">
+                  {PRESET_TRIPS.map((preset: PresetTrip) => (
+                    <button
+                      key={preset.id}
+                      type="button"
+                      onClick={() => void choosePreset(preset)}
+                      className="min-h-tap shrink-0 rounded-full border border-line-strong bg-surface px-4 text-sm font-medium transition-colors hover:bg-amber-wash active:bg-amber-wash"
+                    >
+                      {preset.label}
+                    </button>
+                  ))}
+                </div>
+              </section>
+
+              <section className="mt-4">
+                <div className="overflow-hidden rounded-panel border border-line shadow-lift">
+                  <MapPicker
+                    pickup={pickup}
+                    dropoff={dropoff}
+                    routeCoords={routeCoords}
+                    center={{ lat: mapCenter.lat, lng: mapCenter.lng }}
+                    onMapClick={handleMapClick}
+                  />
+                </div>
+                <div className="mt-1.5 text-sm text-muted">
+                  Tap the map to set your {activeField}.
+                </div>
+              </section>
+
+              <section className="mt-5">
+                <label className="text-sm font-semibold">Choose a vehicle</label>
+                <div className="mt-2">
+                  <VehiclePicker
+                    value={vehicle}
+                    onChange={setVehicle}
+                    disabled={stage === 'requesting'}
+                  />
+                </div>
+              </section>
+
+              {FEATURES.sharedRides && (
+                <section className="mt-5">
+                  <label className="text-sm font-semibold">Ride type</label>
+                  <div className="mt-2">
+                    <RideTypeToggle
+                      value={rideType}
+                      onChange={setRideType}
+                      disabled={stage === 'requesting'}
+                    />
+                  </div>
+                </section>
+              )}
+
+              {rideType === 'private' && (
+                <section className="mt-5">
+                  <label className="text-sm font-semibold">Pickup time</label>
+                  <div className="mt-2">
+                    <SchedulePicker
+                      value={scheduledFor}
+                      onChange={setScheduledFor}
+                      disabled={stage === 'requesting'}
+                    />
+                  </div>
+                </section>
+              )}
+
+              <section
+                data-testid="quote-panel"
+                className="mt-5 rounded-panel border border-line bg-surface p-4 shadow-lift"
+              >
+                <div className="text-sm font-semibold text-muted">Quote</div>
+                {!bothSet && (
+                  <div className="mt-1 text-sm text-muted">
+                    Set a pickup and dropoff to see your fare.
                   </div>
                 )}
-              </div>
-            )}
-          </section>
+                {stage === 'quoting' && <div className="mt-1">Pricing…</div>}
+                {quoteError && (
+                  <div data-testid="quote-error" className="mt-2 font-medium text-stop">
+                    {quoteError}
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      className="ml-3"
+                      data-testid="quote-retry"
+                      onClick={() => setQuoteNonce((n) => n + 1)}
+                    >
+                      Retry
+                    </Button>
+                  </div>
+                )}
+                {quote && stage !== 'error' && (
+                  <div className="mt-1">
+                    <div className="text-3xl font-bold tabular-nums" data-testid="quote-headline">
+                      {rideType === 'shared' && indicativeSeatPrice
+                        ? `${formatMoney(indicativeSeatPrice)} – ${formatMoney(quote.soloFare)}`
+                        : formatMoney(quote.soloFare)}
+                    </div>
+                    <div className="mt-1 text-sm text-muted">
+                      Solo fare for this route: {formatMoney(quote.soloFare)}
+                      {' · '}
+                      {(quote.distanceM / 1000).toFixed(1)} km
+                      {' · '}
+                      {Math.round(quote.durationS / 60)} min
+                    </div>
+                    {rideType === 'shared' && quote.sharedEstimate && (
+                      // The seat fare is fixed when you join (stand-in policy until
+                      // RCAB-E8.S9): joining a ride that already has a rider gives
+                      // the shared price; starting a new one locks the solo fare.
+                      <div
+                        className="mt-3 rounded-control bg-go-wash px-3 py-2 text-sm text-go"
+                        data-testid="shared-fare-note"
+                      >
+                        {formatMoney(quote.sharedEstimate.perSeatPrice)} if you join a ride already
+                        going your way; {formatMoney(quote.soloFare)} if you start a new one. Your
+                        fare is fixed when you book.
+                      </div>
+                    )}
+                  </div>
+                )}
+              </section>
 
-          <section style={{ marginTop: 16 }}>
-            {rideType === 'shared' ? (
-              <button
-                type="button"
-                onClick={submit}
-                disabled={
-                  !quote || stage === 'requesting' || stage === 'opened' || stage === 'slotted'
-                }
-                data-testid="submit-shared"
-                style={{
-                  width: '100%',
-                  padding: '12px 16px',
-                  background: '#111',
-                  color: '#fff',
-                  borderRadius: 8,
-                  border: 'none',
-                  fontSize: 15,
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                }}
-              >
-                {stage === 'requesting' ? 'Requesting…' : 'Book share'}
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={submitSolo}
-                disabled={!quote || stage === 'requesting'}
-                data-testid="submit-private"
-                style={{
-                  width: '100%',
-                  padding: '12px 16px',
-                  background: '#111',
-                  color: '#fff',
-                  borderRadius: 8,
-                  border: 'none',
-                  fontSize: 15,
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                }}
-              >
-                {stage === 'requesting' ? 'Requesting…' : scheduledFor ? 'Schedule ride' : 'Book'}
-              </button>
-            )}
-            {requestError && (
-              <div style={{ marginTop: 8, color: '#b91c1c', fontSize: 13 }}>{requestError}</div>
-            )}
-          </section>
+              <section className="mt-5">
+                {rideType === 'shared' ? (
+                  <Button
+                    variant="accent"
+                    size="lg"
+                    block
+                    onClick={submit}
+                    loading={stage === 'requesting'}
+                    disabled={
+                      !quote || stage === 'requesting' || stage === 'opened' || stage === 'slotted'
+                    }
+                    data-testid="submit-shared"
+                  >
+                    {stage === 'requesting' ? 'Requesting…' : 'Book share'}
+                  </Button>
+                ) : (
+                  <Button
+                    variant="accent"
+                    size="lg"
+                    block
+                    onClick={submitSolo}
+                    loading={stage === 'requesting'}
+                    disabled={!quote || stage === 'requesting'}
+                    data-testid="submit-private"
+                  >
+                    {stage === 'requesting'
+                      ? 'Requesting…'
+                      : scheduledFor
+                        ? 'Schedule ride'
+                        : 'Book'}
+                  </Button>
+                )}
+                {requestError && (
+                  <div className="mt-3 rounded-control bg-stop-wash px-3 py-2 text-sm font-medium text-stop">
+                    {requestError}
+                  </div>
+                )}
+              </section>
+            </>
+          )}
 
           {sharedRideId && (
-            <section style={{ marginTop: 16 }}>
+            <section className="mt-4 rounded-panel border border-line bg-surface p-4 shadow-lift">
               <div
-                style={{ fontSize: 13, color: '#525252' }}
+                className="text-sm font-medium text-muted"
                 data-testid="pool-status"
                 data-pool-status={poolStatus ?? 'pending'}
                 data-seat-count={seatCount}
@@ -676,9 +775,10 @@ function BookPage() {
                 {poolStatusLabel(poolStatus)}
               </div>
               {agreedFare && (
-                <div style={{ fontSize: 14, marginTop: 6 }} data-testid="agreed-fare">
-                  Your fare: <strong>{formatMoney(agreedFare)}</strong>{' '}
-                  <span style={{ color: '#525252', fontSize: 12 }}>(fixed when you joined)</span>
+                <div className="mt-2" data-testid="agreed-fare">
+                  Your fare:{' '}
+                  <strong className="text-lg tabular-nums">{formatMoney(agreedFare)}</strong>{' '}
+                  <span className="text-sm text-muted">(fixed when you joined)</span>
                 </div>
               )}
               <PoolBadge seatCount={seatCount} />
@@ -688,14 +788,15 @@ function BookPage() {
               {/* Only once the pool is over (as for a solo ride): mid-trip it
                   dropped the rider out of the pool view. */}
               {(poolStatus === 'completed' || poolStatus === 'aborted') && (
-                <button
-                  type="button"
+                <Button
+                  variant="accent"
+                  block
+                  className="mt-3"
                   onClick={reset}
                   data-testid="pool-new-booking"
-                  style={{ marginTop: 10, fontSize: 13, padding: '6px 10px' }}
                 >
                   New booking
-                </button>
+                </Button>
               )}
             </section>
           )}

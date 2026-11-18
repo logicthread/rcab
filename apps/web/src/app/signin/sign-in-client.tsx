@@ -18,6 +18,8 @@ import {
   loadGsi,
   type GoogleCredentialResponse,
 } from '../../lib/auth/google';
+import { Button } from '../../components/ui/button';
+import { Spinner } from '../../components/ui/spinner';
 
 // Phone OTP (Firebase) is DISABLED until the pre-launch OTP provider lands
 // (policy auth.enabledMethods, RCAB-E8.S15). Its code stays, but it is a lazy
@@ -144,41 +146,56 @@ export default function SignInPage() {
   }, [googleEnabled, googleClientId, gsiAttempt]);
 
   return (
-    <main style={{ maxWidth: 360, margin: '0 auto', padding: 16 }}>
-      <h1>Sign in</h1>
+    <main className="mx-auto flex min-h-dvh max-w-sm flex-col justify-center px-4 py-10">
+      <p className="mb-6 inline-flex w-fit rounded-full bg-amber px-3 py-1 text-sm font-bold text-amber-ink">
+        rcab
+      </p>
+      <h1 className="text-4xl font-bold leading-tight">Sign in</h1>
 
-      {cfg.status === 'loading' && <p role="status">Loading sign-in options…</p>}
+      {cfg.status === 'loading' && (
+        <p role="status" className="mt-4 flex items-center gap-2 text-muted">
+          <Spinner /> Loading sign-in options…
+        </p>
+      )}
 
       {cfg.status === 'error' && (
-        <div role="alert">
-          <p>Could not load sign-in options. Check your connection and try again.</p>
-          <button type="button" onClick={() => setCfgAttempt((n) => n + 1)}>
+        <div role="alert" className="mt-4 rounded-panel border border-stop/30 bg-stop-wash p-4">
+          <p className="text-stop">
+            Could not load sign-in options. Check your connection and try again.
+          </p>
+          <Button variant="secondary" className="mt-3" onClick={() => setCfgAttempt((n) => n + 1)}>
             Try again
-          </button>
+          </Button>
         </div>
       )}
 
       {config && config.methods.length === 0 && (
-        <p role="alert">Sign-in is not available right now.</p>
+        <p role="alert" className="mt-4 text-muted">
+          Sign-in is not available right now.
+        </p>
       )}
 
       {googleEnabled && (
-        <section aria-label="Google sign-in" aria-busy={busy}>
-          <p style={{ fontSize: 14, color: '#525252' }}>
+        <section aria-label="Google sign-in" aria-busy={busy} className="mt-4">
+          <p className="max-w-[36ch] text-muted">
             Sign in with your Google account. New here? An account is created the first time you
             sign in.
           </p>
 
           {googleClientId === null && (
-            <p role="alert">{signInErrorMessage('google_not_configured')}</p>
+            <p role="alert" className="mt-4 text-stop">
+              {signInErrorMessage('google_not_configured')}
+            </p>
           )}
 
           {googleClientId !== null && (
-            <div style={{ opacity: busy ? 0.5 : 1, pointerEvents: busy ? 'none' : 'auto' }}>
+            <div
+              className={busy ? 'pointer-events-none mt-6 opacity-50' : 'mt-6'}
+            >
               {googleState === 'loading' && (
-                <button type="button" disabled style={{ width: 280, padding: '10px 12px' }}>
+                <Button variant="secondary" size="lg" block disabled>
                   Continue with Google
-                </button>
+                </Button>
               )}
               {/* Google renders its own "Continue with Google" button here. */}
               <div ref={googleButtonRef} data-testid="google-signin-button" />
@@ -186,18 +203,22 @@ export default function SignInPage() {
           )}
 
           {googleState === 'failed' && (
-            <div role="alert">
-              <p>
+            <div role="alert" className="mt-4 rounded-panel border border-stop/30 bg-stop-wash p-4">
+              <p className="text-stop">
                 Could not load Google sign-in. Check your connection (or any content blocker) and
                 try again.
               </p>
-              <button type="button" onClick={() => setGsiAttempt((n) => n + 1)}>
+              <Button variant="secondary" className="mt-3" onClick={() => setGsiAttempt((n) => n + 1)}>
                 Try again
-              </button>
+              </Button>
             </div>
           )}
 
-          {busy && <p role="status">Signing you in…</p>}
+          {busy && (
+            <p role="status" className="mt-4 flex items-center gap-2 text-muted">
+              <Spinner /> Signing you in…
+            </p>
+          )}
         </section>
       )}
 
@@ -212,7 +233,7 @@ export default function SignInPage() {
       )}
 
       {error && (
-        <p role="alert" style={{ color: '#b91c1c' }}>
+        <p role="alert" className="mt-4 rounded-control bg-stop-wash px-3 py-2 font-medium text-stop">
           {error}
         </p>
       )}

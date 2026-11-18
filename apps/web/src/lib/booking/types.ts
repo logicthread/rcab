@@ -166,6 +166,18 @@ export interface RideDetailResponse {
   scheduledFor?: string | null;
 }
 
+/** One row of GET /v1/rides (the rider's ride history). */
+export interface RideHistoryItem {
+  rideId: string;
+  status: string;
+  type: string;
+  fare: Money;
+  origin: { lat: number; lng: number };
+  dropoff: { lat: number; lng: number };
+  scheduledFor: string | null;
+  createdAt: string;
+}
+
 /** A point chosen on the map / via search, with a human-readable label. */
 export interface Place {
   lat: number;
@@ -215,3 +227,22 @@ export const MAP_DEFAULT_CENTER: Place = {
 export function apiRideType(rideType: RideType): ApiRideType {
   return rideType === 'shared' ? 'shared' : 'normal';
 }
+
+/** What the rider asks to be picked up in. UI catalogue only: the API does not price or dispatch by vehicle yet. */
+export type VehicleType = 'bike' | 'auto' | 'cab' | 'suv' | 'seater_6';
+
+export interface VehicleOption {
+  id: VehicleType;
+  label: string;
+  detail: string;
+}
+
+export const VEHICLE_OPTIONS: readonly VehicleOption[] = [
+  { id: 'bike', label: 'Bike', detail: '1 rider' },
+  { id: 'auto', label: 'Auto', detail: '3 seats' },
+  { id: 'cab', label: 'Cab', detail: 'Car' },
+  { id: 'suv', label: 'SUV', detail: 'Roomy car' },
+  { id: 'seater_6', label: '6 seater', detail: '6 seats' },
+];
+
+export const DEFAULT_VEHICLE: VehicleType = 'cab';
