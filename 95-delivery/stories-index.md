@@ -131,13 +131,13 @@ audience: both
 | RCAB-E8.S13 | [[story-rcab-e8-s13-scheduled-cutoff-searching-ui]] — Scheduled retry cutoff + passenger searching state (+ optimistic shared pricing) | ▶ |
 | RCAB-E8.S14 | [[story-rcab-e8-s14-team-onboarding-pack]] — Team onboarding pack (walkthrough, state machines, role guides, demo videos) | ▶ |
 | RCAB-E8.S15 | [[story-rcab-e8-s15-google-only-sign-in]] — Google-only sign-in and registration until launch (phone OTP behind a policy flag) | ▶ |
-| RCAB-E8.S16 | [[story-rcab-e8-s16-web-design-system-themes]] — Web design system, light/dark themes and restyled screens | ▶ |
-| RCAB-E8.S17 | [[story-rcab-e8-s17-booking-vehicle-picker-share-flag]] — Booking: vehicle picker (UI), shared rides behind a flag, pool view fix | ▶ |
-| RCAB-E8.S18 | [[story-rcab-e8-s18-account-menu-profile-ride-history]] — Account menu, profile and ride history (web + API) | ▶ |
-| RCAB-E8.S19 | [[story-rcab-e8-s19-feedback-and-support-chat]] — In-app feedback form and support chat | ▶ |
-| RCAB-E8.S20 | [[story-rcab-e8-s20-driver-app-theme-menu]] — Driver app: themes, side menu, trip history, feedback, help, profile | ▶ |
-| RCAB-E8.S21 | [[story-rcab-e8-s21-snap-pickup-dropoff-to-road]] — Snap pickup and drop-off to the nearest road | ▶ |
-| RCAB-E8.S22 | [[story-rcab-e8-s22-dispatch-three-waves]] — Dispatch in three waves (3 / 5 / 7 km, 20 drivers each) | ▶ |
+| RCAB-E8.S17 | [[story-rcab-e8-s17-web-design-system-themes]] — Web design system, light/dark themes and restyled screens | ▶ |
+| RCAB-E8.S18 | [[story-rcab-e8-s18-booking-vehicle-picker-share-flag]] — Booking: vehicle picker (UI), shared rides behind a flag, pool view fix | ▶ |
+| RCAB-E8.S19 | [[story-rcab-e8-s19-account-menu-profile-ride-history]] — Account menu, profile and ride history (web + API) | ▶ |
+| RCAB-E8.S20 | [[story-rcab-e8-s20-feedback-and-support-chat]] — In-app feedback form and support chat | ▶ |
+| RCAB-E8.S21 | [[story-rcab-e8-s21-driver-app-theme-menu]] — Driver app: themes, side menu, trip history, feedback, help, profile | ▶ |
+| RCAB-E8.S22 | [[story-rcab-e8-s22-snap-pickup-dropoff-to-road]] — Snap pickup and drop-off to the nearest road | ▶ |
+| RCAB-E8.S23 | [[story-rcab-e8-s23-dispatch-three-waves]] — Dispatch in three waves (3 / 5 / 7 km, 20 drivers each) | ▶ |
 
 ## E9 — Pilot rollout → Demo 8 · "Real drivers, real city"
 *Closed pilot, observation, iteration to Phase-0 scale.* See [[epic-e9-pilot-rollout]].

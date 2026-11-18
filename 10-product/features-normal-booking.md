@@ -24,8 +24,8 @@ audience: both
 ## Constraints
 
 - If no driver accepts within 30 s the search widens to 5 km (wave 2), and at 45 s to 7 km (wave 3). After 60 s total, the request fails with an actionable error.
-- **Pickup and drop-off are snapped to the nearest road** before quoting (`GET /v1/rides/snap`); the rider is told when a point moved 15 m or more, and a spot more than 500 m from any road is refused (RCAB-E8.S21). The driver's navigation therefore targets the same on-road point the rider sees.
-- The booking screen offers a vehicle choice (Bike, Auto, Cab, SUV, 6 seater). **UI-only for now**: fares and dispatch do not yet depend on it (RCAB-E8.S17).
+- **Pickup and drop-off are snapped to the nearest road** before quoting (`GET /v1/rides/snap`); the rider is told when a point moved 15 m or more, and a spot more than 500 m from any road is refused (RCAB-E8.S22). The driver's navigation therefore targets the same on-road point the rider sees.
+- The booking screen offers a vehicle choice (Bike, Auto, Cab, SUV, 6 seater). **UI-only for now**: fares and dispatch do not yet depend on it (RCAB-E8.S18).
 - Quote is valid for 5 min. After that, a re-quote is required.
 
 ## See also

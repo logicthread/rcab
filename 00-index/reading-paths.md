@@ -100,11 +100,11 @@ Flutter app skeleton: navigation, state mgmt, auth, FCM, background location.
 Open Google Maps with turn-by-turn for the active ride. Includes why the pin and the route end can differ (snap pickup / drop-off to the road at booking).
 - [[driver-google-maps-handoff]]
 - [[integration-google-maps-deeplink]]
-- [[integration-osrm]] · [[story-rcab-e8-s21-snap-pickup-dropoff-to-road]]
+- [[integration-osrm]] · [[story-rcab-e8-s22-snap-pickup-dropoff-to-road]]
 
 ### `path:implement-account-and-support`
 Side menu, profile, ride history, feedback form and support chat (web and driver app), plus theming and the design system.
-- [[story-rcab-e8-s16-web-design-system-themes]] · [[story-rcab-e8-s18-account-menu-profile-ride-history]] · [[story-rcab-e8-s19-feedback-and-support-chat]] · [[story-rcab-e8-s20-driver-app-theme-menu]]
+- [[story-rcab-e8-s17-web-design-system-themes]] · [[story-rcab-e8-s19-account-menu-profile-ride-history]] · [[story-rcab-e8-s20-feedback-and-support-chat]] · [[story-rcab-e8-s21-driver-app-theme-menu]]
 - [[web-nextjs-structure]] · [[web-pages-routes]] · [[driver-screens]] · [[driver-flutter-structure]]
 - [[rest-endpoints]] · [[schema-postgres]] · [[module-map]]
 

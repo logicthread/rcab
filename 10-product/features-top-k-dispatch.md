@@ -29,7 +29,7 @@ In tier-2/3 cities a single "nearest" driver is often slow to respond (different
 | Per-driver offer TTL | 12 s |
 | Hard fail after | 60 s |
 
-Owner decision 2026-11-18 ([[story-rcab-e8-s22-dispatch-three-waves]]): three widening waves instead of two, 20 drivers each. Values live in the policy table (`docs/POLICY.md`).
+Owner decision 2026-11-18 ([[story-rcab-e8-s23-dispatch-three-waves]]): three widening waves instead of two, 20 drivers each. Values live in the policy table (`docs/POLICY.md`).
 
 ## See also
 - [[algo-top-k-dispatch]] · [[module-dispatch]]

@@ -1,10 +1,10 @@
 ---
-title: RCAB-E8.S22 — Dispatch in three waves (3 / 5 / 7 km, 20 drivers each)
+title: RCAB-E8.S23 — Dispatch in three waves (3 / 5 / 7 km, 20 drivers each)
 tags: [layer/delivery, kind/story]
 status: in_review
 phase: 0
 epic: [[epic-e8-production-hardening]]
-story_id: RCAB-E8.S22
+story_id: RCAB-E8.S23
 demo: 7
 estimate: m
 hitl: yes
@@ -15,7 +15,7 @@ owner: claude
 audience: both
 ---
 
-# RCAB-E8.S22 — Dispatch in three waves (3 / 5 / 7 km, 20 drivers each)
+# RCAB-E8.S23 — Dispatch in three waves (3 / 5 / 7 km, 20 drivers each)
 
 ## Goal
 
@@ -48,4 +48,4 @@ Owner decision 2026-11-18: search wider and offer to more drivers. Dispatch had 
 
 ## See also
 - [[epic-e8-production-hardening]] · [[algo-top-k-dispatch]] · [[features-top-k-dispatch]] · [[module-dispatch]] · [[policy-config]]
-- [[story-rcab-e8-s21-snap-pickup-dropoff-to-road]]
+- [[story-rcab-e8-s22-snap-pickup-dropoff-to-road]]

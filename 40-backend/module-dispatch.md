@@ -17,7 +17,7 @@ audience: both
 - Start dispatch **only** from durable outbox intents (never from in-memory events): `OutboxRelay` publishes `ride.dispatch.requested`, `ride.wake.schedule` and `pool.*` rows; `DispatchStartService` runs the first wave; `DispatchReconciler` re-arms anything that was committed but never started.
 - For an unmatched trip, find K nearest eligible drivers (via `geo`, active vehicle with enough seats) and persist one `dispatch_offer` row per driver (generation-stamped, DB-clock expiry, 12 s TTL).
 - Validate an accept authoritatively in **one Postgres transaction** (offer owner, expiry, generation, trip state, eligibility) and bind the trip; the `driver_active_assignment` guard allows at most one active trip (solo or shared) per driver.
-- Revoke the remaining offers when one wins; widen in waves: wave 2 at 30 s (5 km), wave 3 at 45 s (7 km), hard-fail at 60 s; K = 20 per wave (RCAB-E8.S22).
+- Revoke the remaining offers when one wins; widen in waves: wave 2 at 30 s (5 km), wave 3 at 45 s (7 km), hard-fail at 60 s; K = 20 per wave (RCAB-E8.S23).
 - Scheduled rides use a longer accept window (see Scheduled below).
 
 ## Algorithm

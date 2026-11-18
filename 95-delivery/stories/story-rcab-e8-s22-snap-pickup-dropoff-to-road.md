@@ -1,10 +1,10 @@
 ---
-title: RCAB-E8.S21 — Snap pickup and drop-off to the nearest road
+title: RCAB-E8.S22 — Snap pickup and drop-off to the nearest road
 tags: [layer/delivery, kind/story]
 status: in_review
 phase: 0
 epic: [[epic-e8-production-hardening]]
-story_id: RCAB-E8.S21
+story_id: RCAB-E8.S22
 demo: 7
 estimate: m
 hitl: yes
@@ -15,7 +15,7 @@ owner: claude
 audience: both
 ---
 
-# RCAB-E8.S21 — Snap pickup and drop-off to the nearest road
+# RCAB-E8.S22 — Snap pickup and drop-off to the nearest road
 
 ## Goal
 
@@ -52,4 +52,4 @@ The driver's "Navigate" button did not end at the rider's marker. Walking the fl
 
 ## See also
 - [[epic-e8-production-hardening]] · [[integration-osrm]] · [[driver-google-maps-handoff]] · [[web-osm-integration]]
-- [[story-rcab-e8-s22-dispatch-three-waves]] · [[ADR-0004-osm-for-booking-google-for-nav]]
+- [[story-rcab-e8-s23-dispatch-three-waves]] · [[ADR-0004-osm-for-booking-google-for-nav]]

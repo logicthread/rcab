@@ -1,21 +1,21 @@
 ---
-title: RCAB-E8.S16 — Web design system, light/dark themes and restyled screens
+title: RCAB-E8.S17 — Web design system, light/dark themes and restyled screens
 tags: [layer/delivery, kind/story]
 status: in_review
 phase: 0
 epic: [[epic-e8-production-hardening]]
-story_id: RCAB-E8.S16
+story_id: RCAB-E8.S17
 demo: 7
 estimate: l
 hitl: yes
 depends_on: [[web-nextjs-structure]], [[web-state-management]]
-blocks: [[story-rcab-e8-s18-account-menu-profile-ride-history]]
+blocks: [[story-rcab-e8-s19-account-menu-profile-ride-history]]
 affected_notes: [[web-nextjs-structure]], [[web-pages-routes]], [[tech-stack]]
 owner: claude
 audience: both
 ---
 
-# RCAB-E8.S16 — Web design system, light/dark themes and restyled screens
+# RCAB-E8.S17 — Web design system, light/dark themes and restyled screens
 
 ## Goal
 
@@ -47,7 +47,7 @@ The web client was unstyled inline CSS (Tailwind installed but never wired). Giv
 
 ## Out of scope
 
-- Driver app theming ([[story-rcab-e8-s20-driver-app-theme-menu]]).
+- Driver app theming ([[story-rcab-e8-s21-driver-app-theme-menu]]).
 - Map tile theming (OSM tiles stay light in both themes).
 
 ## Notes / questions
@@ -57,4 +57,4 @@ The web client was unstyled inline CSS (Tailwind installed but never wired). Giv
 
 ## See also
 - [[epic-e8-production-hardening]] · [[web-nextjs-structure]] · [[web-pages-routes]]
-- [[story-rcab-e8-s17-booking-vehicle-picker-share-flag]] · [[story-rcab-e8-s18-account-menu-profile-ride-history]]
+- [[story-rcab-e8-s18-booking-vehicle-picker-share-flag]] · [[story-rcab-e8-s19-account-menu-profile-ride-history]]

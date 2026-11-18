@@ -34,8 +34,8 @@ Auth errors: 403 `account_disabled` (exchange/Google login), 401 `account_disabl
 ## clients (🧍)
 | Method | Path | Description |
 |---|---|---|
-| GET | `/v1/me` 🔒 | current user profile `{ id, role, displayName, email, phone, memberSince }`; a driver also gets `driver: { ratingAvg, ratingCount, totalRides, vehicle }`. **Built RCAB-E8.S18** (`account` module) |
-| PATCH | `/v1/me` 🔒 | Body `{ displayName }` (1-80 chars, trimmed) → updated profile. Email and phone come from the sign-in and are read-only. **Built RCAB-E8.S18** |
+| GET | `/v1/me` 🔒 | current user profile `{ id, role, displayName, email, phone, memberSince }`; a driver also gets `driver: { ratingAvg, ratingCount, totalRides, vehicle }`. **Built RCAB-E8.S19** (`account` module) |
+| PATCH | `/v1/me` 🔒 | Body `{ displayName }` (1-80 chars, trimmed) → updated profile. Email and phone come from the sign-in and are read-only. **Built RCAB-E8.S19** |
 | PATCH | `/v1/clients/me` 🔒🧍 | update saved places — **not built** (display name is `PATCH /v1/me`) |
 
 ## drivers (🚗)
@@ -66,17 +66,17 @@ Auth errors: 403 `account_disabled` (exchange/Google login), 401 `account_disabl
 | POST | `/v1/rides/:id/state` 🔒🚗 | Body: `{ event }` — advance the [[sm-ride-lifecycle]] (RCAB-E4.S6). `event` ∈ `start_en_route`/`mark_arrived`/`start_ride`/`end_ride`; only the bound driver. 200 `{ rideId, status }`; 409 out-of-order; 403 not-owner; 404 unknown. Cancellation is `/cancel` (E4.S8). |
 | POST | `/v1/rides/:id/cancel` 🔒 | Role-aware cancel of a solo ride (RCAB-E4.S8). Body: `{ reason? }` (required for a driver cancel) or `{ event: 'mark_no_show' }` (driver no-show). Client cancels pre-`in_progress`; driver cancels pre-`completed`; no-show only from `arrived` after the 5-min wait. 200 `{ rideId, status, cancelledBy }`; 403 not-your-ride / non-driver no-show; 404 unknown; 409 `invalid_transition` or `no_show_too_early`. **No fee in Phase-0** (deferred). |
 | GET | `/v1/rides/:id/stops` 🔒🚗 | the claimed driver reads a shared trip's ordered stops (403 for anyone else) |
-| GET | `/v1/rides?limit=` 🔒 | The caller's rides, newest first (default 20, max 50): a client's bookings, or a driver's assigned trips. Items `{ rideId, status, type, fare, origin, dropoff, scheduledFor, createdAt }`. No cursor or addresses yet. **Built RCAB-E8.S18**; detail view stays E7.S3 |
-| GET | `/v1/rides/snap?lat&lng` 🔒 | Nearest drivable road point to a coordinate (OSRM `/nearest`) → `{ lat, lng, distanceM }`. 422 `no_road_nearby` beyond `rides.snapMaxMeters` (500 m); 503 `routing_unavailable`. The web client snaps every pickup / drop-off with it before quoting. **RCAB-E8.S21** |
+| GET | `/v1/rides?limit=` 🔒 | The caller's rides, newest first (default 20, max 50): a client's bookings, or a driver's assigned trips. Items `{ rideId, status, type, fare, origin, dropoff, scheduledFor, createdAt }`. No cursor or addresses yet. **Built RCAB-E8.S19**; detail view stays E7.S3 |
+| GET | `/v1/rides/snap?lat&lng` 🔒 | Nearest drivable road point to a coordinate (OSRM `/nearest`) → `{ lat, lng, distanceM }`. 422 `no_road_nearby` beyond `rides.snapMaxMeters` (500 m); 503 `routing_unavailable`. The web client snaps every pickup / drop-off with it before quoting. **RCAB-E8.S22** |
 
 `Money = { amount: integer minor units, currency: 'INR' }`. See [[features-shared-rides]] § Pricing for the per-seat formula.
 
 ## account (profile, feedback, support chat)
 | Method | Path | Description |
 |---|---|---|
-| POST | `/v1/feedback` 🔒 | Body `{ category: bug / idea / compliment / other, message (1-2000) }` → 201 `{ id }`. Stored in `feedback` with the caller's role. **RCAB-E8.S19** |
-| GET | `/v1/support/messages` 🔒 | `{ messages: [{ id, sender: user or support, body, createdAt }] }` — the caller's single conversation, newest 200, oldest first. **RCAB-E8.S19** |
-| POST | `/v1/support/messages` 🔒 | Body `{ body (1-2000) }` → 201 `{ messages }` (the created message, plus an automatic `support` acknowledgement on the user's first). Staff replies are inserted into `support_message` with `sender = 'support'` until an admin tool exists. **RCAB-E8.S19** |
+| POST | `/v1/feedback` 🔒 | Body `{ category: bug / idea / compliment / other, message (1-2000) }` → 201 `{ id }`. Stored in `feedback` with the caller's role. **RCAB-E8.S20** |
+| GET | `/v1/support/messages` 🔒 | `{ messages: [{ id, sender: user or support, body, createdAt }] }` — the caller's single conversation, newest 200, oldest first. **RCAB-E8.S20** |
+| POST | `/v1/support/messages` 🔒 | Body `{ body (1-2000) }` → 201 `{ messages }` (the created message, plus an automatic `support` acknowledgement on the user's first). Staff replies are inserted into `support_message` with `sender = 'support'` until an admin tool exists. **RCAB-E8.S20** |
 
 ## rating
 | Method | Path | Description |

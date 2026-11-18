@@ -39,7 +39,7 @@ audience: both
 |---|---|
 | `0018_app_user_google_identity.sql` | Google-only sign-in: phone and Firebase uid nullable, one login identity required (RCAB-E8.S15) |
 | `0019_rides_one_live_ride_per_passenger.sql` | Partial unique index: one live (requested … in_progress) normal ride per passenger; API answers 409 `passenger_has_active_ride` |
-| `0021_account_feedback_support.sql` | `feedback` (in-app feedback form) and `support_message` (one support chat thread per user) with role / category / sender / length checks (RCAB-E8.S19). Numbered 0021 because another branch carries a driver-queue `0020`; renumber on merge if the order changes |
+| `0021_account_feedback_support.sql` | `feedback` (in-app feedback form) and `support_message` (one support chat thread per user) with role / category / sender / length checks (RCAB-E8.S20). Numbered 0021 because another branch carries a driver-queue `0020`; renumber on merge if the order changes |
 
 ## Zero-downtime
 

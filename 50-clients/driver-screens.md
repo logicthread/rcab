@@ -19,10 +19,10 @@ audience: both
 | `/shared-ride/:id` | Active shared ride — ordered stop list (PICKUP/DROP per passenger), sequential confirm button, auto-routes to `/rating/:id` on last drop | RCAB-E5.S7 |
 | `/rating/:id` | Post-ride rating prompt — 1–5 star selector + optional comment, **Submit** / **Skip** | **RCAB-E4.S9** (was an E5.S7 stub). Submit → `POST /v1/rides/:id/ratings` then `/home`; Skip writes nothing and also routes `/home`; a repeat (409 `already_rated`) is treated as done. Shared-ride completions reach the same screen; submit is solo-only for now. Aggregation + the rating display land in E7. |
 | `/earnings` | Today / week / month aggregates, ride list | |
-| `/profile` | Name (editable), rating and trip count, vehicle selector, sign out | RCAB-E8.S20; name / rating from `GET /v1/me` |
-| `/history` | Trip history: date, fare, status; pull to refresh | RCAB-E8.S20; `GET /v1/rides` |
-| `/feedback` | Feedback form (category + message) | RCAB-E8.S20; `POST /v1/feedback` |
-| `/help` | Support chat with the rcab team, polled every 5 s | RCAB-E8.S20; `/v1/support/messages` |
+| `/profile` | Name (editable), rating and trip count, vehicle selector, sign out | RCAB-E8.S21; name / rating from `GET /v1/me` |
+| `/history` | Trip history: date, fare, status; pull to refresh | RCAB-E8.S21; `GET /v1/rides` |
+| `/feedback` | Feedback form (category + message) | RCAB-E8.S21; `POST /v1/feedback` |
+| `/help` | Support chat with the rcab team, polled every 5 s | RCAB-E8.S21; `/v1/support/messages` |
 
 The home screen has a **side menu** (hamburger) with Profile and vehicles, Trip history, Give feedback, Contact help, the System / Light / Dark theme switch (remembered) and Sign out (with its confirmation).
 

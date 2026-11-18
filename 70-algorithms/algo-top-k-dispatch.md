@@ -65,7 +65,7 @@ For pools closed by `closed_full` or `closed_timeout`, the same top-K machinery 
 
 - Candidates: `GEORADIUS active_drivers <pool.origin> R k+excluded ASC` then exclude drivers who already have a `dispatch_offer` row for this pool.
 - Payload: `ride_offer { offerId, sharedRideId, ttlMs, stops[], passengerCount, waveNumber }`. `stops[]` is computed once from `pool.members` (pickups sorted by proximity to `origin_centroid`, drops by proximity to `dest_centroid`) and read from the persisted itinerary for stability across waves.
-- Waves: K=20 each; R 3 km / 5 km / 7 km at 0 s / 30 s / 45 s; hard-fail 60 s (RCAB-E8.S22).
+- Waves: K=20 each; R 3 km / 5 km / 7 km at 0 s / 30 s / 45 s; hard-fail 60 s (RCAB-E8.S23).
 - Claim: the transactional accept binds the pool (`claimed_by_driver_id`) and the driver guard in Postgres (see [[redis-usage]] for what was removed). On success: revoke the other offers, remove the wave-2, wave-3 and hard-fail BullMQ jobs (`dispatch-wave2-…`, `dispatch-wave3-…`, `dispatch-hardfail-…`, per generation).
 - Hard-fail: `DispatchService.handleHardFail` closes the pool to `aborted` and revokes outstanding offers. Re-queueing aborted pool members as solo rides remains a future enhancement (the solo path itself is E4.S3–S4).
 
@@ -73,7 +73,7 @@ For pools closed by `closed_full` or `closed_timeout`, the same top-K machinery 
 
 The normal (non-pooled) ride is the direct realisation of the algorithm above:
 
-- Candidates: `GEORADIUS active_drivers <pickup> R k+excluded ASC` excluding drivers who already have a `dispatch_offer` row. Scheduled rides use a 4-minute window (`SCHEDULED_DISPATCH_WINDOW_MS`) and are re-armed uncapped when unanswered. Waves: K=20 each; R 3 km / 5 km / 7 km at 0 s / 30 s / 45 s; hard-fail 60 s (RCAB-E8.S22).
+- Candidates: `GEORADIUS active_drivers <pickup> R k+excluded ASC` excluding drivers who already have a `dispatch_offer` row. Scheduled rides use a 4-minute window (`SCHEDULED_DISPATCH_WINDOW_MS`) and are re-armed uncapped when unanswered. Waves: K=20 each; R 3 km / 5 km / 7 km at 0 s / 30 s / 45 s; hard-fail 60 s (RCAB-E8.S23).
 - Payload: `ride_offer { offerId, rideId, ttlMs, pickup, dropoff, fareCents, waveNumber }`.
 - Claim: the single winner is decided by the accept transaction. The winner is bound to the `rides` row (`status='accepted'`, `driver_id`, `accepted_at`) via a `WHERE status='requested'`-guarded UPDATE; a loser gets `ride_offer_outcome` `lost`. On success: revoke the other offers + remove the wave-2/wave-3/hard-fail jobs.
 - Hard-fail: `handleHardFail` (`kind='solo'`) marks the ride `no_driver`, revokes outstanding offers, and emits `ride_no_driver` to the passenger.

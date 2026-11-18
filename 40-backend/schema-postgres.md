@@ -203,7 +203,7 @@ CREATE TABLE notification (
 CREATE INDEX ON notification (user_id, created_at DESC);
 ```
 
-### feedback and support_message (0021, RCAB-E8.S19)
+### feedback and support_message (0021, RCAB-E8.S20)
 
 ```sql
 CREATE TABLE feedback (

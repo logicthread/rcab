@@ -1,21 +1,21 @@
 ---
-title: RCAB-E8.S17 — Booking: vehicle picker, shared rides behind a flag, pool view fix
+title: RCAB-E8.S18 — Booking: vehicle picker, shared rides behind a flag, pool view fix
 tags: [layer/delivery, kind/story]
 status: in_review
 phase: 0
 epic: [[epic-e8-production-hardening]]
-story_id: RCAB-E8.S17
+story_id: RCAB-E8.S18
 demo: 7
 estimate: m
 hitl: yes
-depends_on: [[story-rcab-e8-s16-web-design-system-themes]], [[features-normal-booking]], [[features-shared-rides]]
+depends_on: [[story-rcab-e8-s17-web-design-system-themes]], [[features-normal-booking]], [[features-shared-rides]]
 blocks:
 affected_notes: [[features-normal-booking]], [[features-shared-rides]], [[web-state-management]], [[web-pages-routes]]
 owner: claude
 audience: both
 ---
 
-# RCAB-E8.S17 — Booking: vehicle picker, shared rides behind a flag, pool view fix
+# RCAB-E8.S18 — Booking: vehicle picker, shared rides behind a flag, pool view fix
 
 ## Goal
 
@@ -48,4 +48,4 @@ Owner decisions 2026-11-18: hide Share for now (it returns later), let riders pi
 
 ## See also
 - [[epic-e8-production-hardening]] · [[features-normal-booking]] · [[features-shared-rides]]
-- [[story-rcab-e8-s16-web-design-system-themes]] · [[story-rcab-e8-s21-snap-pickup-dropoff-to-road]]
+- [[story-rcab-e8-s17-web-design-system-themes]] · [[story-rcab-e8-s22-snap-pickup-dropoff-to-road]]

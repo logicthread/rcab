@@ -38,7 +38,7 @@ This keeps a single source of truth and survives reconnect (queries refetch on f
 
 The draft is a Zustand store hydrated from `localStorage`. If the user closes the tab mid-booking, they can resume.
 
-The booking store also holds the chosen `vehicle` (UI-only, RCAB-E8.S17) and starts on `private` while `FEATURES.sharedRides` is off. Pickup and drop-off enter the store already snapped to the road (RCAB-E8.S21); the page keeps the "moved N m" notes in component state.
+The booking store also holds the chosen `vehicle` (UI-only, RCAB-E8.S18) and starts on `private` while `FEATURES.sharedRides` is off. Pickup and drop-off enter the store already snapped to the road (RCAB-E8.S22); the page keeps the "moved N m" notes in component state.
 
 ## Solo live-tracking (RCAB-E4.S7)
 
