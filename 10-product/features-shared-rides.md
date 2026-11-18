@@ -12,7 +12,7 @@ audience: both
 
 *Pool multiple ride requests whose origin/destination corridors are similar enough to a route that an active or about-to-start ride is already serving.*
 
-The headline feature. **Currently hidden in the web client** (owner decision 2026-11-18, RCAB-E8.S18): `FEATURES.sharedRides` in `apps/web/src/config/features.ts` is `false`, so the Share/Private toggle is not shown and every booking is private. The code, store paths and tests remain; set the flag to `true` to bring Share back (it then starts on "Share" as below). Once a shared ride exists the booking form is replaced by the pool view.
+The headline feature. **Currently switched off in the web client** (owner decision 2026-11-18, RCAB-E8.S18): `FEATURES.sharedRides` in `apps/web/src/config/features.ts` is `false`, so Share is shown as "coming soon" and cannot be selected, and every booking is private. The code, store paths and tests remain; set the flag to `true` to bring Share back (it then starts on "Share" as below). Once a shared ride exists the booking form is replaced by the pool view.
 
 ## Why this is hard
 

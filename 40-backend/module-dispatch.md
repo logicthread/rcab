@@ -39,6 +39,13 @@ See [[algo-top-k-dispatch]] for the full algorithm and parameters.
 - **Postgres is the source of truth**: `dispatch_offer`, `driver_active_assignment`, `outbox`, `rides`/`shared_rides` (see [[schema-postgres]]). Migration 0014 added offers + the guard (with a backfill and a `migration_conflict` inventory for pre-existing double assignments).
 - Redis holds only projections and timers: `driver:state:<id>.current_ride_id` (reconciled from Postgres at boot and periodically), the `active_drivers` geo index and `bull:dispatch:*` delayed jobs (`dispatch:wave-timeout` for waves 2 and 3, `dispatch:hard-fail`). The former `claim:ride:*`, `offer:*`, `ride:*:offered`, `pool:*:offered/stops` keys and the Lua claim scripts were **removed**.
 
+## Rounds, hold and next-ride queue (RCAB-E8.S16)
+
+- `normal-rounds.ts` `rearmNormalRide` restarts matching for a normal ride (new generation, outbox intent); `handleHardFail` calls it while `dispatch_generation < DISPATCH_ROUNDS`.
+- The booking hold is the outbox `available_at` of the first intent (`DISPATCH_BOOKING_HOLD_MS`); the relay is kicked when it falls due.
+- `driver-eta.service.ts` `DriverEtaService`: GEOPOS of drivers + OSRM `/table`, fallback straight-line ×1.4 at ~29 km/h. Used for the offer's distance/time and the busy-driver window.
+- `DriverAssignmentRepository.queueNext / promoteQueued / dropQueued / isQueued` own `driver_queued_assignment`; `RidesRepository.transition/cancel` promote in the same transaction and `RideStateMachine` projects `current_ride_id` and pushes `driver:assignment` afterwards.
+
 ## Scheduled rides (E6 + Stage C)
 
 - Wake fires at T−10 min (`SCHEDULED_WAKE_LEAD_MS`) via a `ride.wake.schedule` outbox intent.

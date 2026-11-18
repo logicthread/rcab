@@ -12,12 +12,12 @@ ride lifecycle, sessions, rate limits, realtime cadence, the outbox loop, and th
   (one deployment), then run `pnpm policy:doc`. "Code-fixed" knobs have no env var: change them in the schema.
 - **Clients:** `apps/web/src/config/policy.ts` and `apps/driver-app/lib/core/config/policy.dart`.
 
-71 server knobs (68 env-overridable) in 14 categories, 12 cross-field rules, 11 web and 11 driver-app knobs.
+74 server knobs (71 env-overridable) in 14 categories, 12 cross-field rules, 12 web and 11 driver-app knobs.
 
 ## Contents
 
 - Pricing & fares (10)
-- Dispatch (normal rides) (11)
+- Dispatch (normal rides) (14)
 - Scheduled booking (7)
 - Shared-ride matching & pools (7)
 - Ride lifecycle (4)
@@ -65,6 +65,9 @@ Top-K waves, radii, offer TTL and timers.
 | `dispatch.offerTtlMs` | `DISPATCH_OFFER_TTL_MS` | 12000 (12 s) | integer ≥ 1000 | ms | How long one driver offer stays acceptable (sent to the driver as ttlMs). | features-top-k-dispatch: per-driver offer TTL 12 s. |
 | `dispatch.waveOneTimeoutMs` | `DISPATCH_WAVE_ONE_TIMEOUT_MS` | 30000 (30 s) | integer ≥ 1 | ms | Normal rides: delay from wave 1 to wave 2. | features-top-k-dispatch: wave 2 at +30 s; frozen by Stage-C flag F-1. |
 | `dispatch.hardFailMs` | `DISPATCH_HARD_FAIL_MS` | 60000 (1 min) | integer ≥ 1 | ms | Normal rides: delay from wave 1 until the ride fails with no driver. | features-top-k-dispatch: hard fail after 60 s; frozen by Stage-C flag F-1. |
+| `dispatch.bookingHoldMs` | `DISPATCH_BOOKING_HOLD_MS` | 5000 (5 s) | integer ≥ 0 | ms | Normal rides: delay between the passenger placing a booking and the first offers going out (grace to cancel an accidental booking). | owner 2026-11-18: 5 s accidental-booking cancel window. |
+| `dispatch.rounds` | `DISPATCH_ROUNDS` | 3 | integer ≥ 1 | rounds | Normal rides: matching rounds per booking. A round that ends with no driver restarts matching from wave 1; only the last one ends as no_driver. | owner 2026-11-18: 3 rounds of offers per booking. |
+| `dispatch.busyDriverEtaMs` | `DISPATCH_BUSY_DRIVER_ETA_MS` | 600000 (10 min) | integer ≥ 0 | ms | A driver on an in-progress ride may be offered (and accept) one next ride once they are this close, by road ETA, to ending it. 0 disables. | owner 2026-11-18: accept new bookings within 10 min of ending the current ride. |
 | `dispatch.candidateHeadroom` | `DISPATCH_CANDIDATE_HEADROOM` | 4 | integer ≥ 1 | factor | Geo candidates fetched per wave = K × this + already-offered (before eligibility filtering). | Code default (was dispatch.service CANDIDATE_HEADROOM): 4× headroom for busy/ineligible drivers. |
 | `dispatch.assignmentReconcileMs` | `DISPATCH_ASSIGNMENT_RECONCILE_MS` | 30000 (30 s) | integer ≥ 1000 | ms | How often the driver current_ride_id Redis projection is rebuilt from Postgres. | RCAB-E8.S8 (R06): periodic projection reconcile every 30 s. |
 
@@ -234,6 +237,7 @@ rule the client cannot read at runtime and must be kept in step with the table a
 | Key | Value | Unit | Source | Description | Decision |
 | --- | --- | --- | --- | --- | --- |
 | `auth.tokenRefreshMarginMs` | `30000` | ms | client | Refresh the access token this long before its exp so a request never leaves with a lapsing token. | RCAB-E8.S7 sessions remediation: 30 s skew. |
+| `booking.bookingHoldMs` | `5000` | ms | server-mirror | Grace period after placing an immediate booking before drivers are contacted; the rider can cancel without any driver being bothered. | owner 2026-11-18; mirrors api dispatch.bookingHoldMs. |
 | `booking.idempotencyInProgressRetryMs` | `1000` | ms | client | Pause before the single replay of a create the API reports as still in progress (409). | RCAB-E8.S7 idempotency remediation: one replay after 1 s. |
 | `booking.ratingCommentMaxLength` | `1000` | chars | server-mirror | Max rating comment length (server DTO @MaxLength(1000) re-validates). | RCAB-E4.S9 rating prompts. |
 | `booking.scheduleMinLeadMs` | `900000` | ms | server-mirror | Earliest pickup the "Later" picker offers, from now (server scheduled.minLeadMs re-validates). | RCAB-E8.S14 web scheduled booking: mirrors scheduled.minLeadMs (15 min). |

@@ -3,6 +3,8 @@ import { describe, it, expect, vi } from 'vitest';
 
 const { rearm } = vi.hoisted(() => ({ rearm: vi.fn() }));
 vi.mock('../scheduled/scheduled-retry', () => ({ rearmScheduledRide: rearm }));
+const rearmRound = vi.hoisted(() => vi.fn());
+vi.mock('./normal-rounds', () => ({ rearmNormalRide: rearmRound }));
 
 import {
   DispatchService,
@@ -299,6 +301,7 @@ function makeService(config: Record<string, unknown> = {}) {
     lockSoloTrip: vi.fn().mockResolvedValue(soloRide({ id: RIDE })),
     lockSharedTrip: vi.fn().mockResolvedValue(poolLock()),
     findByTrip: vi.fn().mockResolvedValue(null),
+    isQueued: vi.fn().mockResolvedValue(false),
     driverEligibility: vi.fn().mockResolvedValue('ok'),
     acquire: vi.fn().mockResolvedValue({ ok: true }),
     claimSoloRow: vi.fn().mockResolvedValue(soloRide({ id: RIDE, status: 'accepted' })),
@@ -331,7 +334,8 @@ function makeService(config: Record<string, unknown> = {}) {
     queue as never,
     redis as never,
     db as never,
-    buildPolicy({ get: (k: string) => config[k] }),
+    // One round by default: the hard-fail tests below pin the LAST round's behaviour.
+    buildPolicy({ get: (k: string) => ({ DISPATCH_ROUNDS: 1, ...config })[k] }),
     poolProjection as never,
     snapshots as never,
   );
@@ -1336,3 +1340,33 @@ describe('DispatchService — business metrics', () => {
   });
 });
 
+
+describe('DispatchService: matching rounds (normal rides)', () => {
+  const job = (data: HardFailJob) => ({ data }) as Job<HardFailJob>;
+
+  it('a round that closes empty restarts matching under a new generation, not no_driver', async () => {
+    rearmRound.mockReset().mockResolvedValue({
+      rideId: RIDE,
+      previousGeneration: 1,
+      generation: 2,
+      revokedOffers: [{ offerId: OFFER, driverId: DRIVER }],
+    });
+    const m = makeService({ DISPATCH_ROUNDS: 3 });
+    m.ridesRepo.findById.mockResolvedValue(soloRide({ id: RIDE, dispatchGeneration: 1 }));
+    await m.svc.handleHardFail(job({ rideId: RIDE, kind: 'solo', generation: 1 }));
+    expect(rearmRound).toHaveBeenCalledWith(m.db, RIDE, 1, 3);
+    expect(m.ridesRepo.markNoDriver).not.toHaveBeenCalled();
+    expect(m.bus.toUser).not.toHaveBeenCalledWith('c-1', 'ride_no_driver', expect.anything());
+    expect(m.bus.toDriver).toHaveBeenCalledWith(DRIVER, 'ride_offer_revoked', expect.objectContaining({ offerId: OFFER }));
+    expect(m.queue.remove).toHaveBeenCalledWith(hardFailJobId(RIDE, 1));
+  });
+
+  it('the last round ends as no_driver without another re-arm', async () => {
+    rearmRound.mockReset();
+    const m = makeService({ DISPATCH_ROUNDS: 3 });
+    m.ridesRepo.findById.mockResolvedValue(soloRide({ id: RIDE, dispatchGeneration: 3 }));
+    await m.svc.handleHardFail(job({ rideId: RIDE, kind: 'solo', generation: 3 }));
+    expect(rearmRound).not.toHaveBeenCalled();
+    expect(m.ridesRepo.markNoDriver).toHaveBeenCalledWith(RIDE, 3);
+  });
+});

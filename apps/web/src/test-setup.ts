@@ -3,9 +3,9 @@ import { cleanup } from '@testing-library/react';
 import { afterEach } from 'vitest';
 import { FEATURES } from './config/features';
 
-// The shipped build hides shared rides; the existing suites exercise them, so
-// tests run with the feature on and opt out explicitly where they test "off".
-FEATURES.sharedRides = true;
+// Tests run with the shipped switches (shared rides off); a suite that exercises the
+// shared-ride UI turns the flag on itself.
+FEATURES.sharedRides = false;
 
 // jsdom has no matchMedia; vaul (drawer) and next-themes read it.
 if (typeof window !== 'undefined' && !window.matchMedia) {

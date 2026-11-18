@@ -64,7 +64,7 @@ const QUOTE: QuoteResponse = {
 beforeEach(() => {
   vi.clearAllMocks();
   window.localStorage.clear();
-  useBookingStore.getState().reset();
+  useBookingStore.getState().clearAll();
   useAuthStore.setState({
     user: { id: 'u1', role: 'client', phone_e164: '+911234567890' },
     jwt: 'jwt',
@@ -74,19 +74,20 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  FEATURES.sharedRides = true;
+  FEATURES.sharedRides = false; // the shipped default (test-setup)
 });
 
 describe('BookPage with shared rides switched off', () => {
   beforeEach(() => {
     FEATURES.sharedRides = false;
-    useBookingStore.getState().reset();
+    useBookingStore.getState().clearAll();
   });
 
-  it('hides the ride-type toggle and books private', async () => {
+  it('shows Share as coming soon (not selectable) and books private', async () => {
     fetchQuote.mockResolvedValue(QUOTE);
     render(<BookClient />);
-    expect(screen.queryByRole('radiogroup', { name: 'Ride type' })).toBeNull();
+    expect(screen.getByRole('radio', { name: 'Share' })).toBeDisabled();
+    expect(screen.getByRole('radio', { name: 'Private' })).toBeChecked();
     expect(useBookingStore.getState().rideType).toBe('private');
     fireEvent.click(screen.getByText(PRESET_TRIPS[0].label));
     await waitFor(() => expect(screen.getByTestId('submit-private')).toBeEnabled());
@@ -110,6 +111,11 @@ describe('BookPage with shared rides switched off', () => {
 });
 
 describe('BookPage after a shared ride exists', () => {
+  beforeEach(() => {
+    FEATURES.sharedRides = true; // shared rides back on: the booking starts as Share
+    useBookingStore.getState().clearAll();
+  });
+
   it('replaces the booking form with the pool view, including once the trip starts', async () => {
     fetchQuote.mockResolvedValue(QUOTE);
     createSharedRide.mockResolvedValueOnce({
@@ -149,7 +155,7 @@ describe('BookPage snaps pickup and drop-off to the road', () => {
 
   beforeEach(() => {
     FEATURES.sharedRides = false;
-    useBookingStore.getState().reset();
+    useBookingStore.getState().clearAll();
   });
 
   it('quotes and stores the snapped coordinates, and says how far each point moved', async () => {

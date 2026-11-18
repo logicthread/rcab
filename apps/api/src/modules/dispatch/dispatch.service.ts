@@ -42,6 +42,8 @@ import {
   type TripKindLabel,
 } from '../../metrics';
 import { OutboxTopic, outboxDedupeKey } from '../outbox/outbox.types';
+import { rearmNormalRide } from './normal-rounds';
+import { DriverEtaService } from './driver-eta.service';
 import { rearmScheduledRide, type ScheduledRetryOptions } from '../scheduled/scheduled-retry';
 import { scheduledWindowFromPolicy, type ScheduledDispatchWindow } from '../scheduled/scheduled-window';
 import {
@@ -109,6 +111,10 @@ interface DispatchParams {
   hardFailMs: number;
   /** Live offer lifetime. The authoritative deadline is `dispatch_offer.expires_at`. */
   offerTtlMs: number;
+  /** Matching rounds per normal ride (each restarts at wave 1). */
+  rounds: number;
+  /** Road ETA to the end of its ride within which a busy driver may be offered a next ride (0 = never). */
+  busyDriverEtaMs: number;
   /** Geo-index over-fetch so ineligible / already-offered drivers do not starve a wave. */
   candidateHeadroom: number;
   /** Window for scheduled rides (RCAB-E8.S8): 4 min by default, see scheduled-window.ts. */
@@ -150,6 +156,7 @@ export class DispatchService {
     // R09: Postgres snapshots for the post-commit outcome / pool broadcasts.
     // Optional so a harness without realtime still builds the service.
     @Optional() private readonly snapshots?: RealtimeSnapshotService,
+    @Optional() private readonly eta?: DriverEtaService,
   ) {
     const d = policy.dispatch;
     this.params = {
@@ -162,6 +169,8 @@ export class DispatchService {
       waveOneTimeoutMs: d.waveOneTimeoutMs,
       hardFailMs: d.hardFailMs,
       offerTtlMs: d.offerTtlMs,
+      rounds: d.rounds,
+      busyDriverEtaMs: d.busyDriverEtaMs,
       candidateHeadroom: d.candidateHeadroom,
       scheduled: scheduledWindowFromPolicy(policy),
       scheduledRetry: { cutoffAfterPickupMs: policy.scheduled.retryCutoffAfterPickupMs },
@@ -207,8 +216,12 @@ export class DispatchService {
       return { ok: false, reason: 'offer_not_found' };
     }
 
+    // A driver still on a ride may accept one next ride when near its end. The road ETA
+    // (OSRM) is judged here, outside the transaction; acceptInTx re-checks the DB side.
+    const canQueue = seen.trip.kind === 'solo' && (await this.mayQueueNext(driverId));
+
     const outcome = await withTxRetry(
-      () => this.db.transaction((tx) => this.acceptInTx(tx, offerId, driverId, seen.trip)),
+      () => this.db.transaction((tx) => this.acceptInTx(tx, offerId, driverId, seen.trip, canQueue)),
       () => rejected('conflict'),
     );
 
@@ -228,11 +241,29 @@ export class DispatchService {
     return this.offers.decline(this.db, input.offerId, input.driverId);
   }
 
+  /** Driver is on an in-progress solo ride, nothing queued, and within the ETA window of its end. */
+  private async mayQueueNext(driverId: string): Promise<boolean> {
+    if (this.params.busyDriverEtaMs <= 0 || !this.eta) return false;
+    const row = await this.activeInProgressDrop(driverId);
+    return row ? this.endsWithin(driverId, { lat: row.dropLat, lng: row.dropLng }) : false;
+  }
+
+  private async activeInProgressDrop(driverId: string): Promise<{ dropLat: number; dropLng: number } | null> {
+    const res = await this.db.execute<{ dest_lat: number | string; dest_lng: number | string }>(sql`
+      SELECT r.dest_lat, r.dest_lng
+        FROM driver_active_assignment a JOIN rides r ON r.id = a.solo_ride_id
+       WHERE a.driver_id = ${driverId} AND r.status = 'in_progress'
+         AND NOT EXISTS (SELECT 1 FROM driver_queued_assignment q WHERE q.driver_id = a.driver_id)`);
+    const r = res.rows[0];
+    return r ? { dropLat: Number(r.dest_lat), dropLng: Number(r.dest_lng) } : null;
+  }
+
   private async acceptInTx(
     tx: DrizzleTx,
     offerId: string,
     driverId: string,
     trip: TripRef,
+    canQueue = false,
   ): Promise<AcceptOutcome> {
     // 1. Trip row lock (contract §1.3 step 1) — serializes against other
     //    accepts, cancel, hard-fail and completion of the same trip.
@@ -253,6 +284,12 @@ export class DispatchService {
       if (guard && guard.driverId === driverId && guard.generation === offer.generation) {
         return {
           result: { ok: true, trip, generation: offer.generation, replay: true },
+          revoked: [],
+        };
+      }
+      if (trip.kind === 'solo' && (await this.assignments.isQueued(tx, trip.rideId))) {
+        return {
+          result: { ok: true, trip, generation: offer.generation, replay: true, queued: true },
           revoked: [],
         };
       }
@@ -305,7 +342,21 @@ export class DispatchService {
       offerId,
       generation: offer.generation,
     });
-    if (!guard.ok) return rejected(guard.reason);
+    let queued = false;
+    if (!guard.ok) {
+      if (guard.reason !== 'driver_busy' || trip.kind !== 'solo' || !canQueue) {
+        return rejected(guard.reason);
+      }
+      // Busy but close to done: this ride waits as the driver's next one.
+      const q = await this.assignments.queueNext(tx, {
+        driverId,
+        rideId: trip.rideId,
+        offerId,
+        generation: offer.generation,
+      });
+      if (!q.ok) return rejected(q.reason);
+      queued = true;
+    }
 
     // 8. Bind the trip, resolve the offer, revoke the rest.
     if (trip.kind === 'solo') {
@@ -316,7 +367,7 @@ export class DispatchService {
     await this.offers.markAccepted(tx, offerId);
     const revoked = await this.offers.revokeLiveForTrip(tx, trip, offerId);
     return {
-      result: { ok: true, trip, generation: offer.generation, replay: false },
+      result: { ok: true, trip, generation: offer.generation, replay: false, ...(queued ? { queued: true } : {}) },
       revoked,
       offeredAt: offer.offeredAt,
     };
@@ -344,7 +395,9 @@ export class DispatchService {
     revoked: RevokedOffer[],
   ): Promise<void> {
     const id = tripId(result.trip);
-    await this.projection.set(driverId, id);
+    // A queued next ride is not the driver's current ride: the projection (and so the
+    // live location fan-out) keeps following the ride they are still on.
+    if (!result.queued) await this.projection.set(driverId, id);
     if (!result.replay) await this.removeTimers(id, result.generation);
     // The `pool:<id>` hash is a projection of the committed claim (F09).
     if (result.trip.kind === 'shared') await this.projectPool(id);
@@ -354,6 +407,7 @@ export class DispatchService {
         offerId,
         rideId: id,
         ...(result.trip.kind === 'shared' ? { sharedRideId: id } : {}),
+        ...(result.queued ? { queued: true } : {}),
       }),
     );
     // R09: the explicit positive acknowledgement, carrying the committed
@@ -367,6 +421,7 @@ export class DispatchService {
       tripId: id,
       generation: result.generation,
       assignment,
+      ...(result.queued ? { queued: true } : {}),
     });
     if (result.replay) return;
     this.notifyRevoked(result.trip, revoked, 'taken');
@@ -485,7 +540,7 @@ export class DispatchService {
     }
     const trip: TripRef = { kind: 'solo', rideId: ride.id };
     const { k, radiusMeters } = this.waveParams(waveNumber);
-    const { drivers: candidates, priorOffers } = await this.selectCandidates(
+    const { drivers: candidates, priorOffers, busy } = await this.selectCandidates(
       trip,
       generation,
       ride.originLat,
@@ -499,29 +554,38 @@ export class DispatchService {
       );
     }
 
-    let created = 0;
-    for (const driverId of candidates) {
-      const offer = await this.offers.createOffer(this.db, {
-        trip,
-        driverId,
-        generation,
-        waveNumber,
-        ttlMs: this.params.offerTtlMs,
-      });
-      if (!offer) continue;
-      created++;
-      const payload: SoloRideOfferPayload = {
-        offerId: offer.offerId,
-        rideId: ride.id,
-        ttlMs: this.params.offerTtlMs,
-        expiresAt: offer.expiresAt.toISOString(),
-        pickup: { lat: ride.originLat, lng: ride.originLng },
-        dropoff: { lat: ride.destLat, lng: ride.destLng },
-        fareCents: ride.fareCents,
-        waveNumber,
-      };
-      this.safely('ride_offer', () => this.bus.toDriver(driverId, 'ride_offer', payload));
-    }
+    // Distance / time from each driver's current position to the pickup (what the
+    // driver's offer screen shows); estimated when OSRM is slow, never blocking.
+    const etas = await this.pickupEtas(candidates, ride.originLat, ride.originLng);
+    // Offers are independent rows: write and send them in parallel.
+    const sent = await Promise.all(
+      candidates.map(async (driverId) => {
+        const offer = await this.offers.createOffer(this.db, {
+          trip,
+          driverId,
+          generation,
+          waveNumber,
+          ttlMs: this.params.offerTtlMs,
+        });
+        if (!offer) return false;
+        const eta = etas.get(driverId);
+        const payload: SoloRideOfferPayload = {
+          offerId: offer.offerId,
+          rideId: ride.id,
+          ttlMs: this.params.offerTtlMs,
+          expiresAt: offer.expiresAt.toISOString(),
+          pickup: { lat: ride.originLat, lng: ride.originLng },
+          dropoff: { lat: ride.destLat, lng: ride.destLng },
+          fareCents: ride.fareCents,
+          waveNumber,
+          ...(eta ? { pickupDistanceM: eta.distanceM, pickupDurationS: eta.durationS } : {}),
+          ...(busy.has(driverId) ? { nextRide: true } : {}),
+        };
+        this.safely('ride_offer', () => this.bus.toDriver(driverId, 'ride_offer', payload));
+        return true;
+      }),
+    );
+    const created = sent.filter(Boolean).length;
 
     if (waveNumber === 1 && priorOffers === 0 && created > 0) {
       await this.observeIntentToFirstOffer(trip, generation, 'solo');
@@ -640,6 +704,16 @@ export class DispatchService {
       if (current?.type === 'scheduled') {
         await this.retryScheduledRide(rideId, generation);
         return;
+      }
+      // A normal ride gets `rounds` matching rounds: a round that closes empty
+      // restarts matching at wave 1 under a new generation; only the last one fails.
+      if (current?.type === 'normal' && current.dispatchGeneration < this.params.rounds) {
+        const next = await rearmNormalRide(this.db, rideId, generation, this.params.rounds);
+        if (next) {
+          this.notifyRevoked({ kind: 'solo', rideId }, next.revokedOffers, 'revoked');
+          await this.removeTimers(rideId, next.previousGeneration);
+          return;
+        }
       }
       // One transaction (ride lock → no_driver → revoke live offers); a ride
       // claimed / cancelled / re-dispatched in the same instant is untouched.
@@ -848,7 +922,7 @@ export class DispatchService {
     originLat: number,
     originLng: number,
     opts: { k: number; radiusMeters: number; seatsNeeded: number },
-  ): Promise<{ drivers: string[]; priorOffers: number }> {
+  ): Promise<{ drivers: string[]; priorOffers: number; busy: Set<string> }> {
     const offered = new Set(await this.offers.offeredDriverIds(this.db, trip, generation));
     const raw = (await this.redis.georadius(
       'active_drivers',
@@ -862,7 +936,59 @@ export class DispatchService {
     )) as string[];
     const fresh = raw.filter((id) => !offered.has(id));
     const eligible = await this.offers.eligibleCandidates(this.db, fresh, opts.seatsNeeded);
-    return { drivers: eligible.slice(0, opts.k), priorOffers: offered.size };
+    const drivers = eligible.slice(0, opts.k);
+    const busy = new Set<string>();
+    // Idle drivers come first; spare slots go to drivers about to finish a ride.
+    if (trip.kind === 'solo' && drivers.length < opts.k) {
+      const rest = fresh.filter((id) => !eligible.includes(id));
+      for (const id of await this.nearlyFreeDrivers(rest, opts.k - drivers.length)) {
+        drivers.push(id);
+        busy.add(id);
+      }
+    }
+    return { drivers, priorOffers: offered.size, busy };
+  }
+
+  /**
+   * Busy drivers who may take one more solo ride: on an in-progress solo ride,
+   * nothing queued yet, and within `busyDriverEtaMs` (road ETA from their current
+   * position to that ride's drop-off) of finishing it. Nearest-first order kept.
+   */
+  private async nearlyFreeDrivers(candidateIds: string[], limit: number): Promise<string[]> {
+    if (limit < 1 || this.params.busyDriverEtaMs <= 0 || !this.eta || candidateIds.length === 0) return [];
+    const busy = await this.offers.queueableCandidates(this.db, candidateIds);
+    const out: string[] = [];
+    for (const b of busy) {
+      if (out.length >= limit) break;
+      if (await this.endsWithin(b.id, { lat: b.dropLat, lng: b.dropLng })) out.push(b.id);
+    }
+    return out;
+  }
+
+  /** Whether the driver's road ETA to `dropoff` is within the busy-driver window. */
+  private async endsWithin(driverId: string, dropoff: { lat: number; lng: number }): Promise<boolean> {
+    if (!this.eta) return false;
+    try {
+      const eta = await this.eta.one(driverId, dropoff);
+      return eta !== null && eta.durationS * 1000 <= this.params.busyDriverEtaMs;
+    } catch (err) {
+      this.log.warn({ err, driverId }, 'busy-driver ETA failed; not offering a next ride');
+      return false;
+    }
+  }
+
+  private async pickupEtas(
+    driverIds: string[],
+    lat: number,
+    lng: number,
+  ): Promise<Map<string, { distanceM: number; durationS: number }>> {
+    if (!this.eta || driverIds.length === 0) return new Map();
+    try {
+      return await this.eta.toPoint(driverIds, { lat, lng });
+    } catch (err) {
+      this.log.warn({ err }, 'pickup ETA failed; offers go out without it');
+      return new Map();
+    }
   }
 
   /**

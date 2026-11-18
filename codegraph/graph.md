@@ -1,8 +1,8 @@
 # rcab code graph
 
-Generated 2026-11-14T08:42:09+05:30 @ 54b4fa6b7405e03631242217e765f637eb9fbd38. **Do not hand-edit** — run `pnpm code:graph`.
+Generated 2026-11-18T18:09:45+05:30 @ 2dd70f8da0836550ef74d0d565b7ab6936a18b0d. **Do not hand-edit** — run `pnpm code:graph`.
 
-Nodes: 380 (227 file, 22 module, 78 symbol, 36 route, 17 table). Edges: 778 (598 imports, 47 di-import, 49 di-provides, 36 route, 30 riverpod-provides, 18 fk).
+Nodes: 387 (229 file, 22 module, 82 symbol, 36 route, 18 table). Edges: 798 (611 imports, 47 di-import, 50 di-provides, 36 route, 33 riverpod-provides, 21 fk).
 
 > Known v1 limit: import edges are syntactic (per-file), so barrel re-exports may under-resolve.
 
@@ -70,7 +70,7 @@ Nodes: 380 (227 file, 22 module, 78 symbol, 36 route, 17 table). Edges: 778 (598
 - `POST /v1/support/messages` → AccountController.sendSupport `apps/api/src/modules/account/account.controller.ts`
 - `POST /v1/vehicles` → VehiclesController.create `apps/api/src/modules/vehicles/vehicles.controller.ts`
 
-## DB tables (17)
+## DB tables (18)
 
 - **appUser** (`app_user`)
 - **authRefreshToken** (`auth_refresh_token`) → appUser
@@ -78,6 +78,7 @@ Nodes: 380 (227 file, 22 module, 78 symbol, 36 route, 17 table). Edges: 778 (598
 - **dispatchOffer** (`dispatch_offer`) → driver, rides, sharedRide
 - **driver** (`driver`) → appUser
 - **driverActiveAssignment** (`driver_active_assignment`) → dispatchOffer, driver, rides, sharedRide
+- **driverQueuedAssignment** (`driver_queued_assignment`) → dispatchOffer, driver, rides
 - **feedback** (`feedback`) → appUser
 - **idempotencyRecord** (`idempotency_record`) → appUser
 - **migrationConflict** (`migration_conflict`)

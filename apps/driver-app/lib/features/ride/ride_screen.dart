@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import '../../core/realtime/realtime_socket.dart';
 import '../../di/providers.dart';
 import '../home/driver_notice.dart';
+import '../offer/offer_provider.dart';
 import 'ride_models.dart';
 import 'ride_provider.dart';
 
@@ -135,6 +136,7 @@ class _RideScreenState extends ConsumerState<RideScreen> {
     final actionLabel = state.status.actionLabel;
     final nextEvent = state.status.nextEvent;
     final noShowReady = state.noShowReady();
+    final queued = ref.watch(queuedRideProvider);
 
     return Scaffold(
       key: const Key('ride_screen'),
@@ -154,6 +156,22 @@ class _RideScreenState extends ConsumerState<RideScreen> {
                       key: const Key('ride_status'),
                       style: theme.textTheme.headlineSmall,
                     ),
+                    if (queued != null) ...[
+                      const SizedBox(height: 12),
+                      Container(
+                        key: const Key('ride_queued_banner'),
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: theme.colorScheme.secondaryContainer,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          'Next ride queued${queued.fareDisplay.isEmpty ? '' : ' · ${queued.fareDisplay}'}'
+                          ' — it starts when this one ends.',
+                          style: theme.textTheme.bodyMedium,
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 24),
                     // Navigate is the most prominent control on the ride screen.
                     SizedBox(

@@ -94,3 +94,25 @@ final offerResponseSenderProvider = Provider<OfferResponseSender>(
 final offerProvider = StateNotifierProvider<OfferNotifier, OfferState>(
   (ref) => OfferNotifier(ref.watch(offerResponseSenderProvider)),
 );
+
+/// The ride the driver is currently on (set by `OfferController` from the committed
+/// assignment). A "next ride" offer that ends without a win returns here instead of home.
+final activeRideIdProvider = StateProvider<String?>((ref) => null);
+
+/// A next ride accepted while the current one is still running. Shown on the ride
+/// screen; cleared when it becomes the active ride, or is cancelled while waiting.
+class QueuedRide {
+  const QueuedRide({required this.rideId, required this.fareDisplay});
+  final String rideId;
+  final String fareDisplay;
+}
+
+final queuedRideProvider = StateProvider<QueuedRide?>((ref) => null);
+
+/// Where the driver lands when [offer] ends without becoming their active ride.
+final offerReturnLocationProvider = Provider<String Function(SoloRideOffer offer)>(
+  (ref) => (offer) {
+    final active = ref.read(activeRideIdProvider);
+    return offer.nextRide && active != null ? '/ride/$active' : '/home';
+  },
+);

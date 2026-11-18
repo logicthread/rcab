@@ -39,6 +39,7 @@ Completing every story in this epic ⇒ Demo 7 passes.
 | RCAB-E8.S13 | [[story-rcab-e8-s13-scheduled-cutoff-searching-ui]] — Scheduled retry cutoff + passenger searching state (+ optimistic shared pricing) | ▶ |
 | RCAB-E8.S14 | [[story-rcab-e8-s14-team-onboarding-pack]] — Team onboarding pack (walkthrough, state machines, role guides, demo videos) | ▶ |
 | RCAB-E8.S15 | [[story-rcab-e8-s15-google-only-sign-in]] — Google-only sign-in and registration until launch (phone OTP behind a policy flag) | ▶ |
+| RCAB-E8.S16 | [[story-rcab-e8-s16-booking-hold-rounds-next-ride]] — Booking hold, 3 matching rounds, next-ride queue, booking UX fixes | ▶ |
 | RCAB-E8.S17 | [[story-rcab-e8-s17-web-design-system-themes]] — Web design system, light/dark themes and restyled screens | ▶ |
 | RCAB-E8.S18 | [[story-rcab-e8-s18-booking-vehicle-picker-share-flag]] — Booking: vehicle picker (UI), shared rides behind a flag, pool view fix | ▶ |
 | RCAB-E8.S19 | [[story-rcab-e8-s19-account-menu-profile-ride-history]] — Account menu, profile and ride history (web + API) | ▶ |

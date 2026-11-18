@@ -31,8 +31,7 @@ import { reverseGeocode } from '../../lib/geo/nominatim';
 import { AddressSearch } from './address-search';
 import { Button } from '../../components/ui/button';
 import { MenuDrawer } from '../../components/menu-drawer';
-import { validateSchedule } from '../../lib/booking/schedule';
-import { FEATURES } from '../../config/features';
+import { formatScheduled, validateSchedule } from '../../lib/booking/schedule';
 import { RideTypeToggle } from './ride-type-toggle';
 import { VehiclePicker } from './vehicle-picker';
 import { SchedulePicker } from './schedule-picker';
@@ -44,6 +43,22 @@ import { RideTrackingPanel } from './ride-tracking-panel';
 const ACTIVE_RIDE_KEY = 'rcab_active_ride';
 // Tell the rider when snapping moved their point by at least this much (smaller shifts are invisible).
 const SNAP_NOTICE_MIN_M = 15;
+// Last chosen pickup + drop (with their address labels), so a reload, a finished ride or a
+// scheduled booking all come back to the same route instead of an empty form.
+const LAST_ROUTE_KEY = 'rcab_last_route';
+
+function readLastRoute(): { pickup: Place; dropoff: Place } | null {
+  try {
+    const raw = window.localStorage.getItem(LAST_ROUTE_KEY);
+    if (!raw) return null;
+    const r = JSON.parse(raw) as { pickup?: Place; dropoff?: Place };
+    const ok = (p: unknown): p is Place =>
+      !!p && typeof (p as Place).lat === 'number' && typeof (p as Place).lng === 'number';
+    return ok(r.pickup) && ok(r.dropoff) ? { pickup: r.pickup, dropoff: r.dropoff } : null;
+  } catch {
+    return null;
+  }
+}
 // Terminal solo statuses: the persisted active-ride marker is dropped (and a reload
 // does not resume tracking) once the ride reaches any of them. `no_show` is a terminal
 // state the driver can put a ride into after the wait, so it must be here too.
@@ -140,8 +155,12 @@ function BookPage() {
     applyDispatchRetry,
     applyDriverLocation,
     markRated,
+    finishScheduled,
     reset,
+    clearAll,
   } = useBookingStore();
+  // Confirmation of a "Later" booking (the rider stays on the form and may book again).
+  const [scheduledNotice, setScheduledNotice] = useState<{ rideId: string; at: string } | null>(null);
 
   const bothSet = pickup !== null && dropoff !== null;
   // Request identity = ride type + route coordinates. Deliberately excludes
@@ -259,6 +278,21 @@ function BookPage() {
     };
   }, [authed, getToken, rideId, applyRideState, applyDispatchRetry, applyDriverLocation]);
 
+  // Remember the route (labels included) and bring it back after a reload.
+  useEffect(() => {
+    if (!authed || useBookingStore.getState().pickup || useBookingStore.getState().dropoff) return;
+    const saved = readLastRoute();
+    if (saved) useBookingStore.setState({ pickup: saved.pickup, dropoff: saved.dropoff });
+  }, [authed]);
+  useEffect(() => {
+    if (!pickup || !dropoff) return;
+    try {
+      window.localStorage.setItem(LAST_ROUTE_KEY, JSON.stringify({ pickup, dropoff }));
+    } catch {
+      /* storage unavailable: the route just is not remembered */
+    }
+  }, [pickup, dropoff]);
+
   // Reconnect-restore: a saved active ride (full page reload) rehydrates the
   // tracking view from GET /v1/rides/:id; terminal rides clear the marker.
   useEffect(() => {
@@ -274,9 +308,19 @@ function BookPage() {
           window.localStorage.removeItem(ACTIVE_RIDE_KEY);
           return;
         }
+        // Prefer the remembered labels when they are for this very ride's route.
+        const last = readLastRoute();
+        const same = (a: { lat: number; lng: number }, b: { lat: number; lng: number }) =>
+          Math.abs(a.lat - b.lat) < 1e-6 && Math.abs(a.lng - b.lng) < 1e-6;
         useBookingStore.setState({
-          pickup: { lat: r.origin.lat, lng: r.origin.lng, label: 'Pickup' },
-          dropoff: { lat: r.dropoff.lat, lng: r.dropoff.lng, label: 'Dropoff' },
+          pickup:
+            last && same(last.pickup, r.origin)
+              ? last.pickup
+              : { lat: r.origin.lat, lng: r.origin.lng, label: 'Pickup' },
+          dropoff:
+            last && same(last.dropoff, r.dropoff)
+              ? last.dropoff
+              : { lat: r.dropoff.lat, lng: r.dropoff.lng, label: 'Dropoff' },
           rideType: 'private',
         });
         setSoloRequested(r.rideId, r.status, r.scheduledFor);
@@ -321,6 +365,14 @@ function BookPage() {
         ? await createScheduledRide(pickup, dropoff, quote.quoteToken, scheduledFor, key)
         : await createNormalRide(pickup, dropoff, quote.quoteToken, key);
       intentKeys.clear();
+      if (scheduledFor) {
+        // A future ride is not "the" active ride: stay on the form (same route) so the rider can
+        // book another ride, now or later, while this one waits for its wake.
+        setScheduledNotice({ rideId: res.rideId, at: res.scheduledFor ?? scheduledFor });
+        finishScheduled();
+        return;
+      }
+      setScheduledNotice(null);
       if (typeof window !== 'undefined') window.localStorage.setItem(ACTIVE_RIDE_KEY, res.rideId);
       setSoloRequested(res.rideId, res.status, res.scheduledFor ?? scheduledFor);
     } catch (err) {
@@ -337,6 +389,7 @@ function BookPage() {
     intentKeys,
     startRequest,
     setSoloRequested,
+    finishScheduled,
     setRequestError,
     createErrorMessage,
   ]);
@@ -472,8 +525,22 @@ function BookPage() {
   // ride, the pending idempotency key; then logs out server-side.
   const handleSignOut = useCallback(() => {
     clearActiveRide();
+    clearAll();
+    setScheduledNotice(null);
+    try {
+      window.localStorage.removeItem(LAST_ROUTE_KEY);
+    } catch {
+      /* ignore */
+    }
     void signOut();
-  }, [clearActiveRide, signOut]);
+  }, [clearActiveRide, clearAll, signOut]);
+
+  const cancelScheduledRide = useCallback(() => {
+    if (!scheduledNotice) return;
+    cancelRide(scheduledNotice.rideId)
+      .catch(() => undefined)
+      .finally(() => setScheduledNotice(null));
+  }, [scheduledNotice]);
 
   const cancelActiveRide = useCallback(() => {
     if (!authed || !rideId) return;
@@ -639,18 +706,16 @@ function BookPage() {
                 </div>
               </section>
 
-              {FEATURES.sharedRides && (
-                <section className="mt-5">
-                  <label className="text-sm font-semibold">Ride type</label>
-                  <div className="mt-2">
-                    <RideTypeToggle
-                      value={rideType}
-                      onChange={setRideType}
-                      disabled={stage === 'requesting'}
-                    />
-                  </div>
-                </section>
-              )}
+              <section className="mt-5">
+                <label className="text-sm font-semibold">Ride type</label>
+                <div className="mt-2">
+                  <RideTypeToggle
+                    value={rideType}
+                    onChange={setRideType}
+                    disabled={stage === 'requesting'}
+                  />
+                </div>
+              </section>
 
               {rideType === 'private' && (
                 <section className="mt-5">
@@ -730,7 +795,11 @@ function BookPage() {
                     onClick={submit}
                     loading={stage === 'requesting'}
                     disabled={
-                      !quote || stage === 'requesting' || stage === 'opened' || stage === 'slotted'
+                      !bothSet ||
+                      !quote ||
+                      stage === 'requesting' ||
+                      stage === 'opened' ||
+                      stage === 'slotted'
                     }
                     data-testid="submit-shared"
                   >
@@ -743,7 +812,7 @@ function BookPage() {
                     block
                     onClick={submitSolo}
                     loading={stage === 'requesting'}
-                    disabled={!quote || stage === 'requesting'}
+                    disabled={!bothSet || !quote || stage === 'requesting'}
                     data-testid="submit-private"
                   >
                     {stage === 'requesting'
@@ -756,6 +825,23 @@ function BookPage() {
                 {requestError && (
                   <div className="mt-3 rounded-control bg-stop-wash px-3 py-2 text-sm font-medium text-stop">
                     {requestError}
+                  </div>
+                )}
+                {scheduledNotice && (
+                  <div
+                    data-testid="scheduled-notice"
+                    className="mt-3 rounded-control bg-go-wash px-3 py-2 text-sm text-go"
+                  >
+                    Ride scheduled for {formatScheduled(scheduledNotice.at)}. We start finding your
+                    driver shortly before pickup; you can book another ride meanwhile.{' '}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      data-testid="scheduled-cancel"
+                      onClick={cancelScheduledRide}
+                    >
+                      Cancel it
+                    </Button>
                   </div>
                 )}
               </section>

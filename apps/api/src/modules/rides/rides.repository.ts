@@ -34,7 +34,8 @@ function operationForType(type: string): RideIdempotencyOperation {
  * HTTP 404 / 403 / 409 at the controller. RCAB-E4.S6.
  */
 export type RideTransitionResult =
-  | { ok: true; row: RideRow }
+  /** `promotedRideId`: the driver's queued next ride that became their active trip in the same transaction. */
+  | { ok: true; row: RideRow; promotedRideId?: string }
   | { ok: false; reason: 'not_found' | 'not_owner' | 'invalid_transition' };
 
 /**
@@ -42,7 +43,15 @@ export type RideTransitionResult =
  * a no-show reported before the 5-minute wait has elapsed (→ HTTP 409). RCAB-E4.S8.
  */
 export type RideCancelResult =
-  | { ok: true; row: RideRow; revokedOffers: RevokedOffer[] }
+  | {
+      ok: true;
+      row: RideRow;
+      revokedOffers: RevokedOffer[];
+      /** The driver's queued next ride that became their active trip (this ride was their active one). */
+      promotedRideId?: string;
+      /** Driver whose next-ride queue lost this ride (it was cancelled while queued). */
+      dequeuedDriverId?: string;
+    }
   | {
       ok: false;
       reason: 'not_found' | 'not_owner' | 'invalid_transition' | 'no_show_too_early';
@@ -179,6 +188,9 @@ export class RidesRepository {
             aggregateId: row.id,
             generation: 1,
             payload: { rideId: row.id },
+            // Grace window: the first offers go out `bookingHoldMs` after the booking, so an
+            // accidental booking can be cancelled before any driver is bothered.
+            availableAt: new Date(Date.now() + getPolicy().dispatch.bookingHoldMs),
           });
         }
         return row;
@@ -376,6 +388,8 @@ export class RidesRepository {
       if (!current) return { ok: false, reason: 'not_found' };
       if (current.driverId !== driverId) return { ok: false, reason: 'not_owner' };
       if (current.status !== fromStatus) return { ok: false, reason: 'invalid_transition' };
+      // A ride waiting in the driver's next-ride queue is not theirs to advance yet.
+      if (await this.assignments.isQueued(tx, rideId)) return { ok: false, reason: 'invalid_transition' };
 
       const now = new Date();
       const patch: Partial<typeof rides.$inferInsert> = { status: toStatus, updatedAt: now };
@@ -383,10 +397,12 @@ export class RidesRepository {
       if (tsField) patch[tsField] = now;
 
       const updated = await tx.update(rides).set(patch).where(eq(rides.id, rideId)).returning();
+      let promotedRideId: string | undefined;
       if (TERMINAL_STATUSES.has(toStatus)) {
-        await this.assignments.release(tx, { driverId, trip: { kind: 'solo', rideId } });
+        const released = await this.assignments.release(tx, { driverId, trip: { kind: 'solo', rideId } });
+        if (released) promotedRideId = (await this.assignments.promoteQueued(tx, driverId)) ?? undefined;
       }
-      return { ok: true, row: toRow(updated[0]) };
+      return { ok: true, row: toRow(updated[0]), ...(promotedRideId ? { promotedRideId } : {}) };
     });
     if (result.ok) recordRideTransition(fromStatus, toStatus);
     return result;
@@ -460,10 +476,23 @@ export class RidesRepository {
         .returning();
       const trip = { kind: 'solo', rideId } as const;
       const revokedOffers = await this.offers.revokeLiveForTrip(tx, trip);
+      let promotedRideId: string | undefined;
+      let dequeuedDriverId: string | undefined;
       if (current.driverId) {
-        await this.assignments.release(tx, { driverId: current.driverId, trip });
+        const released = await this.assignments.release(tx, { driverId: current.driverId, trip });
+        if (released) {
+          promotedRideId = (await this.assignments.promoteQueued(tx, current.driverId)) ?? undefined;
+        } else {
+          dequeuedDriverId = (await this.assignments.dropQueued(tx, rideId)) ?? undefined;
+        }
       }
-      return { ok: true, row: toRow(updated[0]), revokedOffers };
+      return {
+        ok: true,
+        row: toRow(updated[0]),
+        revokedOffers,
+        ...(promotedRideId ? { promotedRideId } : {}),
+        ...(dequeuedDriverId ? { dequeuedDriverId } : {}),
+      };
     });
     if (result.ok) {
       recordRideTransition(fromStatus, result.row.status);

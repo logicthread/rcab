@@ -19,23 +19,23 @@ audience: both
 
 ## Goal
 
-Owner decisions 2026-11-18: hide Share for now (it returns later), let riders pick a vehicle at booking, and fix the booking form still showing after a shared ride starts.
+Owner decisions 2026-11-18: Share is off for now (it returns later; `main` shows it as "coming soon"), let riders pick a vehicle at booking, and fix the booking form still showing after a shared ride starts.
 
 ## User-facing acceptance criteria
 
-- Given the booking screen, When it loads, Then there is no Share/Private toggle and every booking is private.
+- Given the booking screen, When it loads, Then Share is shown as "coming soon" and cannot be selected, and every booking is private.
 - Given the booking screen, When it loads, Then a "Choose a vehicle" row offers Bike, Auto (3 seats), Cab, SUV and 6 seater, with Cab selected.
 - Given a shared ride exists (flag on), When the pool is open, closed or "Trip under way", Then the page shows the map and pool status, never the booking form.
 
 ## Technical acceptance criteria
 
-- `config/features.ts` `FEATURES.sharedRides = false`; the shared code, tests and store paths stay; flipping the flag restores them. `test-setup.ts` turns it on so the shared suites keep running.
+- `config/features.ts` `FEATURES.sharedRides = false`; the shared code, tests and store paths stay; flipping the flag enables Share again (the toggle reads the flag, and the initial ride type follows it). `test-setup.ts` turns it on so the shared suites keep running.
 - `VehicleType` / `VEHICLE_OPTIONS` in `lib/booking/types.ts`, `vehicle` in the booking store, `vehicle-picker.tsx`.
 - **The vehicle choice is UI-only**: the API prices and dispatches by route only, and its vehicle types are `auto`, `bike`, `cab_hatch`, `cab_sedan`.
 
 ## Test plan
 
-- Unit: flag off hides the toggle and books private; picker lists five options, defaults to Cab, stores the choice; pool view replaces the form after open and after `closed_started`.
+- Unit: flag off shows Share disabled and books private; picker lists five options, defaults to Cab, stores the choice; pool view replaces the form after open and after `closed_started`.
 
 ## HITL stops
 

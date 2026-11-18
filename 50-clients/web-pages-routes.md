@@ -25,7 +25,7 @@ audience: both
 | `/settings` | Profile, saved places, link Google | [[journey-client-google-link]] |
 | `/help` | Support chat (replaces the static FAQ): thread with "rcab support", polled every 5 s | RCAB-E8.S20 |
 
-The `/book` header opens a left **side menu** (Vaul drawer, RCAB-E8.S19) with Profile, Ride history, Give feedback, Contact help, the System / Light / Dark theme switch and Sign out. `/book` also shows a vehicle picker and, with `FEATURES.sharedRides` off, no ride-type toggle ([[story-rcab-e8-s18-booking-vehicle-picker-share-flag]]).
+The `/book` header opens a left **side menu** (Vaul drawer, RCAB-E8.S19) with Profile, Ride history, Give feedback, Contact help, the System / Light / Dark theme switch and Sign out. `/book` also shows a vehicle picker and, with `FEATURES.sharedRides` off, the ride-type toggle shows Share as "coming soon" ([[story-rcab-e8-s18-booking-vehicle-picker-share-flag]]).
 
 ## Route conventions
 

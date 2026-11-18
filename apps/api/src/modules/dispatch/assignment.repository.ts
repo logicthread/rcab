@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import type { DbExecutor, DrizzleTx } from '../../infra/db/drizzle.module';
-import { driverActiveAssignment, rides } from '../../db/schema';
+import { driverActiveAssignment, driverQueuedAssignment, rides } from '../../db/schema';
 import { Constraint, PG_UNIQUE_VIOLATION, pgConstraintViolation } from '../../db/constraints';
 import { toRow, type RideRow } from '../rides/ride-row';
 import type { TripRef } from './dispatch.types';
@@ -124,6 +124,85 @@ export class DriverAssignmentRepository {
   async listAll(db: DbExecutor): Promise<AssignmentRow[]> {
     const rows = await db.select().from(driverActiveAssignment);
     return rows.map(fromDb);
+  }
+
+  /**
+   * Queue `trip` as the driver's NEXT ride. Only valid while the driver's active
+   * assignment is a solo ride that is `in_progress`; the check is a
+   * `FOR SHARE` read of the guard row, so the transaction that ends the active
+   * ride (it deletes that row) serializes with this insert and either sees the
+   * queued row (and promotes it) or finds the driver idle here. A second queued
+   * ride for the same driver is `driver_busy`.
+   */
+  async queueNext(
+    tx: DrizzleTx,
+    p: { driverId: string; rideId: string; offerId: string | null; generation: number },
+  ): Promise<{ ok: true } | { ok: false; reason: 'driver_busy' | 'trip_taken' }> {
+    const active = await tx.execute<{ ok: boolean }>(sql`
+      SELECT true AS ok
+        FROM driver_active_assignment a
+        JOIN rides r ON r.id = a.solo_ride_id
+       WHERE a.driver_id = ${p.driverId} AND r.status = 'in_progress'
+         FOR SHARE OF a`);
+    if (active.rows.length === 0) return { ok: false, reason: 'driver_busy' };
+    try {
+      await tx.transaction(async (sp) => {
+        await sp.insert(driverQueuedAssignment).values({
+          driverId: p.driverId,
+          soloRideId: p.rideId,
+          offerId: p.offerId,
+          dispatchGeneration: p.generation,
+        });
+      });
+      return { ok: true };
+    } catch (err) {
+      const v = pgConstraintViolation(err);
+      if (v?.code === PG_UNIQUE_VIOLATION) {
+        return { ok: false, reason: v.constraint === Constraint.QueuedDriverFull ? 'driver_busy' : 'trip_taken' };
+      }
+      throw err;
+    }
+  }
+
+  /** True when `rideId` is waiting in a driver's next-ride queue (not yet their active trip). */
+  async isQueued(db: DbExecutor, rideId: string): Promise<boolean> {
+    const rows = await db
+      .select({ d: driverQueuedAssignment.driverId })
+      .from(driverQueuedAssignment)
+      .where(eq(driverQueuedAssignment.soloRideId, rideId))
+      .limit(1);
+    return rows.length > 0;
+  }
+
+  /** Drop a ride from the queue (cancelled while waiting). Returns the driver it was queued for. */
+  async dropQueued(db: DbExecutor, rideId: string): Promise<string | null> {
+    const del = await db
+      .delete(driverQueuedAssignment)
+      .where(eq(driverQueuedAssignment.soloRideId, rideId))
+      .returning({ driverId: driverQueuedAssignment.driverId });
+    return del[0]?.driverId ?? null;
+  }
+
+  /**
+   * The driver's active trip just ended: move their queued ride (if any) into the
+   * exclusivity guard so it becomes their active trip. Returns its ride id.
+   * Call inside the transaction that released the previous guard.
+   */
+  async promoteQueued(tx: DrizzleTx, driverId: string): Promise<string | null> {
+    const del = await tx
+      .delete(driverQueuedAssignment)
+      .where(eq(driverQueuedAssignment.driverId, driverId))
+      .returning();
+    const q = del[0];
+    if (!q) return null;
+    await tx.insert(driverActiveAssignment).values({
+      driverId,
+      soloRideId: q.soloRideId,
+      sharedRideId: null,
+      offerId: q.offerId,
+      dispatchGeneration: q.dispatchGeneration,
+    });
+    return q.soloRideId;
   }
 
   /** Lock-order step 1 for a solo trip. */

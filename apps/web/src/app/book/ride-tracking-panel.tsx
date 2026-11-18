@@ -90,6 +90,15 @@ export function RideTrackingPanel({
     return () => clearInterval(t);
   }, [scheduledFor]);
   const waitingForWake = status === 'requested' && !searching && isBeforeWake(scheduledFor, now);
+  // Immediate bookings are held back for a few seconds before any driver is contacted, so an
+  // accidental tap can still be cancelled for free.
+  const [holding, setHolding] = useState(!scheduledFor);
+  useEffect(() => {
+    if (scheduledFor) return;
+    const t = setTimeout(() => setHolding(false), WEB_POLICY.booking.bookingHoldMs);
+    return () => clearTimeout(t);
+  }, [scheduledFor]);
+  const showHoldHint = holding && !scheduledFor && status === 'requested';
   return (
     <section
       data-testid="tracking-panel"
@@ -102,6 +111,12 @@ export function RideTrackingPanel({
             ? `Scheduled for ${formatScheduled(scheduledFor)}`
             : BANNER[status]}
       </div>
+      {showHoldHint && (
+        <div data-testid="tracking-hold-hint" style={{ fontSize: 12, color: '#525252', marginTop: 6 }}>
+          Booked by mistake? Cancel within {Math.round(WEB_POLICY.booking.bookingHoldMs / 1000)} seconds —
+          we haven&apos;t contacted any driver yet.
+        </div>
+      )}
       {waitingForWake && (
         <div data-testid="tracking-scheduled-hint" className="mt-2 text-sm text-muted">
           We start finding your driver about {Math.round(WEB_POLICY.booking.scheduleWakeLeadMs / 60_000)}{' '}

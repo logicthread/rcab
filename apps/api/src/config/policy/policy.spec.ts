@@ -48,6 +48,9 @@ describe('policy schema', () => {
       offerTtlMs: 12_000,
       waveOneTimeoutMs: 30_000,
       hardFailMs: 60_000,
+      bookingHoldMs: 5_000,
+      rounds: 3,
+      busyDriverEtaMs: 10 * 60_000,
       candidateHeadroom: 4,
       assignmentReconcileMs: 30_000,
     });

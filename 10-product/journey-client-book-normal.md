@@ -33,14 +33,20 @@ sequenceDiagram
     API-->>C: { status=matched, ride_id, driver=B }
 ```
 
+## Booking form rules (RCAB-E8.S16)
+
+- Book is enabled only once pickup and drop are both set and quoted. Pickup/drop (with labels) persist across reloads, "New booking" and a scheduled booking; only sign-out clears them.
+- Share is shown disabled ("coming soon"); Private is the default. "Later" stays for private rides: after scheduling, the form stays open with a confirmation (and Cancel), so a "Now" ride can be booked meanwhile (one live NOW ride per passenger still applies, 0019).
+
 ## After match — live tracking (RCAB-E4.S7)
 
 Once `status=matched`, the client is already in the `ride:<id>` room (joined at request time, re-asserted via `ride:subscribe` on reconnect). It then follows the ride live: `ride_state_changed` drives the status banner (driver assigned → en route → arrived → on trip → complete) and `driver_location` moves the driver marker on the booking map (≤ 1 Hz). The driver's first location implicitly advances `accepted → en_route`. See [[websocket-events]] · [[sm-ride-lifecycle]].
 
 ## Failure paths
 
+- **5-second hold (RCAB-E8.S16):** drivers are contacted 5 s after the tap; the tracking panel says so and Cancel inside the window is free.
 - No driver in K=5 accepts within 30s → wave 2 fires K=10.
-- Total elapsed 60s without acceptance → request fails with `dispatch_no_driver`. Client is shown the option to try again, schedule, or convert to shared.
+- A 60 s round without acceptance restarts matching from wave 1 (up to 3 rounds); only after the third round does the request fail with `dispatch_no_driver`. Client is shown the option to try again, schedule, or convert to shared.
 - Client cancels mid-flow → all outstanding offers revoked, request marked `canceled_by_client`.
 - **Cancellation & no-show (RCAB-E4.S8):** the rider can tap **Cancel ride** any time before the trip starts (`POST /v1/rides/:id/cancel`); the ride goes `cancelled`, the driver is freed, and dispatch unwinds (claim/offers/timers via `RIDE_CANCELLED_EVENT`). Once `in_progress` the rider can no longer cancel (the trip ends via the driver). If the rider never shows, the driver can **Report no-show** from `arrived` after a 5-min wait → `no_show`. **Cancellation is free in Phase-0** — the fee mechanism is deferred to a later phase.
 

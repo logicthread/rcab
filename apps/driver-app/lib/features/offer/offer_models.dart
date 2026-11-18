@@ -30,6 +30,9 @@ class SoloRideOffer {
     required this.dropoffLng,
     required this.fareCents,
     required this.waveNumber,
+    this.pickupDistanceM,
+    this.pickupDurationS,
+    this.nextRide = false,
   });
 
   final String offerId;
@@ -41,6 +44,28 @@ class SoloRideOffer {
   final double dropoffLng;
   final int fareCents;
   final int waveNumber;
+
+  /// Road distance (m) / time (s) from the driver's CURRENT position to the pickup.
+  final int? pickupDistanceM;
+  final int? pickupDurationS;
+
+  /// The driver is still on a ride: accepting queues this one as their next ride.
+  final bool nextRide;
+
+  /// "3.2 km" / "850 m"; null when the server sent no distance.
+  String? get distanceDisplay {
+    final m = pickupDistanceM;
+    if (m == null) return null;
+    return m >= 1000 ? '${(m / 1000).toStringAsFixed(1)} km' : '$m m';
+  }
+
+  /// "7 min" (at least 1); null when the server sent no time.
+  String? get durationDisplay {
+    final s = pickupDurationS;
+    if (s == null) return null;
+    final min = (s / 60).ceil();
+    return '${min < 1 ? 1 : min} min';
+  }
 
   /// Fare in major currency units (₹). The server quotes in integer cents.
   String get fareDisplay => '₹${(fareCents / 100).toStringAsFixed(2)}';
@@ -72,6 +97,9 @@ class SoloRideOffer {
       dropoffLng: dLng.toDouble(),
       fareCents: (json['fareCents'] as num?)?.toInt() ?? 0,
       waveNumber: (json['waveNumber'] as num?)?.toInt() ?? 1,
+      pickupDistanceM: (json['pickupDistanceM'] as num?)?.toInt(),
+      pickupDurationS: (json['pickupDurationS'] as num?)?.toInt(),
+      nextRide: json['nextRide'] == true,
     );
   }
 }

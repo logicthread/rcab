@@ -85,11 +85,35 @@ class OfferController {
     final offerId = payload['offerId'] as String?;
     final rideId = payload['rideId'] as String?;
     if (offerId == null || rideId == null) return;
+    final fare = container.read(offerProvider).offer?.fareDisplay;
     if (_notifier.applyAccepted(offerId: offerId, rideId: rideId)) {
       _cancelTicker();
-      _routedRideId = rideId;
+      if (payload['queued'] == true) {
+        // A next ride behind the one in progress: stay on the current ride.
+        container.read(queuedRideProvider.notifier).state =
+            QueuedRide(rideId: rideId, fareDisplay: fare ?? '');
+        _navigate(_activeOrHome());
+        return;
+      }
+      _setActive(rideId);
       _navigate('/ride/$rideId');
     }
+  }
+
+  String _activeOrHome() {
+    final active = container.read(activeRideIdProvider);
+    return active != null ? '/ride/$active' : '/home';
+  }
+
+  void _setActive(String? rideId) {
+    _routedRideId = rideId;
+    container.read(activeRideIdProvider.notifier).state = rideId;
+  }
+
+  /// Where an offer that did not become the active ride sends the driver.
+  String _afterOfferEnded() {
+    final offer = container.read(offerProvider).offer;
+    return offer == null ? '/home' : container.read(offerReturnLocationProvider)(offer);
   }
 
   void _onOutcome(Map<String, dynamic> payload) {
@@ -98,7 +122,13 @@ class OfferController {
     switch (outcome.kind) {
       case OfferOutcomeKind.assigned:
         final rideId = outcome.tripId;
-        if (rideId != null) _onAccepted({'offerId': outcome.offerId, 'rideId': rideId});
+        if (rideId != null) {
+          _onAccepted({
+            'offerId': outcome.offerId,
+            'rideId': rideId,
+            if (outcome.queued) 'queued': true,
+          });
+        }
         break;
       case OfferOutcomeKind.retry:
         _notifier.applyRetry(offerId: outcome.offerId);
@@ -122,7 +152,7 @@ class OfferController {
     final snapshot = DriverAssignmentSnapshot.fromJson(payload);
     final a = snapshot?.assignment;
     if (a == null) {
-      _routedRideId = null;
+      _setActive(null);
       final live = container.read(offerProvider);
       if (_awaitingVerdict && live.phase == OfferPhase.claiming && live.offer != null) {
         // No committed assignment: the undecided accept did not win.
@@ -138,19 +168,33 @@ class OfferController {
       _onAccepted({'offerId': a.offerId, 'rideId': a.tripId});
       return;
     }
+    // The queued next ride just became the active one.
+    final queued = container.read(queuedRideProvider);
+    if (queued != null && queued.rideId == a.tripId) {
+      container.read(queuedRideProvider.notifier).state = null;
+    }
     if (_routedRideId == a.tripId) return;
-    _routedRideId = a.tripId;
+    _setActive(a.tripId);
     _navigate('/ride/${a.tripId}');
   }
 
   void _onRevoked(Map<String, dynamic> payload) {
+    final reason = payload['reason'] as String?;
+    // The passenger of the queued next ride cancelled while it was waiting.
+    if (reason == 'queued_cancelled') {
+      final queued = container.read(queuedRideProvider);
+      if (queued != null && queued.rideId == payload['rideId']) {
+        container.read(queuedRideProvider.notifier).state = null;
+      }
+      return;
+    }
     final offerId = payload['offerId'] as String?;
     if (offerId == null) return;
-    final reason = payload['reason'] as String?;
+    final back = _afterOfferEnded();
     if (_notifier.applyRevoked(offerId: offerId, reason: reason)) {
       _cancelTicker();
       container.read(driverNoticeProvider.notifier).state = offerEndedNotice(reason);
-      _navigate('/home');
+      _navigate(back);
     }
   }
 
@@ -159,9 +203,10 @@ class OfferController {
     _ticker = Timer.periodic(tickInterval, (_) {
       _notifier.tick();
       if (container.read(offerProvider).phase == OfferPhase.expired) {
+        final back = _afterOfferEnded();
         _cancelTicker();
         container.read(driverNoticeProvider.notifier).state = offerEndedNotice('expired');
-        _navigate('/home');
+        _navigate(back);
       }
     });
   }

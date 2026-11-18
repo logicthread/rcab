@@ -100,10 +100,16 @@ export interface BookingState {
   applyDispatchRetry: (rideId: string, retryUntil?: string | null) => void;
   applyDriverLocation: (rideId: string, lat: number, lng: number, heading: number) => void;
   markRated: () => void;
+  /** A "Later" booking was accepted: back to a fresh form for the same route (the rider may book again). */
+  finishScheduled: () => void;
+  /** Back to a fresh booking. Keeps the chosen pickup and drop. */
   reset: () => void;
+  /** Forget everything, including the route (sign-out). */
+  clearAll: () => void;
 }
 
 const initialState = () => ({
+  // Shared rides are switched off for now (FEATURES.sharedRides), so bookings start as private.
   rideType: (FEATURES.sharedRides ? 'shared' : 'private') as RideType,
   vehicle: DEFAULT_VEHICLE as VehicleType,
   pickup: null as Place | null,
@@ -300,7 +306,22 @@ export const useBookingStore = create<BookingState>((set, get) => ({
     set({ rated: true });
   },
 
+  finishScheduled() {
+    // The quote token was spent on that booking; re-quote for the next one.
+    set({
+      scheduledFor: null,
+      requestError: null,
+      ...clearQuote(get().quoteEpoch),
+    });
+  },
+
   reset() {
+    // Keep the route and the vehicle choice; everything else starts fresh.
+    const { pickup, dropoff, vehicle, quoteEpoch } = get();
+    set({ ...initialState(), pickup, dropoff, vehicle, quoteEpoch: quoteEpoch + 1 });
+  },
+
+  clearAll() {
     set({ ...initialState(), quoteEpoch: get().quoteEpoch + 1 });
   },
 }));

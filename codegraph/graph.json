@@ -1,24 +1,24 @@
 {
   "version": 1,
-  "generatedAt": "2026-11-14T08:42:09+05:30",
-  "gitSha": "54b4fa6b7405e03631242217e765f637eb9fbd38",
+  "generatedAt": "2026-11-18T18:09:45+05:30",
+  "gitSha": "2dd70f8da0836550ef74d0d565b7ab6936a18b0d",
   "counts": {
-    "nodes": 380,
-    "edges": 778,
+    "nodes": 387,
+    "edges": 798,
     "byNodeKind": {
-      "file": 227,
+      "file": 229,
       "module": 22,
-      "symbol": 78,
+      "symbol": 82,
       "route": 36,
-      "table": 17
+      "table": 18
     },
     "byEdgeKind": {
-      "imports": 598,
+      "imports": 611,
       "di-import": 47,
-      "di-provides": 49,
+      "di-provides": 50,
       "route": 36,
-      "riverpod-provides": 30,
-      "fk": 18
+      "riverpod-provides": 33,
+      "fk": 21
     }
   },
   "nodes": [
@@ -649,7 +649,8 @@
           "DispatchService",
           "DispatchOfferRepository",
           "DriverAssignmentRepository",
-          "DriverAssignmentProjection"
+          "DriverAssignmentProjection",
+          "DriverEtaService"
         ],
         "controllers": [],
         "exports": [
@@ -719,6 +720,30 @@
       "kind": "symbol",
       "path": "apps/api/src/modules/dispatch/driver-assignment.projection.ts",
       "name": "DriverAssignmentProjection",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/dispatch/driver-eta.service.ts",
+      "kind": "file",
+      "path": "apps/api/src/modules/dispatch/driver-eta.service.ts",
+      "name": "driver-eta.service.ts",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/dispatch/driver-eta.service.ts#DriverEtaService",
+      "kind": "symbol",
+      "path": "apps/api/src/modules/dispatch/driver-eta.service.ts",
+      "name": "DriverEtaService",
+      "app": "api"
+    },
+    {
+      "meta": {},
+      "id": "apps/api/src/modules/dispatch/normal-rounds.ts",
+      "kind": "file",
+      "path": "apps/api/src/modules/dispatch/normal-rounds.ts",
+      "name": "normal-rounds.ts",
       "app": "api"
     },
     {
@@ -2270,6 +2295,14 @@
     },
     {
       "meta": {},
+      "id": "apps/driver-app/lib/features/offer/offer_provider.dart#activeRideIdProvider",
+      "kind": "symbol",
+      "path": "apps/driver-app/lib/features/offer/offer_provider.dart",
+      "name": "activeRideIdProvider",
+      "app": "driver-app"
+    },
+    {
+      "meta": {},
       "id": "apps/driver-app/lib/features/offer/offer_provider.dart#offerProvider",
       "kind": "symbol",
       "path": "apps/driver-app/lib/features/offer/offer_provider.dart",
@@ -2282,6 +2315,22 @@
       "kind": "symbol",
       "path": "apps/driver-app/lib/features/offer/offer_provider.dart",
       "name": "offerResponseSenderProvider",
+      "app": "driver-app"
+    },
+    {
+      "meta": {},
+      "id": "apps/driver-app/lib/features/offer/offer_provider.dart#offerReturnLocationProvider",
+      "kind": "symbol",
+      "path": "apps/driver-app/lib/features/offer/offer_provider.dart",
+      "name": "offerReturnLocationProvider",
+      "app": "driver-app"
+    },
+    {
+      "meta": {},
+      "id": "apps/driver-app/lib/features/offer/offer_provider.dart#queuedRideProvider",
+      "kind": "symbol",
+      "path": "apps/driver-app/lib/features/offer/offer_provider.dart",
+      "name": "queuedRideProvider",
       "app": "driver-app"
     },
     {
@@ -3529,6 +3578,23 @@
       "kind": "table",
       "path": "apps/api/src/db/schema.ts",
       "name": "driverActiveAssignment",
+      "app": "api"
+    },
+    {
+      "meta": {
+        "pgName": "driver_queued_assignment",
+        "columns": [
+          "driverId",
+          "soloRideId",
+          "offerId",
+          "dispatchGeneration",
+          "queuedAt"
+        ]
+      },
+      "id": "table:driverQueuedAssignment",
+      "kind": "table",
+      "path": "apps/api/src/db/schema.ts",
+      "name": "driverQueuedAssignment",
       "app": "api"
     },
     {
@@ -4936,6 +5002,14 @@
     },
     {
       "from": "apps/api/src/modules/dispatch/dispatch.module.ts",
+      "to": "apps/api/src/modules/dispatch/driver-eta.service.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./driver-eta.service"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/dispatch/dispatch.module.ts",
       "to": "apps/api/src/modules/dispatch/offer.repository.ts",
       "kind": "imports",
       "meta": {
@@ -4981,6 +5055,12 @@
     {
       "from": "apps/api/src/modules/dispatch/dispatch.module.ts#DispatchModule",
       "to": "apps/api/src/modules/dispatch/driver-assignment.projection.ts#DriverAssignmentProjection",
+      "kind": "di-provides",
+      "meta": {}
+    },
+    {
+      "from": "apps/api/src/modules/dispatch/dispatch.module.ts#DispatchModule",
+      "to": "apps/api/src/modules/dispatch/driver-eta.service.ts#DriverEtaService",
       "kind": "di-provides",
       "meta": {}
     },
@@ -5094,6 +5174,22 @@
       "kind": "imports",
       "meta": {
         "spec": "./driver-assignment.projection"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/dispatch/dispatch.service.ts",
+      "to": "apps/api/src/modules/dispatch/driver-eta.service.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./driver-eta.service"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/dispatch/dispatch.service.ts",
+      "to": "apps/api/src/modules/dispatch/normal-rounds.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./normal-rounds"
       }
     },
     {
@@ -5270,6 +5366,62 @@
       "kind": "imports",
       "meta": {
         "spec": "./offer.repository"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/dispatch/driver-eta.service.ts",
+      "to": "apps/api/src/infra/redis/redis.module.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../infra/redis/redis.module"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/dispatch/normal-rounds.ts",
+      "to": "apps/api/src/db/schema.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../db/schema"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/dispatch/normal-rounds.ts",
+      "to": "apps/api/src/infra/db/drizzle.module.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../infra/db/drizzle.module"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/dispatch/normal-rounds.ts",
+      "to": "apps/api/src/metrics.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../metrics"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/dispatch/normal-rounds.ts",
+      "to": "apps/api/src/modules/dispatch/offer.repository.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "./offer.repository"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/dispatch/normal-rounds.ts",
+      "to": "apps/api/src/modules/outbox/outbox.types.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../outbox/outbox.types"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/dispatch/normal-rounds.ts",
+      "to": "apps/api/src/modules/outbox/outbox.writer.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../outbox/outbox.writer"
       }
     },
     {
@@ -6922,10 +7074,26 @@
     },
     {
       "from": "apps/api/src/modules/rides/ride-state-machine.service.ts",
+      "to": "apps/api/src/modules/realtime/realtime-snapshot.service.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../realtime/realtime-snapshot.service"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/rides/ride-state-machine.service.ts",
       "to": "apps/api/src/modules/realtime/realtime.bus.ts",
       "kind": "imports",
       "meta": {
         "spec": "../realtime/realtime.bus"
+      }
+    },
+    {
+      "from": "apps/api/src/modules/rides/ride-state-machine.service.ts",
+      "to": "apps/api/src/modules/realtime/realtime.protocol.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../realtime/realtime.protocol"
       }
     },
     {
@@ -8414,6 +8582,12 @@
     },
     {
       "from": "apps/driver-app/lib/features/offer/offer_provider.dart",
+      "to": "apps/driver-app/lib/features/offer/offer_provider.dart#activeRideIdProvider",
+      "kind": "riverpod-provides",
+      "meta": {}
+    },
+    {
+      "from": "apps/driver-app/lib/features/offer/offer_provider.dart",
       "to": "apps/driver-app/lib/features/offer/offer_provider.dart#offerProvider",
       "kind": "riverpod-provides",
       "meta": {}
@@ -8421,6 +8595,18 @@
     {
       "from": "apps/driver-app/lib/features/offer/offer_provider.dart",
       "to": "apps/driver-app/lib/features/offer/offer_provider.dart#offerResponseSenderProvider",
+      "kind": "riverpod-provides",
+      "meta": {}
+    },
+    {
+      "from": "apps/driver-app/lib/features/offer/offer_provider.dart",
+      "to": "apps/driver-app/lib/features/offer/offer_provider.dart#offerReturnLocationProvider",
+      "kind": "riverpod-provides",
+      "meta": {}
+    },
+    {
+      "from": "apps/driver-app/lib/features/offer/offer_provider.dart",
+      "to": "apps/driver-app/lib/features/offer/offer_provider.dart#queuedRideProvider",
       "kind": "riverpod-provides",
       "meta": {}
     },
@@ -8610,6 +8796,14 @@
       "kind": "imports",
       "meta": {
         "spec": "../home/driver_notice.dart"
+      }
+    },
+    {
+      "from": "apps/driver-app/lib/features/ride/ride_screen.dart",
+      "to": "apps/driver-app/lib/features/offer/offer_provider.dart",
+      "kind": "imports",
+      "meta": {
+        "spec": "../offer/offer_provider.dart"
       }
     },
     {
@@ -9038,14 +9232,6 @@
     },
     {
       "from": "apps/web/src/app/book/book-client.tsx",
-      "to": "apps/web/src/config/features.ts",
-      "kind": "imports",
-      "meta": {
-        "spec": "../../config/features"
-      }
-    },
-    {
-      "from": "apps/web/src/app/book/book-client.tsx",
       "to": "apps/web/src/lib/auth/store.ts",
       "kind": "imports",
       "meta": {
@@ -9170,6 +9356,14 @@
       "kind": "imports",
       "meta": {
         "spec": "../../lib/booking/types"
+      }
+    },
+    {
+      "from": "apps/web/src/app/book/ride-type-toggle.tsx",
+      "to": "apps/web/src/config/features.ts",
+      "kind": "imports",
+      "meta": {
+        "spec": "../../config/features"
       }
     },
     {
@@ -9677,6 +9871,24 @@
     {
       "from": "table:driverActiveAssignment",
       "to": "table:sharedRide",
+      "kind": "fk",
+      "meta": {}
+    },
+    {
+      "from": "table:driverQueuedAssignment",
+      "to": "table:dispatchOffer",
+      "kind": "fk",
+      "meta": {}
+    },
+    {
+      "from": "table:driverQueuedAssignment",
+      "to": "table:driver",
+      "kind": "fk",
+      "meta": {}
+    },
+    {
+      "from": "table:driverQueuedAssignment",
+      "to": "table:rides",
       "kind": "fk",
       "meta": {}
     },

@@ -38,6 +38,10 @@ Pure infrastructure (DB/Redis URLs, secrets, ports, CORS origins, the `RCAB_DISA
 
 Tests build policies with `buildPolicy({ ENV_NAME: 'value' })` or `defaultPolicy({ category: { knob: value } })` and pass them to constructors.
 
+## Dispatch knobs added by RCAB-E8.S16
+
+`dispatch.bookingHoldMs` (5 s), `dispatch.rounds` (3), `dispatch.busyDriverEtaMs` (10 min); see `docs/POLICY.md`. The web client mirrors the hold as `booking.bookingHoldMs`.
+
 ## See also
 - [[nestjs-structure]] · [[module-dispatch]] · [[module-matching]] · [[module-rides]] · [[module-auth]]
 - [[features-top-k-dispatch]] · [[features-scheduled-booking]] · [[features-shared-rides]]

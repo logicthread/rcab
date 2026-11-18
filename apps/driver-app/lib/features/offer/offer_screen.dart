@@ -75,11 +75,14 @@ class _OfferBody extends ConsumerWidget {
         children: [
           const SizedBox(height: 8),
           Text('New ride request', style: theme.textTheme.headlineSmall),
-          const SizedBox(height: 4),
-          Text(
-            'Wave ${offer.waveNumber}',
-            style: theme.textTheme.bodySmall,
-          ),
+          if (offer.nextRide) ...[
+            const SizedBox(height: 4),
+            Text(
+              'Next ride — queued after your current one',
+              key: const Key('offer_next_ride'),
+              style: theme.textTheme.bodySmall,
+            ),
+          ],
           const SizedBox(height: 24),
           Text(
             '${state.secondsLeft}s',
@@ -87,17 +90,21 @@ class _OfferBody extends ConsumerWidget {
             style: theme.textTheme.displaySmall,
           ),
           const SizedBox(height: 24),
-          _row(context, Icons.my_location, 'Pickup',
-              '${offer.pickupLat.toStringAsFixed(4)}, ${offer.pickupLng.toStringAsFixed(4)}'),
-          const SizedBox(height: 12),
-          _row(context, Icons.location_on, 'Dropoff',
-              '${offer.dropoffLat.toStringAsFixed(4)}, ${offer.dropoffLng.toStringAsFixed(4)}'),
-          const SizedBox(height: 24),
           Text(
             offer.fareDisplay,
             key: const Key('offer_fare'),
-            style: theme.textTheme.headlineMedium,
+            style: theme.textTheme.displayMedium,
           ),
+          const SizedBox(height: 20),
+          // Distance and time are from the driver's current position to the pickup.
+          if (offer.distanceDisplay != null)
+            _row(context, Icons.straighten, 'Distance to pickup', offer.distanceDisplay!,
+                const Key('offer_distance')),
+          if (offer.distanceDisplay != null && offer.durationDisplay != null)
+            const SizedBox(height: 12),
+          if (offer.durationDisplay != null)
+            _row(context, Icons.schedule, 'Time to pickup', offer.durationDisplay!,
+                const Key('offer_duration')),
           const Spacer(),
           if (state.isClaiming)
             const Center(
@@ -117,7 +124,8 @@ class _OfferBody extends ConsumerWidget {
                     // for an offer…" screen with no way back (RCAB-E8.S14).
                     onPressed: () {
                       notifier.decline();
-                      GoRouter.maybeOf(context)?.go('/home');
+                      GoRouter.maybeOf(context)?.go(
+                          ref.read(offerReturnLocationProvider)(offer));
                     },
                     child: const Padding(
                       padding: EdgeInsets.symmetric(vertical: 14),
@@ -143,7 +151,7 @@ class _OfferBody extends ConsumerWidget {
     );
   }
 
-  Widget _row(BuildContext context, IconData icon, String label, String value) {
+  Widget _row(BuildContext context, IconData icon, String label, String value, Key valueKey) {
     final theme = Theme.of(context);
     return Row(
       children: [
@@ -153,7 +161,7 @@ class _OfferBody extends ConsumerWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(label, style: theme.textTheme.labelMedium),
-            Text(value, style: theme.textTheme.bodyLarge),
+            Text(value, key: valueKey, style: theme.textTheme.titleLarge),
           ],
         ),
       ],
