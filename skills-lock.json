@@ -1,0 +1,12 @@
+{
+  "version": 2,
+  "skills": {
+    "pick-ui-library": {
+      "source": "emilkowalski/skills",
+      "commit": "64eb3deb9a5fbfa041faf783e0bc3fd635872e9c",
+      "sourceType": "github",
+      "skillPath": "skills/pick-ui-library/SKILL.md",
+      "computedHash": "3bc44e7faccb949583f4af6c8a15b5a50acc04a5e656f5168a96e5aa43e9f3cd"
+    }
+  }
+}
