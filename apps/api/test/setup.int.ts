@@ -14,6 +14,11 @@ export async function setup(): Promise<void> {
   // Same reason for the outbox relay + reconciler timers: specs that need them
   // construct them explicitly and drive drainOnce()/reconcile() deterministically.
   process.env.RCAB_DISABLE_OUTBOX_RELAY = '1';
+  // The production defaults hold a new booking back 5 s and play 3 matching rounds. The
+  // suites drive dispatch step by step, so they run with no hold and a single round;
+  // the hold / rounds themselves are covered by their own specs.
+  process.env.DISPATCH_BOOKING_HOLD_MS = '0';
+  process.env.DISPATCH_ROUNDS = '1';
 
   if (process.env.RCAB_SKIP_INT === '1') {
     process.env.RCAB_INT_SKIPPED = '1';

@@ -213,6 +213,7 @@ CREATE INDEX ON notification (user_id, created_at DESC);
 - **Ride idempotency (0013):** `rides.idempotency_operation` + `rides.request_fingerprint`; UNIQUE on (passenger, operation, key) replaces the former global UNIQUE on `idempotency_key`. New `idempotency_record` table backs shared-create claims (pending/completed). See [[module-rides]].
 
 - **Offers + driver assignment (0014):** `dispatch_offer` (one row per offered driver, generation, DB-clock `expires_at`, outcome), `driver_active_assignment` (one active trip per driver across solo and shared), `migration_conflict` (pre-existing double assignments found by the backfill; operators resolve, never auto-cancel). See [[module-dispatch]].
+- **Next-ride queue (0020):** `driver_queued_assignment` (PK `driver_id`, unique `solo_ride_id`, `offer_id`, `dispatch_generation`): the one solo ride a busy driver accepted while within `dispatch.busyDriverEtaMs` of ending their active ride. Promoted into `driver_active_assignment` by the transaction that ends the active ride. See [[module-dispatch]].
 - **Outbox (0015):** `outbox` — dispatch/wake/pool intents written in the booking/pool transaction and published by `OutboxRelay`. See [[module-rides]].
 - **Pool membership (0016):** `pool_member` (capacity + duplicate-member constraints) replaces the deprecated `shared_rides.members` jsonb; `shared_rides.state_version` versions realtime events. See [[module-matching]].
 - **Agreed fare (0017):** `pool_member.agreed_fare_cents` required and immutable (triggers); fixed at join (`SHARED_FARE_POLICY='fixed_at_join'`).

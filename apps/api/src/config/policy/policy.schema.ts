@@ -195,6 +195,21 @@ export const POLICY_SCHEMA = {
       description: 'Normal rides: delay from wave 1 until the ride fails with no driver.',
       decision: 'features-top-k-dispatch: hard fail after 60 s; frozen by Stage-C flag F-1.',
     }),
+    bookingHoldMs: ms({
+      env: 'DISPATCH_BOOKING_HOLD_MS', default: 5_000, min: 0, unit: 'ms',
+      description: 'Normal rides: delay between the passenger placing a booking and the first offers going out (grace to cancel an accidental booking).',
+      decision: 'owner 2026-11-18: 5 s accidental-booking cancel window.',
+    }),
+    rounds: int({
+      env: 'DISPATCH_ROUNDS', default: 3, min: 1, unit: 'rounds',
+      description: 'Normal rides: matching rounds per booking. A round that ends with no driver restarts matching from wave 1; only the last one ends as no_driver.',
+      decision: 'owner 2026-11-18: 3 rounds of offers per booking.',
+    }),
+    busyDriverEtaMs: ms({
+      env: 'DISPATCH_BUSY_DRIVER_ETA_MS', default: 10 * MIN, min: 0, unit: 'ms',
+      description: 'A driver on an in-progress ride may be offered (and accept) one next ride once they are this close, by road ETA, to ending it. 0 disables.',
+      decision: 'owner 2026-11-18: accept new bookings within 10 min of ending the current ride.',
+    }),
     candidateHeadroom: int({
       env: 'DISPATCH_CANDIDATE_HEADROOM', default: 4, min: 1, unit: 'factor',
       description: 'Geo candidates fetched per wave = K × this + already-offered (before eligibility filtering).',

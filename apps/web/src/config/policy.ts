@@ -18,6 +18,7 @@ export const WEB_POLICY = {
     tokenRefreshMarginMs: 30_000,
   },
   booking: {
+    bookingHoldMs: 5_000,
     idempotencyInProgressRetryMs: 1_000,
     ratingCommentMaxLength: 1_000,
     scheduleMinLeadMs: 900_000,
@@ -55,6 +56,12 @@ export const WEB_POLICY_META: Readonly<Record<WebPolicyKey, ClientKnobMeta>> = {
     source: 'client',
     description: 'Refresh the access token this long before its exp so a request never leaves with a lapsing token.',
     decision: 'RCAB-E8.S7 sessions remediation: 30 s skew.',
+  },
+  'booking.bookingHoldMs': {
+    unit: 'ms',
+    source: 'server-mirror',
+    description: 'Grace period after placing an immediate booking before drivers are contacted; the rider can cancel without any driver being bothered.',
+    decision: 'owner 2026-11-18; mirrors api dispatch.bookingHoldMs.',
   },
   'booking.idempotencyInProgressRetryMs': {
     unit: 'ms',

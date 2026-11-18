@@ -76,6 +76,7 @@ class OfferOutcome {
     this.generation,
     this.reason,
     this.assignment,
+    this.queued = false,
   });
 
   final String offerId;
@@ -89,6 +90,9 @@ class OfferOutcome {
 
   /// The committed assignment (server `DriverAssignmentView`) when known.
   final Map<String, dynamic>? assignment;
+
+  /// The accept committed as the driver's NEXT ride (queued behind the active one).
+  final bool queued;
 
   bool get isShared => tripKind == 'shared';
 
@@ -104,6 +108,7 @@ class OfferOutcome {
       tripId: json['tripId'] as String?,
       generation: (json['generation'] as num?)?.toInt(),
       reason: json['reason'] as String?,
+      queued: json['queued'] == true,
       assignment: assignment is Map
           ? assignment.map((k, v) => MapEntry(k.toString(), v))
           : null,
@@ -132,6 +137,7 @@ class OfferOutcome {
         'tripKind': kind,
         'tripId': tripId,
         'generation': ack['generation'],
+        if (ack['queued'] == true) 'queued': true,
         'source': 'ack',
       };
     }

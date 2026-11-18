@@ -35,6 +35,8 @@ stateDiagram-v2
 - **Postgres** `driver_active_assignment`: the authoritative "this driver is busy" fact (PK `driver_id` = at most one active trip per driver, solo or shared). Offers and the accept transaction re-check it; dispatch filters candidates with an SQL eligibility query (active driver, no assignment, no live offer, vehicle seats), so a stale geo entry cannot produce a double assignment.
 - **Postgres** `driver.availability` (`offline` / `online` / `on_ride` allowed by CHECK): denormalised for dashboards. Only `online` / `offline` are ever written; `on_ride` is never set.
 
+**Next-ride exception (RCAB-E8.S16):** a busy driver whose active trip is a solo ride `in_progress` and whose road ETA to its drop-off is within `dispatch.busyDriverEtaMs` (10 min) is also offered ONE next ride. Accepting parks it in `driver_queued_assignment` (0020); it becomes the active trip in the transaction that ends the current one. The accept transaction still re-checks everything.
+
 "Busy" is therefore a **derived** state, not a stored enum value, and a busy driver **stays in** `active_drivers`; they are excluded from new offers by the SQL eligibility check. The `rcab_busy_drivers` gauge is `count(*)` of `driver_active_assignment`.
 
 ## Presence rules

@@ -483,7 +483,7 @@ export class RidesController {
     if (created) {
       // Join the booking client to the ride room so it receives
       // `ride_state_changed` once a driver starts advancing the ride (E4.S6).
-      this.relay.kick();
+      this.relay.kick(getPolicy().dispatch.bookingHoldMs);
       await this.bus.joinRide(passengerId, row.id);
     }
 

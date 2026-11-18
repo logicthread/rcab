@@ -72,8 +72,14 @@ export class OutboxRelay implements OnApplicationBootstrap, OnModuleDestroy {
    * not bounded by the poll interval). Debounced and fire-and-forget: a failure
    * here is invisible to the caller by design, the poll loop is the backstop.
    */
-  kick(): void {
+  kick(afterMs = 0): void {
     if (process.env.RCAB_DISABLE_OUTBOX_RELAY === '1') return;
+    if (afterMs > 0) {
+      // A held row (available_at in the future): wake right when it falls due instead of
+      // waiting for the next poll. Independent of the immediate-kick debounce below.
+      setTimeout(() => void this.tick(), afterMs + 20).unref();
+      return;
+    }
     if (this.kickTimer) return;
     this.kickTimer = setTimeout(() => {
       this.kickTimer = null;

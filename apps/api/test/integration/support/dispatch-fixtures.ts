@@ -65,7 +65,13 @@ export interface DispatchHarness {
 }
 
 /** A full DispatchService over its own pg Pool (independent connections). */
-export function buildDispatch(pgPool: Pool, redis: Redis, queue: Queue, bus: Bus): DispatchHarness {
+export function buildDispatch(
+  pgPool: Pool,
+  redis: Redis,
+  queue: Queue,
+  bus: Bus,
+  eta?: { one(driverId: string, p: { lat: number; lng: number }): Promise<{ distanceM: number; durationS: number } | null> },
+): DispatchHarness {
   const db = drizzleOn(pgPool);
   const shared = new SharedRideRepository(db);
   const rides = new RidesRepository(db);
@@ -73,7 +79,7 @@ export function buildDispatch(pgPool: Pool, redis: Redis, queue: Queue, bus: Bus
   const offers = new DispatchOfferRepository();
   const assignments = new DriverAssignmentRepository();
   const projection = new DriverAssignmentProjection(db, redis, assignments, offers);
-  const config = { get: vi.fn().mockReturnValue(undefined) };
+  const config = { get: vi.fn((k: string) => process.env[k]) };
   const poolProjection = new PoolProjectionService(shared, redis);
   const snapshots = new RealtimeSnapshotService(db, bus as never);
   const dispatch = new DispatchService(
@@ -90,6 +96,7 @@ export function buildDispatch(pgPool: Pool, redis: Redis, queue: Queue, bus: Bus
     buildPolicy(config),
     poolProjection,
     snapshots,
+    eta as never,
   );
   return {
     db,

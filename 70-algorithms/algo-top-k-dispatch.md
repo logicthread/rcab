@@ -20,7 +20,10 @@ audience: both
 | K₂ | 10 | wave-2 fan-out (after 30 s without acceptance) |
 | R_max | 4 km | max radius |
 | TTL | 12 s | per-driver offer TTL |
-| HARD_FAIL | 60 s | total time budget |
+| HARD_FAIL | 60 s | time budget of ONE round |
+| ROUNDS | 3 | normal rides: a round with no acceptance restarts at wave 1 (new generation); only the last round fails (`DISPATCH_ROUNDS`) |
+| HOLD | 5 s | normal rides: delay between booking and the first offers, so an accidental booking can be cancelled (`DISPATCH_BOOKING_HOLD_MS`) |
+| BUSY_ETA | 10 min | a driver on an in-progress solo ride within this road ETA of its drop-off may be offered one next ride (`DISPATCH_BUSY_DRIVER_ETA_MS`) |
 
 ## Algorithm
 
@@ -74,9 +77,13 @@ For pools closed by `closed_full` or `closed_timeout`, the same top-K machinery 
 The normal (non-pooled) ride is the direct realisation of the algorithm above:
 
 - Candidates: `GEORADIUS active_drivers <pickup> R k+excluded ASC` excluding drivers who already have a `dispatch_offer` row. Scheduled rides use a 4-minute window (`SCHEDULED_DISPATCH_WINDOW_MS`) and are re-armed uncapped when unanswered. Wave-1 K=5 R=2 km; wave-2 K=10 R=4 km at 30 s; hard-fail 60 s.
-- Payload: `ride_offer { offerId, rideId, ttlMs, pickup, dropoff, fareCents, waveNumber }`.
+- Payload: `ride_offer { offerId, rideId, ttlMs, pickup, dropoff, fareCents, waveNumber, pickupDistanceM?, pickupDurationS?, nextRide? }`.
 - Claim: the single winner is decided by the accept transaction. The winner is bound to the `rides` row (`status='accepted'`, `driver_id`, `accepted_at`) via a `WHERE status='requested'`-guarded UPDATE; a loser gets `ride_offer_outcome` `lost`. On success: revoke the other offers + remove the wave-2/hard-fail jobs.
-- Hard-fail: `handleHardFail` (`kind='solo'`) marks the ride `no_driver`, revokes outstanding offers, and emits `ride_no_driver` to the passenger.
+- **Hold (RCAB-E8.S16):** the `ride.dispatch.requested` intent of a normal ride is written with `available_at = now + 5 s`; cancelling inside that window leaves nothing to dispatch. Offers of a wave are written and sent in parallel.
+- **Rounds (RCAB-E8.S16):** the generation is the round number. At hard-fail, a normal ride below `DISPATCH_ROUNDS` is re-armed under `generation + 1` (`rearmNormalRide`: ride lock, revoke live offers, new outbox intent), so every driver can be offered again from wave 1. Scheduled rides keep their own uncapped re-arm.
+- **Next-ride queue (RCAB-E8.S16):** after the idle candidates, spare slots go to busy drivers whose active trip is a solo `in_progress` ride with nothing queued and whose OSRM ETA to its drop-off is within BUSY_ETA (`nextRide: true` on the offer). Accepting queues the ride in `driver_queued_assignment` (the ride is `accepted` + `driver_id`, but not the driver's active trip); the transaction that ends the active ride promotes it into `driver_active_assignment`. A queued ride cannot be advanced; cancelling it drops it from the queue.
+- **Offer payload** carries `pickupDistanceM` / `pickupDurationS`: road distance and time from the driver's CURRENT position (`DriverEtaService`, one OSRM `/table` call per wave, straight-line fallback).
+- Hard-fail: `handleHardFail` (`kind='solo'`) on the last round marks the ride `no_driver`, revokes outstanding offers, and emits `ride_no_driver` to the passenger.
 - The wave-2/hard-fail BullMQ jobs carry `kind: 'solo' | 'pool'` so the shared handlers route to the right path.
 
 ## Future ranking blend (Phase-1, gated by data)

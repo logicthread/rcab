@@ -427,6 +427,24 @@ export const driverActiveAssignment = pgTable(
   ],
 );
 
+// Next-ride queue (0020): one solo ride a busy driver accepted while within
+// dispatch.busyDriverEtaMs of ending their active ride. Promoted into
+// driver_active_assignment by the transaction that ends the active ride.
+export const driverQueuedAssignment = pgTable('driver_queued_assignment', {
+  driverId: uuid('driver_id')
+    .primaryKey()
+    .references(() => driver.userId, { onDelete: 'cascade' }),
+  soloRideId: uuid('solo_ride_id')
+    .notNull()
+    .unique()
+    .references(() => rides.id, { onDelete: 'cascade' }),
+  offerId: uuid('offer_id')
+    .unique()
+    .references(() => dispatchOffer.id, { onDelete: 'set null' }),
+  dispatchGeneration: integer('dispatch_generation').notNull(),
+  queuedAt: timestamp('queued_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
 // Transactional outbox (F08 / R07, 0015). Written in the same transaction as
 // the business mutation; an in-process relay leases due rows, publishes a
 // deterministic BullMQ job and acks with the lease token. `processed_at` means

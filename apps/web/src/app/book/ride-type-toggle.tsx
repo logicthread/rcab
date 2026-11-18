@@ -8,8 +8,9 @@ interface Props {
   disabled?: boolean;
 }
 
-const OPTIONS: Array<{ value: RideType; label: string; subtitle: string }> = [
-  { value: 'shared', label: 'Share', subtitle: 'cheaper · co-rider may join' },
+const OPTIONS: Array<{ value: RideType; label: string; subtitle: string; unavailable?: boolean }> = [
+  // Shared rides are switched off for now: shown, but not selectable.
+  { value: 'shared', label: 'Share', subtitle: 'coming soon', unavailable: true },
   { value: 'private', label: 'Private', subtitle: 'solo · no detour' },
 ];
 
@@ -29,6 +30,7 @@ export function RideTypeToggle({ value, onChange, disabled }: Props) {
     >
       {OPTIONS.map((opt) => {
         const selected = opt.value === value;
+        const off = disabled || opt.unavailable;
         return (
           <button
             key={opt.value}
@@ -36,18 +38,18 @@ export function RideTypeToggle({ value, onChange, disabled }: Props) {
             role="radio"
             aria-checked={selected}
             aria-label={opt.label}
-            disabled={disabled}
+            disabled={off}
             onClick={() => onChange(opt.value)}
             style={{
               flex: 1,
               padding: '10px 12px',
               borderRadius: 6,
               border: 'none',
-              cursor: disabled ? 'not-allowed' : 'pointer',
+              cursor: off ? 'not-allowed' : 'pointer',
               background: selected ? '#111' : 'transparent',
               color: selected ? '#fff' : '#111',
               textAlign: 'left',
-              opacity: disabled ? 0.5 : 1,
+              opacity: off ? 0.5 : 1,
             }}
           >
             <div style={{ fontWeight: 600 }}>{opt.label}</div>

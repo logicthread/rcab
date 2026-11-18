@@ -1,10 +1,12 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { POLICY, type Policy } from '../../config/policy/policy';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import type Redis from 'ioredis';
 import { REDIS } from '../../infra/redis/redis.module';
 import { RealtimeBus } from '../realtime/realtime.bus';
-import { clearCurrentRide } from '../dispatch/driver-assignment.projection';
+import { RealtimeSnapshotService } from '../realtime/realtime-snapshot.service';
+import { DRIVER_ASSIGNMENT } from '../realtime/realtime.protocol';
+import { clearCurrentRide, projectCurrentRide } from '../dispatch/driver-assignment.projection';
 import { RidesRepository, type RideCancelResult, type RideRow } from './rides.repository';
 
 export const RIDE_STATE_CHANGED_EVENT = 'ride_state_changed';
@@ -73,6 +75,7 @@ export class RideStateMachine {
     private readonly events: EventEmitter2,
     @Inject(POLICY) policy: Policy,
     @Inject(REDIS) private readonly redis: Redis,
+    @Optional() private readonly snapshots?: RealtimeSnapshotService,
   ) {
     this.noShowWaitMs = policy.rides.noShowWaitMs;
   }
@@ -94,6 +97,7 @@ export class RideStateMachine {
     if (result.row.status === 'completed') {
       await this.clearDriverCurrentRide(driverId, rideId);
     }
+    if (result.promotedRideId) await this.promoteNextRide(driverId, result.promotedRideId);
     return result;
   }
 
@@ -141,6 +145,18 @@ export class RideStateMachine {
     if (result.row.driverId) {
       await this.clearDriverCurrentRide(result.row.driverId, params.rideId);
     }
+    if (result.row.driverId && result.promotedRideId) {
+      await this.promoteNextRide(result.row.driverId, result.promotedRideId);
+    }
+    if (result.dequeuedDriverId) {
+      const driverId = result.dequeuedDriverId;
+      this.safely(() =>
+        this.bus.toDriver(driverId, 'ride_offer_revoked', {
+          rideId: params.rideId,
+          reason: 'queued_cancelled',
+        }),
+      );
+    }
     this.safely(() =>
       this.events.emit(RIDE_CANCELLED_EVENT, {
         rideId: params.rideId,
@@ -150,6 +166,24 @@ export class RideStateMachine {
     );
 
     return result;
+  }
+
+  /**
+   * The driver's queued next ride just became their active trip (same
+   * transaction as the end of the previous one): project it and push the fresh
+   * `driver:assignment` snapshot so the app opens it. Best-effort after commit;
+   * the periodic projection reconcile and the reconnect snapshot repair a miss.
+   */
+  private async promoteNextRide(driverId: string, rideId: string): Promise<void> {
+    try {
+      await projectCurrentRide(this.redis, driverId, rideId);
+      if (this.snapshots) {
+        const snapshot = await this.snapshots.driverAssignment(driverId);
+        this.safely(() => this.bus.toDriver(driverId, DRIVER_ASSIGNMENT, snapshot));
+      }
+    } catch (err) {
+      this.log.warn({ err, driverId, rideId }, 'failed to promote the queued next ride');
+    }
   }
 
   /** Compare-and-delete: never clears a newer trip's projection (F06). */
